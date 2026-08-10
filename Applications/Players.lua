@@ -1,151 +1,172 @@
--- Applications/Players.lua (COMPATIBLE)
+-- Applications/Players.lua (FIXED - NO return function)
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 
-return function()
-    local appContent = _G.appContent
-    local selectedPlayer = _G.PhoneState and _G.PhoneState.selectedPlayer
-    local T = _G.T or {}
-    local favSet = (_G.Storage and _G.Storage.favSet) or {}
+local appContent = _G.appContent
+local selectedPlayer = _G.PhoneState and _G.PhoneState.selectedPlayer
+local T = _G.T or {}
+local favSet = (_G.Storage and _G.Storage.favSet) or {}
 
-    local searchBox = Instance.new("Frame", appContent)
-    searchBox.Size = UDim2.new(1, 0, 0, 36)
-    searchBox.BackgroundColor3 = T.Card2 or Color3.fromRGB(230, 230, 230)
-    searchBox.LayoutOrder = 0
-    pcall(function() _G.Helpers.corner(searchBox, 9) end)
-    pcall(function() _G.Helpers.stroke(searchBox, T.Border or Color3.fromRGB(200, 200, 200), 1, 0.3) end)
+local searchBox = Instance.new("Frame", appContent)
+searchBox.Size = UDim2.new(1, 0, 0, 36)
+searchBox.BackgroundColor3 = T.Card2 or Color3.fromRGB(230, 230, 230)
+searchBox.LayoutOrder = 0
 
-    local searchInput = Instance.new("TextBox", searchBox)
-    searchInput.Size = UDim2.new(1, -16, 1, 0)
-    searchInput.Position = UDim2.new(0, 8, 0, 0)
-    searchInput.BackgroundTransparency = 1
-    searchInput.PlaceholderText = "Search player..."
-    searchInput.Text = ""
-    searchInput.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
-    searchInput.Font = Enum.Font.Gotham
-    searchInput.TextSize = 13
-    searchInput.ClearTextOnFocus = false
+if _G.Helpers and _G.Helpers.corner then
+    _G.Helpers.corner(searchBox, 9)
+    _G.Helpers.stroke(searchBox, T.Border or Color3.fromRGB(200, 200, 200), 1, 0.3)
+end
 
-    local listHolder = Instance.new("Frame", appContent)
-    listHolder.Size = UDim2.new(1, 0, 0, 0)
-    listHolder.AutomaticSize = Enum.AutomaticSize.Y
-    listHolder.BackgroundTransparency = 1
-    listHolder.LayoutOrder = 1
+local searchInput = Instance.new("TextBox", searchBox)
+searchInput.Size = UDim2.new(1, -16, 1, 0)
+searchInput.Position = UDim2.new(0, 8, 0, 0)
+searchInput.BackgroundTransparency = 1
+searchInput.PlaceholderText = "Search player..."
+searchInput.Text = ""
+searchInput.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
+searchInput.Font = Enum.Font.Gotham
+searchInput.TextSize = 13
+searchInput.ClearTextOnFocus = false
 
-    local listLayout = Instance.new("UIListLayout", listHolder)
-    listLayout.Padding = UDim.new(0, 8)
-    listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+local listHolder = Instance.new("Frame", appContent)
+listHolder.Size = UDim2.new(1, 0, 0, 0)
+listHolder.AutomaticSize = Enum.AutomaticSize.Y
+listHolder.BackgroundTransparency = 1
+listHolder.LayoutOrder = 1
 
-    local function renderList(filter)
-        for _, c in ipairs(listHolder:GetChildren()) do
-            if not c:IsA("UIListLayout") then c:Destroy() end
-        end
-        filter = (filter or ""):lower()
-        local list = Players:GetPlayers()
+local listLayout = Instance.new("UIListLayout", listHolder)
+listLayout.Padding = UDim.new(0, 8)
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-        table.sort(list, function(a, b)
-            if a == LocalPlayer then return true end
-            if b == LocalPlayer then return false end
-            local af = favSet[tostring(a.UserId)] and 1 or 0
-            local bf = favSet[tostring(b.UserId)] and 1 or 0
-            if af ~= bf then return af > bf end
-            return a.DisplayName < b.DisplayName
-        end)
+local function renderList(filter)
+    for _, c in ipairs(listHolder:GetChildren()) do
+        if not c:IsA("UIListLayout") then c:Destroy() end
+    end
+    filter = (filter or ""):lower()
+    local list = Players:GetPlayers()
 
-        for i, p in ipairs(list) do
-            if filter == "" or p.Name:lower():find(filter, 1, true) or p.DisplayName:lower():find(filter, 1, true) then
-                local isMe = p == LocalPlayer
-                local isFav = favSet[tostring(p.UserId)] == true
-                local isSel = selectedPlayer == p
+    table.sort(list, function(a, b)
+        if a == LocalPlayer then return true end
+        if b == LocalPlayer then return false end
+        local af = favSet[tostring(a.UserId)] and 1 or 0
+        local bf = favSet[tostring(b.UserId)] and 1 or 0
+        if af ~= bf then return af > bf end
+        return a.DisplayName < b.DisplayName
+    end)
 
-                local row = Instance.new("Frame", listHolder)
-                row.Size = UDim2.new(1, 0, 0, 60)
-                row.BackgroundColor3 = isSel and Color3.fromRGB(220, 220, 220) or (T.Card2 or Color3.fromRGB(230, 230, 230))
-                row.LayoutOrder = i
-                pcall(function() _G.Helpers.corner(row, 10) end)
-                pcall(function() _G.Helpers.stroke(row, isSel and (T.Accent or Color3.fromRGB(30, 30, 30)) or (T.Border or Color3.fromRGB(200, 200, 200)), isSel and 2 or 1, isSel and 0 or 0.3) end)
+    for i, p in ipairs(list) do
+        if filter == "" or p.Name:lower():find(filter, 1, true) or p.DisplayName:lower():find(filter, 1, true) then
+            local isMe = p == LocalPlayer
+            local isFav = favSet[tostring(p.UserId)] == true
+            local isSel = selectedPlayer == p
 
-                local av = Instance.new("ImageLabel", row)
-                av.Size = UDim2.new(0, 44, 0, 44)
-                av.Position = UDim2.new(0, 8, 0.5, -22)
-                av.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
-                av.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. p.UserId .. "&width=100&height=100&format=png"
-                pcall(function() _G.Helpers.corner(av, 100) end)
+            local row = Instance.new("Frame", listHolder)
+            row.Size = UDim2.new(1, 0, 0, 60)
+            row.BackgroundColor3 = isSel and Color3.fromRGB(220, 220, 220) or (T.Card2 or Color3.fromRGB(230, 230, 230))
+            row.LayoutOrder = i
 
-                local nameLbl = Instance.new("TextLabel", row)
-                nameLbl.Size = UDim2.new(1, -170, 0, 20)
-                nameLbl.Position = UDim2.new(0, 60, 0, 10)
-                nameLbl.BackgroundTransparency = 1
-                nameLbl.Text = (isMe and "(You) " or "") .. p.DisplayName
-                nameLbl.TextColor3 = isMe and (T.Accent or Color3.fromRGB(30, 30, 30)) or (T.Text or Color3.fromRGB(30, 30, 30))
-                nameLbl.Font = Enum.Font.GothamBold
-                nameLbl.TextSize = 13
-                nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-                nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+            if _G.Helpers and _G.Helpers.corner then
+                _G.Helpers.corner(row, 10)
+                _G.Helpers.stroke(row, isSel and (T.Accent or Color3.fromRGB(30, 30, 30)) or (T.Border or Color3.fromRGB(200, 200, 200)), isSel and 2 or 1, isSel and 0 or 0.3)
+            end
 
-                local userLbl = Instance.new("TextLabel", row)
-                userLbl.Size = UDim2.new(1, -170, 0, 16)
-                userLbl.Position = UDim2.new(0, 60, 0, 32)
-                userLbl.BackgroundTransparency = 1
-                userLbl.Text = "@" .. p.Name
-                userLbl.TextColor3 = T.Text2 or Color3.fromRGB(120, 120, 120)
-                userLbl.Font = Enum.Font.Gotham
-                userLbl.TextSize = 10
-                userLbl.TextXAlignment = Enum.TextXAlignment.Left
+            local av = Instance.new("ImageLabel", row)
+            av.Size = UDim2.new(0, 44, 0, 44)
+            av.Position = UDim2.new(0, 8, 0.5, -22)
+            av.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
+            av.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. p.UserId .. "&width=100&height=100&format=png"
 
-                if not isMe then
-                    local starBtn = Instance.new("TextButton", row)
-                    starBtn.Size = UDim2.new(0, 34, 0, 30)
-                    starBtn.Position = UDim2.new(1, -108, 0.5, -15)
-                    starBtn.BackgroundColor3 = isFav and (T.Gold or Color3.fromRGB(200, 150, 0)) or (T.Card or Color3.fromRGB(245, 245, 245))
-                    starBtn.Text = "Fav"
-                    starBtn.TextColor3 = isFav and (T.OnAccent or Color3.fromRGB(255, 255, 255)) or (T.Text2 or Color3.fromRGB(120, 120, 120))
-                    starBtn.Font = Enum.Font.GothamBold
-                    starBtn.TextSize = 10
-                    starBtn.AutoButtonColor = false
-                    pcall(function() _G.Helpers.corner(starBtn, 7) end)
-                    pcall(function() _G.Helpers.stroke(starBtn, T.Border or Color3.fromRGB(200, 200, 200), 1, 0.3) end)
-                    pcall(function() _G.Helpers.pressFX(starBtn) end)
-                    starBtn.MouseButton1Click:Connect(function()
-                        local k = tostring(p.UserId)
-                        if favSet[k] then
-                            favSet[k] = nil
-                            pcall(function() _G.Helpers.showDynamicNotification("Removed from fav", T.Text2) end)
-                        else
-                            favSet[k] = true
-                            pcall(function() _G.Helpers.showDynamicNotification("Added to fav", T.Gold) end)
-                        end
-                        if _G.Storage and _G.Storage.persistFav then
-                            _G.Storage.persistFav()
-                        end
-                        renderList(searchInput.Text)
-                    end)
+            if _G.Helpers and _G.Helpers.corner then
+                _G.Helpers.corner(av, 100)
+            end
+
+            local nameLbl = Instance.new("TextLabel", row)
+            nameLbl.Size = UDim2.new(1, -170, 0, 20)
+            nameLbl.Position = UDim2.new(0, 60, 0, 10)
+            nameLbl.BackgroundTransparency = 1
+            nameLbl.Text = (isMe and "(You) " or "") .. p.DisplayName
+            nameLbl.TextColor3 = isMe and (T.Accent or Color3.fromRGB(30, 30, 30)) or (T.Text or Color3.fromRGB(30, 30, 30))
+            nameLbl.Font = Enum.Font.GothamBold
+            nameLbl.TextSize = 13
+            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+            local userLbl = Instance.new("TextLabel", row)
+            userLbl.Size = UDim2.new(1, -170, 0, 16)
+            userLbl.Position = UDim2.new(0, 60, 0, 32)
+            userLbl.BackgroundTransparency = 1
+            userLbl.Text = "@" .. p.Name
+            userLbl.TextColor3 = T.Text2 or Color3.fromRGB(120, 120, 120)
+            userLbl.Font = Enum.Font.Gotham
+            userLbl.TextSize = 10
+            userLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+            if not isMe then
+                local starBtn = Instance.new("TextButton", row)
+                starBtn.Size = UDim2.new(0, 34, 0, 30)
+                starBtn.Position = UDim2.new(1, -108, 0.5, -15)
+                starBtn.BackgroundColor3 = isFav and (T.Gold or Color3.fromRGB(200, 150, 0)) or (T.Card or Color3.fromRGB(245, 245, 245))
+                starBtn.Text = "Fav"
+                starBtn.TextColor3 = isFav and (T.OnAccent or Color3.fromRGB(255, 255, 255)) or (T.Text2 or Color3.fromRGB(120, 120, 120))
+                starBtn.Font = Enum.Font.GothamBold
+                starBtn.TextSize = 10
+                starBtn.AutoButtonColor = false
+
+                if _G.Helpers and _G.Helpers.corner then
+                    _G.Helpers.corner(starBtn, 7)
+                    _G.Helpers.stroke(starBtn, T.Border or Color3.fromRGB(200, 200, 200), 1, 0.3)
+                    _G.Helpers.pressFX(starBtn)
                 end
 
-                local selBtn = Instance.new("TextButton", row)
-                selBtn.Size = UDim2.new(0, 66, 0, 30)
-                selBtn.Position = UDim2.new(1, -72, 0.5, -15)
-                selBtn.BackgroundColor3 = T.Accent or Color3.fromRGB(30, 30, 30)
-                selBtn.Text = isSel and "Selected" or "Select"
-                selBtn.TextColor3 = T.OnAccent or Color3.fromRGB(255, 255, 255)
-                selBtn.Font = Enum.Font.GothamBold
-                selBtn.TextSize = 10
-                selBtn.AutoButtonColor = false
-                pcall(function() _G.Helpers.corner(selBtn, 7) end)
-                pcall(function() _G.Helpers.pressFX(selBtn) end)
-                selBtn.MouseButton1Click:Connect(function()
-                    if _G.PhoneState then
-                        _G.PhoneState.selectedPlayer = p
+                starBtn.MouseButton1Click:Connect(function()
+                    local k = tostring(p.UserId)
+                    if favSet[k] then
+                        favSet[k] = nil
+                        if _G.Helpers and _G.Helpers.showDynamicNotification then
+                            _G.Helpers.showDynamicNotification("Removed from fav", T.Text2)
+                        end
+                    else
+                        favSet[k] = true
+                        if _G.Helpers and _G.Helpers.showDynamicNotification then
+                            _G.Helpers.showDynamicNotification("Added to fav", T.Gold)
+                        end
                     end
-                    pcall(function() _G.Helpers.showDynamicNotification("Target: " .. p.DisplayName, T.Green) end)
+                    if _G.Storage and _G.Storage.persistFav then
+                        _G.Storage.persistFav()
+                    end
                     renderList(searchInput.Text)
                 end)
             end
+
+            local selBtn = Instance.new("TextButton", row)
+            selBtn.Size = UDim2.new(0, 66, 0, 30)
+            selBtn.Position = UDim2.new(1, -72, 0.5, -15)
+            selBtn.BackgroundColor3 = T.Accent or Color3.fromRGB(30, 30, 30)
+            selBtn.Text = isSel and "Selected" or "Select"
+            selBtn.TextColor3 = T.OnAccent or Color3.fromRGB(255, 255, 255)
+            selBtn.Font = Enum.Font.GothamBold
+            selBtn.TextSize = 10
+            selBtn.AutoButtonColor = false
+
+            if _G.Helpers and _G.Helpers.corner then
+                _G.Helpers.corner(selBtn, 7)
+                _G.Helpers.pressFX(selBtn)
+            end
+
+            selBtn.MouseButton1Click:Connect(function()
+                if _G.PhoneState then
+                    _G.PhoneState.selectedPlayer = p
+                end
+                if _G.Helpers and _G.Helpers.showDynamicNotification then
+                    _G.Helpers.showDynamicNotification("Target: " .. p.DisplayName, T.Green)
+                end
+                renderList(searchInput.Text)
+            end)
         end
     end
-
-    renderList("")
-    searchInput:GetPropertyChangedSignal("Text"):Connect(function()
-        renderList(searchInput.Text)
-    end)
 end
+
+renderList("")
+searchInput:GetPropertyChangedSignal("Text"):Connect(function()
+    renderList(searchInput.Text)
+end)
