@@ -1,57 +1,43 @@
 -- ================================================
--- PHONE GUI - Complete Fixed
+-- PHONE GUI - Complete with Notification System
 -- ================================================
 
 local Services = _G.Services
-local T = _G.T or {}
-local Helpers = _G.Helpers or {}
-local Config = _G.Config or {}
+local T = _G.T
+local Helpers = _G.Helpers
+local Config = _G.Config
 local LocalPlayer = _G.LocalPlayer
 
-local Storage = _G.Storage or {}
+local Storage = _G.Storage
 local Firebase = _G.Firebase
 
--- Safe helpers
-local function safeCorner(obj, radius)
-    pcall(function()
-        if obj then
-            local c = Instance.new("UICorner")
-            c.CornerRadius = UDim.new(0, radius or 10)
-            c.Parent = obj
-        end
-    end)
+local corner = Helpers.corner or function(o, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 10)
+    c.Parent = o
+    return c
 end
 
-local function safeStroke(obj, color, thickness, transparency)
-    pcall(function()
-        if obj then
-            local s = Instance.new("UIStroke")
-            s.Color = color or Color3.fromRGB(200, 200, 200)
-            s.Thickness = thickness or 1
-            s.Transparency = transparency or 0
-            s.Parent = obj
-        end
-    end)
+local stroke = Helpers.stroke or function(o, c, t, tr)
+    local s = Instance.new("UIStroke")
+    s.Color = c or Color3.fromRGB(200, 200, 200)
+    s.Thickness = t or 1
+    s.Transparency = tr or 0
+    s.Parent = o
+    return s
 end
 
-local function safeTween(obj, props, time, easingStyle)
-    pcall(function()
-        if obj and obj.Parent then
-            game:GetService("TweenService"):Create(obj, TweenInfo.new(time or 0.25, easingStyle or Enum.EasingStyle.Quart, Enum.EasingDirection.Out), props):Play()
-        end
-    end)
+local tween = Helpers.tween or function(o, p, tm, st)
+    game:GetService("TweenService"):Create(o, TweenInfo.new(tm or 0.25, st or Enum.EasingStyle.Quart, Enum.EasingDirection.Out), p):Play()
 end
 
-local function safePressFX(btn)
-    pcall(function()
-        if not btn then return end
-        local origSize = btn.Size
-        btn.MouseButton1Down:Connect(function()
-            safeTween(btn, {Size = UDim2.new(origSize.X.Scale * 0.95, origSize.X.Offset * 0.95, origSize.Y.Scale * 0.95, origSize.Y.Offset * 0.95)}, 0.1)
-        end)
-        btn.MouseButton1Up:Connect(function()
-            safeTween(btn, {Size = origSize}, 0.1)
-        end)
+local pressFX = Helpers.pressFX or function(b)
+    local orig = b.Size
+    b.MouseButton1Down:Connect(function()
+        tween(b, {Size = UDim2.new(orig.X.Scale * 0.95, orig.X.Offset * 0.95, orig.Y.Scale * 0.95, orig.Y.Offset * 0.95)}, 0.1)
+    end)
+    b.MouseButton1Up:Connect(function()
+        tween(b, {Size = orig}, 0.1)
     end)
 end
 
@@ -79,7 +65,7 @@ end
 gui.Parent = getGuiParent()
 
 -- ==================== PHONE FRAME ====================
-local phone = Instance.new("Frame")
+local phone = Instance.new("Frame", gui)
 phone.Size = UDim2.new(0, 0, 0, 0)
 phone.Position = UDim2.new(0.5, 0, 0.52, 0)
 phone.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -87,30 +73,45 @@ phone.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
 phone.BorderSizePixel = 0
 phone.Visible = false
 phone.ClipsDescendants = true
-phone.Parent = gui
-safeCorner(phone, 38)
-safeStroke(phone, T.Accent or Color3.fromRGB(30, 30, 30), 2, 0.15)
+corner(phone, 38)
+phone.BackgroundTransparency = 0
 
-local PHONE_SIZE = UDim2.new(0, 320, 0, 560)
+stroke(phone, T.Accent or Color3.fromRGB(30, 30, 30), 2, 0.15)
+
+-- ==================== ORIENTASI ====================
+local PHONE_SIZE_PORTRAIT = UDim2.new(0, 320, 0, 560)
+local PHONE_SIZE = PHONE_SIZE_PORTRAIT
+
+local function isPortrait()
+    local cam = Services.Workspace.CurrentCamera
+    if not cam then return true end
+    return cam.ViewportSize.Y >= cam.ViewportSize.X
+end
+
+local function getGridIconSize()
+    if isPortrait() then
+        return UDim2.new(0, 72, 0, 86)
+    else
+        return UDim2.new(0, 68, 0, 78)
+    end
+end
 
 -- ==================== SCREEN AREA ====================
-local sa = Instance.new("Frame")
+local sa = Instance.new("Frame", phone)
 sa.Size = UDim2.new(1, -16, 1, -16)
 sa.Position = UDim2.new(0, 8, 0, 8)
 sa.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
 sa.BorderSizePixel = 0
 sa.ClipsDescendants = true
-sa.Parent = phone
-safeCorner(sa, 30)
+corner(sa, 30)
 
 -- ==================== STATUS BAR ====================
-local sb = Instance.new("Frame")
+local sb = Instance.new("Frame", sa)
 sb.Size = UDim2.new(1, 0, 0, 34)
 sb.BackgroundTransparency = 1
 sb.ZIndex = 100
-sb.Parent = sa
 
-local clockLbl = Instance.new("TextLabel")
+local clockLbl = Instance.new("TextLabel", sb)
 clockLbl.Size = UDim2.new(0, 80, 0, 30)
 clockLbl.Position = UDim2.new(0, 14, 0, 0)
 clockLbl.BackgroundTransparency = 1
@@ -120,7 +121,6 @@ clockLbl.Font = Enum.Font.GothamBold
 clockLbl.TextSize = 13
 clockLbl.TextXAlignment = Enum.TextXAlignment.Left
 clockLbl.ZIndex = 101
-clockLbl.Parent = sb
 
 task.spawn(function()
     while clockLbl.Parent do
@@ -130,21 +130,16 @@ task.spawn(function()
 end)
 
 -- ==================== DYNAMIC ISLAND ====================
-local di = Instance.new("Frame")
+local di = Instance.new("Frame", sa)
 di.Size = UDim2.new(0, 90, 0, 24)
 di.Position = UDim2.new(0.5, -45, 0, 4)
 di.BackgroundColor3 = Color3.new(0, 0, 0)
 di.ZIndex = 110
-di.Parent = sa
-safeCorner(di, 100)
+corner(di, 100)
 
-local diStroke = Instance.new("UIStroke")
-diStroke.Color = Color3.new(1, 1, 1)
-diStroke.Thickness = 1.5
-diStroke.Transparency = 0.6
-diStroke.Parent = di
+local diStroke = stroke(di, Color3.new(1, 1, 1), 1.5, 0.6)
 
-local dil = Instance.new("TextLabel")
+local dil = Instance.new("TextLabel", di)
 dil.Size = UDim2.new(1, -8, 1, 0)
 dil.Position = UDim2.new(0, 4, 0, 0)
 dil.BackgroundTransparency = 1
@@ -154,7 +149,6 @@ dil.Font = Enum.Font.GothamBold
 dil.TextSize = 14
 dil.TextXAlignment = Enum.TextXAlignment.Center
 dil.ZIndex = 111
-dil.Parent = di
 
 -- ==================== DYNAMIC BAR SYSTEM ====================
 local iid = 0
@@ -173,10 +167,10 @@ local function processNotify()
     dil.TextTransparency = 0
     diStroke.Color = color or Color3.new(1, 1, 1)
     local textWidth = math.min(240, 12 * #text + 40)
-    safeTween(di, {Size = UDim2.new(0, textWidth, 0, 32), Position = UDim2.new(0.5, -textWidth/2, 0, 2)}, 0.25, Enum.EasingStyle.Back)
+    tween(di, {Size = UDim2.new(0, textWidth, 0, 32), Position = UDim2.new(0.5, -textWidth/2, 0, 2)}, 0.25, Enum.EasingStyle.Back)
     task.delay(1.8, function()
         if iid ~= my then return end
-        safeTween(di, {Size = UDim2.new(0, 90, 0, 24), Position = UDim2.new(0.5, -45, 0, 4)}, 0.25)
+        tween(di, {Size = UDim2.new(0, 90, 0, 24), Position = UDim2.new(0.5, -45, 0, 4)}, 0.25)
         task.delay(0.3, function()
             if iid == my then dil.Text = ""; processNotify() end
         end)
@@ -189,52 +183,46 @@ function _G.showDynamicNotification(text, color)
 end
 
 -- ==================== HOME SCREEN ====================
-local sh = Instance.new("Frame")
+local sh = Instance.new("Frame", sa)
 sh.Size = UDim2.new(1, 0, 1, -60)
 sh.Position = UDim2.new(0, 0, 0, 34)
 sh.BackgroundTransparency = 1
 sh.ClipsDescendants = true
-sh.Parent = sa
 
-local home = Instance.new("Frame")
+local home = Instance.new("Frame", sh)
 home.Size = UDim2.new(1, 0, 1, 0)
 home.BackgroundTransparency = 1
 home.ClipsDescendants = true
-home.Parent = sh
 
-local homeWall = Instance.new("Frame")
+local homeWall = Instance.new("Frame", home)
 homeWall.Size = UDim2.new(1, 0, 1, 0)
 homeWall.BackgroundColor3 = Color3.fromRGB(240, 240, 250)
 homeWall.ZIndex = 0
-homeWall.Parent = home
-safeCorner(homeWall, 30)
+corner(homeWall, 30)
 
 -- ==================== DOCK ====================
-local dockArea = Instance.new("Frame")
+local dockArea = Instance.new("Frame", home)
 dockArea.Size = UDim2.new(0, 224, 0, 64)
 dockArea.Position = UDim2.new(0.5, -112, 1, -84)
 dockArea.BackgroundTransparency = 1
 dockArea.ZIndex = 5
-dockArea.Parent = home
 
-local dockBg = Instance.new("Frame")
+local dockBg = Instance.new("Frame", dockArea)
 dockBg.Size = UDim2.new(1, 0, 0, 56)
 dockBg.Position = UDim2.new(0, 0, 0, 4)
 dockBg.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 dockBg.BackgroundTransparency = 0.1
-dockBg.Parent = dockArea
-safeCorner(dockBg, 20)
+corner(dockBg, 20)
 
-local dockGrid = Instance.new("UIGridLayout")
+local dockGrid = Instance.new("UIGridLayout", dockBg)
 dockGrid.CellSize = UDim2.new(0, 70, 0, 50)
 dockGrid.CellPadding = UDim2.new(0, 2, 0, 0)
 dockGrid.HorizontalAlignment = Enum.HorizontalAlignment.Center
 dockGrid.VerticalAlignment = Enum.VerticalAlignment.Center
 dockGrid.FillDirection = Enum.FillDirection.Horizontal
-dockGrid.Parent = dockBg
 
 -- ==================== APP GRID ====================
-local appGrid = Instance.new("ScrollingFrame")
+local appGrid = Instance.new("ScrollingFrame", home)
 appGrid.Size = UDim2.new(1, -16, 1, -156)
 appGrid.Position = UDim2.new(0, 8, 0, 70)
 appGrid.BackgroundTransparency = 1
@@ -243,18 +231,16 @@ appGrid.ScrollBarImageColor3 = T.Accent or Color3.fromRGB(30, 30, 30)
 appGrid.CanvasSize = UDim2.new(0, 0, 0, 0)
 appGrid.AutomaticCanvasSize = Enum.AutomaticSize.Y
 appGrid.BorderSizePixel = 0
-appGrid.Parent = home
 
-local gridLayout = Instance.new("UIGridLayout")
-gridLayout.CellSize = UDim2.new(0, 72, 0, 86)
+local gridLayout = Instance.new("UIGridLayout", appGrid)
+gridLayout.CellSize = getGridIconSize()
 gridLayout.CellPadding = UDim2.new(0, 10, 0, 12)
 gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-gridLayout.Parent = appGrid
 
--- ==================== KEY SCREEN ====================
-local keyScreen = Instance.new("Frame")
+-- ==================== KEY SCREEN (MODERN REDESIGN) ====================
+local keyScreen = Instance.new("Frame", sa)
 keyScreen.Size = UDim2.new(1, 0, 1, 0)
 keyScreen.Position = UDim2.new(0, 0, 0, 0)
 keyScreen.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
@@ -262,57 +248,68 @@ keyScreen.ZIndex = 80
 keyScreen.Visible = false
 keyScreen.BorderSizePixel = 0
 keyScreen.ClipsDescendants = true
-keyScreen.Parent = sa
-safeCorner(keyScreen, 30)
+corner(keyScreen, 30)
 
 -- Gradient background
-local keyBgGradient = Instance.new("UIGradient")
+local keyBgGradient = Instance.new("UIGradient", keyScreen)
 keyBgGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 30)),
     ColorSequenceKeypoint.new(0.5, Color3.fromRGB(10, 10, 16)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 35))
 })
 keyBgGradient.Rotation = 135
-keyBgGradient.Parent = keyScreen
 
--- Key content
-local keyContent = Instance.new("Frame")
+-- Decorative glow orb (top)
+local glowOrb = Instance.new("Frame", keyScreen)
+glowOrb.Size = UDim2.new(0, 200, 0, 200)
+glowOrb.Position = UDim2.new(0.5, -100, 0, -80)
+glowOrb.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+glowOrb.BackgroundTransparency = 0.85
+glowOrb.ZIndex = 81
+corner(glowOrb, 100)
+
+local glowOrb2 = Instance.new("Frame", keyScreen)
+glowOrb2.Size = UDim2.new(0, 150, 0, 150)
+glowOrb2.Position = UDim2.new(1, -60, 1, -60)
+glowOrb2.BackgroundColor3 = Color3.fromRGB(139, 92, 246)
+glowOrb2.BackgroundTransparency = 0.85
+glowOrb2.ZIndex = 81
+corner(glowOrb2, 100)
+
+-- ==================== MAIN CONTENT ====================
+local keyContent = Instance.new("Frame", keyScreen)
 keyContent.Size = UDim2.new(1, -40, 1, -40)
 keyContent.Position = UDim2.new(0, 20, 0, 20)
 keyContent.BackgroundTransparency = 1
 keyContent.ZIndex = 82
-keyContent.Parent = keyScreen
 
-local keyLayout = Instance.new("UIListLayout")
+local keyLayout = Instance.new("UIListLayout", keyContent)
 keyLayout.Padding = UDim.new(0, 12)
 keyLayout.SortOrder = Enum.SortOrder.LayoutOrder
 keyLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 keyLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-keyLayout.Parent = keyContent
 
 -- Logo
-local logoFrame = Instance.new("Frame")
+local logoFrame = Instance.new("Frame", keyContent)
 logoFrame.Size = UDim2.new(0, 80, 0, 80)
 logoFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 logoFrame.BackgroundTransparency = 0.9
 logoFrame.LayoutOrder = 0
 logoFrame.ZIndex = 83
-logoFrame.Parent = keyContent
-safeCorner(logoFrame, 20)
-safeStroke(logoFrame, Color3.fromRGB(255, 255, 255), 2, 0.8)
+corner(logoFrame, 20)
+stroke(logoFrame, Color3.fromRGB(255, 255, 255), 2, 0.8)
 
-local logoImage = Instance.new("ImageLabel")
+local logoImage = Instance.new("ImageLabel", logoFrame)
 logoImage.Size = UDim2.new(1, -10, 1, -10)
 logoImage.Position = UDim2.new(0, 5, 0, 5)
 logoImage.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 logoImage.Image = Config.LogoURL or "https://files.catbox.moe/io8o2d.png"
 logoImage.ScaleType = Enum.ScaleType.Fit
 logoImage.ZIndex = 84
-logoImage.Parent = logoFrame
-safeCorner(logoImage, 18)
+corner(logoImage, 18)
 
 -- Title
-local keyTitle = Instance.new("TextLabel")
+local keyTitle = Instance.new("TextLabel", keyContent)
 keyTitle.Size = UDim2.new(1, 0, 0, 34)
 keyTitle.BackgroundTransparency = 1
 keyTitle.Text = "PHONE ID VIEWER"
@@ -321,10 +318,9 @@ keyTitle.Font = Enum.Font.GothamBlack
 keyTitle.TextSize = 22
 keyTitle.LayoutOrder = 1
 keyTitle.ZIndex = 83
-keyTitle.Parent = keyContent
 
 -- Description
-local keyDesc = Instance.new("TextLabel")
+local keyDesc = Instance.new("TextLabel", keyContent)
 keyDesc.Size = UDim2.new(1, -20, 0, 30)
 keyDesc.BackgroundTransparency = 1
 keyDesc.Text = "Masukkan access key untuk membuka semua fitur premium."
@@ -334,20 +330,18 @@ keyDesc.TextSize = 11
 keyDesc.TextWrapped = true
 keyDesc.LayoutOrder = 2
 keyDesc.ZIndex = 83
-keyDesc.Parent = keyContent
 
 -- Input container
-local inputContainer = Instance.new("Frame")
+local inputContainer = Instance.new("Frame", keyContent)
 inputContainer.Size = UDim2.new(1, 0, 0, 50)
 inputContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
 inputContainer.LayoutOrder = 3
 inputContainer.ZIndex = 84
-inputContainer.Parent = keyContent
-safeCorner(inputContainer, 14)
-safeStroke(inputContainer, Color3.fromRGB(255, 255, 255), 1, 0.8)
+corner(inputContainer, 14)
+stroke(inputContainer, Color3.fromRGB(255, 255, 255), 1, 0.8)
 
 -- Key icon
-local keyIcon = Instance.new("TextLabel")
+local keyIcon = Instance.new("TextLabel", inputContainer)
 keyIcon.Size = UDim2.new(0, 30, 0, 30)
 keyIcon.Position = UDim2.new(0, 10, 0.5, -15)
 keyIcon.BackgroundTransparency = 1
@@ -355,10 +349,9 @@ keyIcon.Text = "🔑"
 keyIcon.Font = Enum.Font.GothamBold
 keyIcon.TextSize = 16
 keyIcon.ZIndex = 85
-keyIcon.Parent = inputContainer
 
 -- TextBox
-local keyInput = Instance.new("TextBox")
+local keyInput = Instance.new("TextBox", inputContainer)
 keyInput.Size = UDim2.new(1, -46, 1, 0)
 keyInput.Position = UDim2.new(0, 42, 0, 0)
 keyInput.BackgroundTransparency = 1
@@ -371,10 +364,9 @@ keyInput.TextSize = 15
 keyInput.TextXAlignment = Enum.TextXAlignment.Left
 keyInput.ClearTextOnFocus = false
 keyInput.ZIndex = 85
-keyInput.Parent = inputContainer
 
 -- Status label
-local keyStatus = Instance.new("TextLabel")
+local keyStatus = Instance.new("TextLabel", keyContent)
 keyStatus.Size = UDim2.new(1, 0, 0, 22)
 keyStatus.BackgroundTransparency = 1
 keyStatus.Text = ""
@@ -383,10 +375,9 @@ keyStatus.Font = Enum.Font.GothamBold
 keyStatus.TextSize = 11
 keyStatus.LayoutOrder = 4
 keyStatus.ZIndex = 83
-keyStatus.Parent = keyContent
 
 -- Unlock button
-local submitBtn = Instance.new("TextButton")
+local submitBtn = Instance.new("TextButton", keyContent)
 submitBtn.Size = UDim2.new(1, 0, 0, 48)
 submitBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 submitBtn.Text = "UNLOCK"
@@ -396,12 +387,11 @@ submitBtn.TextSize = 16
 submitBtn.AutoButtonColor = false
 submitBtn.LayoutOrder = 5
 submitBtn.ZIndex = 84
-submitBtn.Parent = keyContent
-safeCorner(submitBtn, 14)
-safePressFX(submitBtn)
+corner(submitBtn, 14)
+pressFX(submitBtn)
 
 -- Buy button
-local buyBtn = Instance.new("TextButton")
+local buyBtn = Instance.new("TextButton", keyContent)
 buyBtn.Size = UDim2.new(1, 0, 0, 40)
 buyBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 buyBtn.BackgroundTransparency = 0.9
@@ -412,13 +402,12 @@ buyBtn.TextSize = 13
 buyBtn.AutoButtonColor = false
 buyBtn.LayoutOrder = 6
 buyBtn.ZIndex = 84
-buyBtn.Parent = keyContent
-safeCorner(buyBtn, 10)
-safeStroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.6)
-safePressFX(buyBtn)
+corner(buyBtn, 10)
+stroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.6)
+pressFX(buyBtn)
 
 -- Version info
-local buildInfo = Instance.new("TextLabel")
+local buildInfo = Instance.new("TextLabel", keyContent)
 buildInfo.Size = UDim2.new(1, 0, 0, 16)
 buildInfo.BackgroundTransparency = 1
 buildInfo.Text = "Build v2.1.0 | © 2025 " .. (Config.DEVELOPER_USERNAME or "AlfreadR0rw")
@@ -427,7 +416,6 @@ buildInfo.Font = Enum.Font.Gotham
 buildInfo.TextSize = 8
 buildInfo.LayoutOrder = 7
 buildInfo.ZIndex = 83
-buildInfo.Parent = keyContent
 
 -- ==================== FUNCTIONS ====================
 local function submitKey()
@@ -455,8 +443,11 @@ local function submitKey()
                     keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
                     
                     -- Simpan key ke storage
-                    if Storage.saveKey then
-                        Storage.saveKey(key)
+                    if Storage and Storage.appSettings then
+                        Storage.appSettings.savedKey = key
+                        if Storage.persistSettings then
+                            Storage.persistSettings()
+                        end
                     end
                     
                     task.wait(0.8)
@@ -484,7 +475,9 @@ end)
 
 buyBtn.MouseButton1Click:Connect(function()
     local url = Config.BUY_KEY_URL or "https://discord.gg/yourdiscord"
-    pcall(function() setclipboard(url) end)
+    if Helpers and Helpers.copyToClipboard then
+        Helpers.copyToClipboard(url)
+    end
     _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(255, 180, 50))
 end)
 
@@ -497,16 +490,26 @@ _G.PhoneState = {
 }
 
 -- ==================== PHONE FUNCTIONS ====================
+local keyScreenAnim = false
+
 function _G.showKeyEntry()
     keyScreen.Visible = true
     keyInput.Text = ""
     keyStatus.Text = ""
+    if not keyScreenAnim then
+        keyContent.Position = UDim2.new(0, 20, -0.1, 0)
+        keyContent.BackgroundTransparency = 0.2
+        tween(keyContent, {Position = UDim2.new(0, 20, 0, 20)}, 0.3, Enum.EasingStyle.Quart)
+        tween(keyContent, {BackgroundTransparency = 1}, 0.3)
+        keyScreenAnim = true
+    end
     task.wait(0.1)
     keyInput:CaptureFocus()
 end
 
 function _G.hideKeyEntry()
     keyScreen.Visible = false
+    keyScreenAnim = false
 end
 
 function _G.unlock()
@@ -522,35 +525,9 @@ function _G.openPhone()
     if phone.Visible then return end
     phone.Visible = true
     phone.Size = UDim2.new(0, 0, 0, 0)
-    safeTween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
+    tween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
     
     if _G.PhoneState.isLocked then
-        -- Cek saved key dulu
-        local savedKey = nil
-        if Storage.getSavedKey then
-            savedKey = Storage.getSavedKey()
-        end
-        
-        if savedKey and savedKey ~= "" and Firebase and Firebase.CheckSavedKey then
-            local ok, isValid = pcall(function()
-                return Firebase.CheckSavedKey(LocalPlayer.UserId, savedKey)
-            end)
-            
-            if ok and isValid then
-                -- Key masih valid, langsung unlock
-                _G.PhoneState.isLocked = false
-                task.wait(0.3)
-                if _G.goHome then _G.goHome() end
-                _G.showDynamicNotification("✅ Welcome back!", Color3.fromRGB(0, 255, 100))
-                return
-            else
-                -- Key expired
-                if Storage.clearSavedKey then
-                    Storage.clearSavedKey()
-                end
-            end
-        end
-        
         task.wait(0.5)
         _G.showKeyEntry()
     else
@@ -562,14 +539,14 @@ end
 
 function _G.closePhone()
     if not phone.Visible then return end
-    safeTween(phone, {Size = UDim2.new(0, 0, 0, 0)}, 0.22)
+    tween(phone, {Size = UDim2.new(0, 0, 0, 0)}, 0.22)
     task.delay(0.22, function()
         phone.Visible = false
     end)
 end
 
--- ==================== ONLINE TRACKING (FIXED) ====================
-local function setPlayerOnline()
+-- ==================== ONLINE TRACKING ====================
+task.spawn(function()
     if Firebase and Firebase.SetOnline then
         local playerData = {
             name = LocalPlayer.Name,
@@ -580,35 +557,21 @@ local function setPlayerOnline()
             lastUpdate = os.time(),
         }
         Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        
+        while true do
+            task.wait(60)
+            playerData.lastUpdate = os.time()
+            playerData.mapName = game.PlaceId
+            playerData.jobId = game.JobId
+            Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        end
     end
-end
+end)
 
-local function removePlayerOnline()
+game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
     if Firebase and Firebase.RemoveOnline then
         Firebase.RemoveOnline(LocalPlayer.UserId)
     end
-end
-
-task.spawn(function()
-    setPlayerOnline()
-    while true do
-        task.wait(30)
-        setPlayerOnline()
-    end
-end)
-
-game:GetService("Players").PlayerRemoving:Connect(function(player)
-    if player == LocalPlayer then
-        removePlayerOnline()
-    end
-end)
-
-game:BindToClose(function()
-    removePlayerOnline()
-end)
-
-LocalPlayer.OnTeleport:Connect(function()
-    removePlayerOnline()
 end)
 
 -- ==================== EXPORT ====================
@@ -630,5 +593,7 @@ return {
     appGrid = appGrid,
     gridLayout = gridLayout,
     keyScreen = keyScreen,
+    isPortrait = isPortrait,
+    getGridIconSize = getGridIconSize,
     PHONE_SIZE = PHONE_SIZE,
 }
