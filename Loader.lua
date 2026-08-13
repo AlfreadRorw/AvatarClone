@@ -5,15 +5,9 @@
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
 
--- Cache-buster: raw.githubusercontent.com CDN sering nyimpen cache file lama
--- selama beberapa menit walau file di GitHub sudah diupdate. Menempelkan
--- query param unik (waktu join) memaksa CDN ambil versi terbaru tiap kali
--- script ini dijalankan ulang (rejoin/execute lagi).
-local CACHE_BUSTER = "?v=" .. tostring(os.time())
-
 local function Load(path)
     local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE_URL .. path .. CACHE_BUSTER, true))()
+        return loadstring(game:HttpGet(BASE_URL .. path, true))()
     end)
     if not ok then
         warn("[PhoneIDViewer] Failed: " .. path .. " | " .. tostring(result))
@@ -40,7 +34,7 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- Load pondasi dulu (sebelum key system, karena key system butuh Firebase & helpers)
+-- Load order
 local Config = Load("Config.lua")
 _G.Config = Config
 
@@ -56,18 +50,21 @@ _G.Storage = Storage
 local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
--- ================= LOAD SEMUA MODUL DARI AWAL =================
--- Floating icon SELALU muncul begitu join, tidak menunggu key.
--- Key baru dicek pas player TAP floating icon (lihat pembungkus
--- openPhone di bagian bawah file ini).
 local Phone = Load("Core/Phone.lua")
 _G.Phone = Phone
 
 local Icons = Load("Core/Icons.lua")
 _G.Icons = Icons
 
+-- PENTING: BuildIcons.lua HARUS di-load sebelum semua Applications/*.lua.
+-- Setiap file di Applications/ membaca _G.appContent, _G.buildAppIcon, dll
+-- pada saat file itu sendiri di-load (baris atas file, bukan di dalam fungsi),
+-- dan nilai itu di-assign ke variabel LOKAL. Kalau BuildIcons.lua belum jalan,
+-- _G.appContent masih nil saat dibaca, dan variabel lokal appContent di tiap
+-- app akan tetap nil selamanya walau _G.appContent diisi belakangan.
 Load("Core/BuildIcons.lua")
 
+-- Applications (load SETELAH BuildIcons.lua)
 local AppList = {
     "Applications/Players.lua",
     "Applications/Clone.lua",
@@ -96,20 +93,5 @@ for _, path in ipairs(AppList) do
 end
 
 Load("Core/FloatingIcon.lua")
-
--- ================= GATE DI TITIK BUKA PHONE =================
--- Core/Phone.lua sudah mendefinisikan _G.openPhone() versi "polos" (langsung
--- buka tanpa cek apapun). Kita bungkus di sini supaya SETIAP kali floating
--- icon di-tap, key dicek dulu lewat requireValidKey(). Karena KeySystem
--- punya sessionUnlocked + cek expiresAt di Firebase, popup key HANYA akan
--- muncul kalau memang belum pernah valid di sesi ini / key sudah expired —
--- bukan nanya berkali-kali.
-local rawOpenPhone = _G.openPhone
-_G.openPhone = function()
-    requireValidKey(function(granted)
-        if not granted then return end
-        rawOpenPhone()
-    end)
-end
 
 print("[PhoneIDViewer] All modules loaded!")

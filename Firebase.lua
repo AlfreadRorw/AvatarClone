@@ -1,5 +1,5 @@
 -- Firebase.lua
--- Firebase Realtime Database untuk Online Tracker & Messages
+-- Firebase Realtime Database + Key System + Online Tracker + Messages
 
 local Services = _G.Services
 local LocalPlayer = _G.LocalPlayer
@@ -11,7 +11,6 @@ local FIREBASE_URL = "https://phone-id-viewer-default-rtdb.asia-southeast1.fireb
 -- ================= FIREBASE FUNCTIONS =================
 local Firebase = {}
 
--- Request helper
 local function firebaseRequest(method, path, body)
     local url = FIREBASE_URL .. path .. ".json"
     local ok, result = pcall(function()
@@ -39,45 +38,11 @@ local function firebaseRequest(method, path, body)
         if dok then return data end
     end
     
-    -- Fallback ke file lokal
-    local localFile = "PhoneIDViewer_Firebase.json"
-    local localData = {}
-    pcall(function()
-        if isfile and isfile(localFile) then
-            localData = HttpService:JSONDecode(readfile(localFile))
-        end
-    end)
-    return localData
+    return nil
 end
 
 function Firebase.set(path, data)
     firebaseRequest("PUT", path, data)
-    
-    -- Simpan juga ke lokal (fallback)
-    pcall(function()
-        local localFile = "PhoneIDViewer_Firebase.json"
-        local allData = {}
-        if isfile and isfile(localFile) then
-            allData = HttpService:JSONDecode(readfile(localFile))
-        end
-        
-        -- Parse path
-        local keys = {}
-        for key in path:gmatch("[^/]+") do
-            table.insert(keys, key)
-        end
-        
-        local current = allData
-        for i = 1, #keys - 1 do
-            if not current[keys[i]] then current[keys[i]] = {} end
-            current = current[keys[i]]
-        end
-        current[keys[#keys]] = data
-        
-        if writefile then
-            writefile(localFile, HttpService:JSONEncode(allData))
-        end
-    end)
 end
 
 function Firebase.get(path)
@@ -86,34 +51,251 @@ end
 
 function Firebase.delete(path)
     firebaseRequest("DELETE", path, nil)
+end
+
+-- ================= KEY SYSTEM =================
+-- Struktur Firebase:
+-- /keys/{key} = {userId, expiresAt, valid, createdAt}
+
+local sessionUnlocked = false
+local sessionExpiresAt = 0
+local activeKeyPopup = nil
+
+-- Check key dari Firebase
+function Firebase.checkKey(key)
+    local keyData = Firebase.get("/keys/" .. key)
     
-    -- Hapus juga dari lokal
-    pcall(function()
-        local localFile = "PhoneIDViewer_Firebase.json"
-        local allData = {}
-        if isfile and isfile(localFile) then
-            allData = HttpService:JSONDecode(readfile(localFile))
-        end
+    if keyData and type(keyData) == "table" then
+        local expiresAt = keyData.expiresAt or 0
+        local isValid = keyData.valid == true
         
-        local keys = {}
-        for key in path:gmatch("[^/]+") do
-            table.insert(keys, key)
-        end
-        
-        if #keys == 1 then
-            allData[keys[1]] = nil
+        -- Cek apakah key masih valid (belum expired)
+        if isValid and expiresAt > os.time() then
+            -- Key valid - tandai sebagai terpakai
+            Firebase.set("/keys/" .. key .. "/used", true)
+            Firebase.set("/keys/" .. key .. "/usedBy", {
+                username = LocalPlayer.Name,
+                userId = LocalPlayer.UserId,
+                usedAt = os.time()
+            })
+            return true, expiresAt
+        elseif isValid and expiresAt <= os.time() then
+            -- Key expired
+            Firebase.set("/keys/" .. key .. "/valid", false)
+            return false, 0, "expired"
         else
-            local current = allData
-            for i = 1, #keys - 1 do
-                if not current[keys[i]] then return end
-                current = current[keys[i]]
-            end
-            current[keys[#keys]] = nil
+            return false, 0, "invalid"
+        end
+    end
+    
+    return false, 0, "notfound"
+end
+
+-- Check session lokal
+function Firebase.checkSession()
+    if sessionUnlocked and sessionExpiresAt > os.time() then
+        return true, sessionExpiresAt
+    end
+    return false, 0
+end
+
+-- Require valid key
+function requireValidKey(callback)
+    -- Cek session dulu
+    local sessionValid, sessionExpiry = Firebase.checkSession()
+    if sessionValid then
+        callback(true, sessionExpiry)
+        return
+    end
+    
+    -- Session tidak valid - tampilkan popup
+    showKeyPopup(callback)
+end
+
+-- Format time remaining
+local function formatTimeRemaining(expiresAt)
+    local remaining = expiresAt - os.time()
+    
+    if remaining <= 0 then
+        return "Expired"
+    end
+    
+    local days = math.floor(remaining / 86400)
+    local hours = math.floor((remaining % 86400) / 3600)
+    local minutes = math.floor((remaining % 3600) / 60)
+    
+    if days > 0 then
+        return string.format("%d hari %d jam", days, hours)
+    elseif hours > 0 then
+        return string.format("%d jam %d menit", hours, minutes)
+    elseif minutes > 0 then
+        return string.format("%d menit", minutes)
+    else
+        return string.format("%d detik", remaining)
+    end
+end
+
+-- Popup key
+function showKeyPopup(callback)
+    if activeKeyPopup then
+        pcall(function() activeKeyPopup:Destroy() end)
+    end
+    
+    local popupGui = Instance.new("ScreenGui")
+    popupGui.Name = "KeyPopup"
+    popupGui.ResetOnSpawn = false
+    popupGui.IgnoreGuiInset = true
+    popupGui.DisplayOrder = 99999
+    popupGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    
+    pcall(function() popupGui.Parent = game:GetService("CoreGui") end)
+    if not popupGui.Parent then popupGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+    activeKeyPopup = popupGui
+    
+    -- Backdrop
+    local backdrop = Instance.new("Frame", popupGui)
+    backdrop.Size = UDim2.new(1, 0, 1, 0)
+    backdrop.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    backdrop.BackgroundTransparency = 0.6
+    backdrop.ZIndex = 10000
+    
+    -- Card
+    local card = Instance.new("Frame", popupGui)
+    card.Size = UDim2.new(0, 300, 0, 220)
+    card.Position = UDim2.new(0.5, -150, 0.5, -110)
+    card.BackgroundColor3 = Color3.fromRGB(18, 18, 28)
+    card.ZIndex = 10001
+    Helpers.corner(card, 16)
+    Helpers.stroke(card, Color3.fromRGB(80, 150, 255), 2, 0)
+    
+    -- Gradient
+    local cardGrad = Instance.new("UIGradient", card)
+    cardGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 28, 42)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(14, 16, 26))
+    })
+    cardGrad.Rotation = 135
+    
+    -- Title
+    local title = Instance.new("TextLabel", card)
+    title.Size = UDim2.new(1, -20, 0, 30)
+    title.Position = UDim2.new(0, 10, 0, 15)
+    title.BackgroundTransparency = 1
+    title.Text = "ENTER ACCESS KEY"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 16
+    title.ZIndex = 10002
+    
+    -- Subtitle
+    local subtitle = Instance.new("TextLabel", card)
+    subtitle.Size = UDim2.new(1, -20, 0, 20)
+    subtitle.Position = UDim2.new(0, 10, 0, 45)
+    subtitle.BackgroundTransparency = 1
+    subtitle.Text = "Dapatkan key dari developer"
+    subtitle.TextColor3 = Color3.fromRGB(120, 120, 130)
+    subtitle.Font = Enum.Font.Gotham
+    subtitle.TextSize = 9
+    subtitle.ZIndex = 10002
+    
+    -- Key input
+    local keyInput = Instance.new("TextBox", card)
+    keyInput.Size = UDim2.new(1, -40, 0, 38)
+    keyInput.Position = UDim2.new(0, 20, 0, 70)
+    keyInput.PlaceholderText = "PHONE-XXXX-XXXX-XXXX"
+    keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 110)
+    keyInput.Text = ""
+    keyInput.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
+    keyInput.TextColor3 = Color3.new(1, 1, 1)
+    keyInput.Font = Enum.Font.Code
+    keyInput.TextSize = 14
+    keyInput.ZIndex = 10002
+    Helpers.corner(keyInput, 8)
+    Helpers.stroke(keyInput, Color3.fromRGB(60, 60, 70), 1, 0)
+    
+    -- Error label
+    local errorLbl = Instance.new("TextLabel", card)
+    errorLbl.Size = UDim2.new(1, -20, 0, 18)
+    errorLbl.Position = UDim2.new(0, 10, 0, 112)
+    errorLbl.BackgroundTransparency = 1
+    errorLbl.Text = ""
+    errorLbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+    errorLbl.Font = Enum.Font.Gotham
+    errorLbl.TextSize = 10
+    errorLbl.ZIndex = 10002
+    
+    -- Submit button
+    local submitBtn = Instance.new("TextButton", card)
+    submitBtn.Size = UDim2.new(1, -40, 0, 36)
+    submitBtn.Position = UDim2.new(0, 20, 0, 134)
+    submitBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+    submitBtn.Text = "ACTIVATE"
+    submitBtn.TextColor3 = Color3.new(1, 1, 1)
+    submitBtn.Font = Enum.Font.GothamBlack
+    submitBtn.TextSize = 12
+    submitBtn.AutoButtonColor = false
+    submitBtn.ZIndex = 10002
+    Helpers.corner(submitBtn, 8)
+    Helpers.pressFX(submitBtn)
+    
+    -- Info expiry
+    local expiryLbl = Instance.new("TextLabel", card)
+    expiryLbl.Size = UDim2.new(1, -20, 0, 14)
+    expiryLbl.Position = UDim2.new(0, 10, 0, 176)
+    expiryLbl.BackgroundTransparency = 1
+    expiryLbl.Text = "Key berlaku selama durasi yang ditentukan"
+    expiryLbl.TextColor3 = Color3.fromRGB(80, 80, 90)
+    expiryLbl.Font = Enum.Font.Gotham
+    expiryLbl.TextSize = 8
+    expiryLbl.ZIndex = 10002
+    
+    submitBtn.MouseButton1Click:Connect(function()
+        local key = keyInput.Text:upper():gsub("%s+", "")
+        
+        if key == "" then
+            errorLbl.Text = "❌ Key tidak boleh kosong!"
+            return
         end
         
-        if writefile then
-            writefile(localFile, HttpService:JSONEncode(allData))
-        end
+        submitBtn.Text = "Checking..."
+        submitBtn.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+        submitBtn.Interactable = false
+        
+        task.spawn(function()
+            task.wait(1)
+            
+            local valid, expiresAt, errorType = Firebase.checkKey(key)
+            
+            if valid then
+                sessionUnlocked = true
+                sessionExpiresAt = expiresAt
+                
+                pcall(function() popupGui:Destroy() end)
+                activeKeyPopup = nil
+                
+                showDynamicNotification("✅ Key valid! Akses diberikan.", Color3.fromRGB(0, 200, 80))
+                
+                if callback then
+                    callback(true, expiresAt)
+                end
+            else
+                submitBtn.Text = "ACTIVATE"
+                submitBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 80)
+                submitBtn.Interactable = true
+                
+                if errorType == "expired" then
+                    errorLbl.Text = "❌ Key sudah expired!"
+                elseif errorType == "notfound" then
+                    errorLbl.Text = "❌ Key tidak ditemukan!"
+                else
+                    errorLbl.Text = "❌ Key tidak valid!"
+                end
+                
+                if callback then
+                    callback(false)
+                end
+            end
+        end)
     end)
 end
 
@@ -262,4 +444,4 @@ end)
 -- Export
 _G.Firebase = Firebase
 
-print("[Firebase] Module ready!")
+print("[Firebase] Module ready with Key System!")
