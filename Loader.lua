@@ -56,10 +56,6 @@ _G.Storage = Storage
 local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
--- Key system: load dulu (openPhone butuh requireValidKey tersedia)
-Load("KeyGateUI.lua")
-Load("KeySystem.lua")
-
 -- ================= LOAD SEMUA MODUL DARI AWAL =================
 -- Floating icon SELALU muncul begitu join, tidak menunggu key.
 -- Key baru dicek pas player TAP floating icon (lihat pembungkus
