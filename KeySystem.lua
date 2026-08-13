@@ -7,6 +7,10 @@
 local KEY_CHECK_ROOT = "/keys"
 local USER_KEY_ROOT  = "/user_keys"
 
+-- Sekali gate ini lolos dalam sesi berjalan ini, jangan tampilkan lagi
+-- walaupun requireValidKey() dipanggil ulang (misal tiap buka phone).
+local sessionUnlocked = false
+
 local DURATION_SECONDS = {
     ["3d"]  = 3  * 24 * 60 * 60,
     ["7d"]  = 7  * 24 * 60 * 60,
@@ -69,7 +73,18 @@ local function tryActivateKey(code)
     end
 
     local ok, keyData = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
-    if not ok or not keyData or type(keyData) ~= "table" then
+
+    -- pcall gagal total (network/firebase error) -> coba sekali lagi sebelum nyerah
+    if not ok then
+        task.wait(0.6)
+        ok, keyData = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
+    end
+
+    if not ok then
+        return false, "Gagal terhubung ke server. Cek koneksi lalu coba lagi."
+    end
+
+    if not keyData or type(keyData) ~= "table" then
         return false, "Key tidak ditemukan. Cek kembali kode kamu."
     end
 
@@ -107,11 +122,20 @@ local function tryActivateKey(code)
         durationLabel = keyData.durationLabel,
     })
 
+    sessionUnlocked = true
     return true, "Key berhasil diaktifkan! Selamat menikmati.", expiresAt
 end
 
 -- ================= ENTRY POINT =================
+-- Aman dipanggil berkali-kali (misal tiap buka phone): setelah pernah
+-- lolos sekali di sesi ini, panggilan berikutnya langsung onDone(true)
+-- tanpa nampilin popup lagi.
 function requireValidKey(onDone)
+    if sessionUnlocked then
+        onDone(true)
+        return
+    end
+
     task.spawn(function()
         -- Tunggu LocalPlayer ready (penting kalau script jalan sangat awal)
         local lp = getLocalPlayer()
@@ -129,12 +153,14 @@ function requireValidKey(onDone)
 
         local hasAccess, expiresAt = checkExistingAccess()
         if hasAccess then
+            sessionUnlocked = true
             print("[PhoneIDViewer] Key aktif, sisa: " .. formatTimeLeft(expiresAt))
             onDone(true)
             return
         end
 
         showKeyGateUI(function()
+            sessionUnlocked = true
             onDone(true)
         end)
     end)
