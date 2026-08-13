@@ -8,5 +8,9 @@ return {
     DEVELOPER_USERNAME = "AlfreadR0rw",
     
     -- Link untuk membeli key
-    BUY_KEY_URL = "https://discord.gg/yourdiscord", -- Ganti dengan link Discord/website kamu
+    BUY_KEY_URL = "https://discord.gg/yourdiscord",
+    
+    -- Logo untuk notifikasi loading
+    LogoURL = "https://files.catbox.moe/xbvd7n.png",
+    LogoLocalPath = "PhoneIDViewer_Logo.png",
 }

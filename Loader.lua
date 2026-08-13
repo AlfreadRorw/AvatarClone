@@ -88,4 +88,7 @@ end
 
 Load("Core/FloatingIcon.lua")
 
+-- Loading Notification (dimuat terakhir agar muncul setelah semua siap)
+Load("Core/LoadingNotif.lua")
+
 print("[PhoneIDViewer] All modules loaded!")
