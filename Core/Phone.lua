@@ -1,4 +1,3 @@
--- Core/Phone.lua
 -- Membuat GUI root, phone frame, screen area, home screen
 
 local Services = _G.Services
@@ -6,6 +5,7 @@ local T = _G.T
 local Helpers = _G.Helpers
 local Config = _G.Config
 local Storage = _G.Storage
+local Firebase = _G.Firebase
 
 local appSettings = Storage.appSettings
 
@@ -49,7 +49,6 @@ local phoneStroke = Helpers.stroke(phone, T.Accent, 2, appSettings.glowEnabled a
 -- ================= ORIENTASI =================
 local PHONE_SIZE_PORTRAIT = UDim2.new(0, 320, 0, 560)
 local PHONE_SIZE = PHONE_SIZE_PORTRAIT
-local isLandscapeMode = false
 
 local function isPortrait()
     local cam = Services.Workspace.CurrentCamera
@@ -246,7 +245,7 @@ local hint = Instance.new("TextLabel", lock)
 hint.Size = UDim2.new(1, 0, 0, 30)
 hint.Position = UDim2.new(0, 0, 0.88, 0)
 hint.BackgroundTransparency = 1
-hint.Text = "Click to unlock"
+hint.Text = "Click to enter key"
 hint.TextColor3 = Color3.fromRGB(200, 200, 220)
 hint.Font = Enum.Font.GothamBold
 hint.TextSize = 13
@@ -257,7 +256,7 @@ lock.InputBegan:Connect(function(input)
     end
 end)
 
--- ================= PASSCODE =================
+-- ================= KEY ENTRY SCREEN (Firebase) =================
 local pass = Instance.new("Frame", sa)
 pass.Size = UDim2.new(1, 0, 1, 0)
 pass.BackgroundColor3 = Color3.new(0, 0, 0)
@@ -270,98 +269,84 @@ local pTitle = Instance.new("TextLabel", pass)
 pTitle.Size = UDim2.new(1, 0, 0, 40)
 pTitle.Position = UDim2.new(0, 0, 0.1, 0)
 pTitle.BackgroundTransparency = 1
-pTitle.Text = "Enter Passcode"
+pTitle.Text = "Enter Key"
 pTitle.TextColor3 = Color3.new(1, 1, 1)
 pTitle.Font = Enum.Font.GothamBold
 pTitle.TextSize = 20
 
-local dotsH = Instance.new("Frame", pass)
-dotsH.Size = UDim2.new(0, 200, 0, 30)
-dotsH.Position = UDim2.new(0.5, -100, 0.25, 0)
-dotsH.BackgroundTransparency = 1
+local keyInput = Instance.new("TextBox", pass)
+keyInput.Size = UDim2.new(0.8, 0, 0, 40)
+keyInput.Position = UDim2.new(0.1, 0, 0.25, 0)
+keyInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+keyInput.BackgroundTransparency = 0.1
+keyInput.TextColor3 = Color3.new(1, 1, 1)
+keyInput.PlaceholderText = "KEY-XXXXXX"
+keyInput.PlaceholderColor3 = Color3.fromRGB(180, 180, 180)
+keyInput.Font = Enum.Font.GothamBold
+keyInput.TextSize = 18
+keyInput.TextXAlignment = Enum.TextXAlignment.Center
+keyInput.ClearTextOnFocus = false
+Helpers.corner(keyInput, 10)
 
-local dots = {}
-for i = 1, 4 do
-    local d = Instance.new("Frame", dotsH)
-    d.Size = UDim2.new(0, 24, 0, 24)
-    d.Position = UDim2.new(0, (i-1) * 56 + 8, 0.5, -12)
-    d.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
-    Helpers.corner(d, 100)
-    table.insert(dots, d)
-end
+local submitBtn = Instance.new("TextButton", pass)
+submitBtn.Size = UDim2.new(0.8, 0, 0, 45)
+submitBtn.Position = UDim2.new(0.1, 0, 0.38, 0)
+submitBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 80)
+submitBtn.Text = "Unlock"
+submitBtn.TextColor3 = Color3.new(1, 1, 1)
+submitBtn.Font = Enum.Font.GothamBold
+submitBtn.TextSize = 18
+submitBtn.AutoButtonColor = false
+Helpers.corner(submitBtn, 10)
+Helpers.pressFX(submitBtn)
 
-local numpad = Instance.new("Frame", pass)
-numpad.Size = UDim2.new(0.8, 0, 0.45, 0)
-numpad.Position = UDim2.new(0.1, 0, 0.4, 0)
-numpad.BackgroundTransparency = 1
+local errorLbl = Instance.new("TextLabel", pass)
+errorLbl.Size = UDim2.new(1, 0, 0, 25)
+errorLbl.Position = UDim2.new(0, 0, 0.5, 0)
+errorLbl.BackgroundTransparency = 1
+errorLbl.Text = ""
+errorLbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+errorLbl.Font = Enum.Font.GothamBold
+errorLbl.TextSize = 12
+errorLbl.TextXAlignment = Enum.TextXAlignment.Center
 
-local numLayout = Instance.new("UIGridLayout", numpad)
-numLayout.CellSize = UDim2.new(0, 70, 0, 56)
-numLayout.CellPadding = UDim2.new(0, 8, 0, 8)
-numLayout.FillDirection = Enum.FillDirection.Horizontal
-numLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-numLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+local backToLockBtn = Instance.new("TextButton", pass)
+backToLockBtn.Size = UDim2.new(0.4, 0, 0, 30)
+backToLockBtn.Position = UDim2.new(0.3, 0, 0.56, 0)
+backToLockBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+backToLockBtn.Text = "Back"
+backToLockBtn.TextColor3 = Color3.new(1, 1, 1)
+backToLockBtn.Font = Enum.Font.GothamBold
+backToLockBtn.TextSize = 14
+backToLockBtn.AutoButtonColor = false
+Helpers.corner(backToLockBtn, 10)
+Helpers.pressFX(backToLockBtn)
 
-local passEntry = ""
-
-local function updateDots()
-    for i, dot in ipairs(dots) do
-        dot.BackgroundColor3 = i <= #passEntry and Color3.fromRGB(255, 255, 255) or Color3.fromRGB(100, 100, 100)
+local function submitKey()
+    local key = keyInput.Text:upper():gsub("%s", "")
+    if key == "" then
+        errorLbl.Text = "Masukkan key!"
+        return
+    end
+    local isValid = Firebase.ValidateKey(key)
+    if isValid then
+        _G.unlock()
+        errorLbl.Text = ""
+    else
+        errorLbl.Text = "Key tidak valid atau kedaluwarsa"
     end
 end
 
-local function onNum(n)
-    if #passEntry >= 4 then return end
-    passEntry = passEntry .. n
-    updateDots()
-    if #passEntry == 4 then
-        task.wait(0.15)
-        if passEntry == (appSettings.passcode or "2006") then
-            _G.unlock()
-        else
-            passEntry = ""
-            updateDots()
-        end
+submitBtn.MouseButton1Click:Connect(submitKey)
+backToLockBtn.MouseButton1Click:Connect(function()
+    pass.Visible = false
+    lock.Visible = true
+end)
+
+keyInput.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        submitKey()
     end
-end
-
-for _, n in ipairs({1, 2, 3, 4, 5, 6, 7, 8, 9}) do
-    local b = Instance.new("TextButton", numpad)
-    b.Text = tostring(n)
-    b.TextColor3 = Color3.new(1, 1, 1)
-    b.Font = Enum.Font.GothamBold
-    b.TextSize = 24
-    b.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-    b.AutoButtonColor = false
-    Helpers.corner(b, 100)
-    Helpers.pressFX(b)
-    b.MouseButton1Click:Connect(function() onNum(tostring(n)) end)
-end
-
-local btn0 = Instance.new("TextButton", numpad)
-btn0.Text = "0"
-btn0.TextColor3 = Color3.new(1, 1, 1)
-btn0.Font = Enum.Font.GothamBold
-btn0.TextSize = 24
-btn0.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
-btn0.AutoButtonColor = false
-Helpers.corner(btn0, 100)
-btn0.LayoutOrder = 11
-Helpers.pressFX(btn0)
-btn0.MouseButton1Click:Connect(function() onNum("0") end)
-
-local btnDel = Instance.new("TextButton", numpad)
-btnDel.Text = "Del"
-btnDel.TextColor3 = Color3.new(1, 1, 1)
-btnDel.Font = Enum.Font.Gotham
-btnDel.TextSize = 18
-btnDel.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
-btnDel.AutoButtonColor = false
-Helpers.corner(btnDel, 100)
-btnDel.LayoutOrder = 12
-Helpers.pressFX(btnDel)
-btnDel.MouseButton1Click:Connect(function()
-    if #passEntry > 0 then passEntry = passEntry:sub(1, -2); updateDots() end
 end)
 
 -- ================= STATE =================
@@ -376,8 +361,8 @@ _G.PhoneState = {
 function _G.showPass()
     lock.Visible = false
     pass.Visible = true
-    passEntry = ""
-    updateDots()
+    keyInput.Text = ""
+    errorLbl.Text = ""
 end
 
 function _G.hidePass()
@@ -435,23 +420,4 @@ return {
     isPortrait = isPortrait,
     getGridIconSize = getGridIconSize,
     PHONE_SIZE = PHONE_SIZE,
-    applyPhoneOrientationSize = function()
-        local cam = Services.Workspace.CurrentCamera
-        if not cam then return end
-        local vp = cam.ViewportSize
-        if vp.X <= 0 or vp.Y <= 0 then return end
-        local landscape = vp.X > vp.Y
-        if landscape then
-            local phoneW = math.min(vp.X - 10, 520)
-            local phoneH = math.min(vp.Y - 10, 320)
-            PHONE_SIZE = UDim2.new(0, phoneW, 0, phoneH)
-            phone.Position = UDim2.new(0.5, 0, 0.5, 0)
-        else
-            PHONE_SIZE = PHONE_SIZE_PORTRAIT
-            phone.Position = UDim2.new(0.5, 0, 0.52, 0)
-        end
-        if phone.Visible then
-            Helpers.tween(phone, {Size = PHONE_SIZE, Position = phone.Position}, 0.3, Enum.EasingStyle.Quart)
-        end
-    end,
 }

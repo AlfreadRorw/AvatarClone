@@ -1,4 +1,3 @@
--- Core/Storage.lua
 local HttpService = game:GetService("HttpService")
 
 local Storage = {
@@ -39,7 +38,6 @@ local function saveJSON(file, data)
     end)
 end
 
--- Load all
 Storage.presets = loadJSON(FILES.PRESET)
 Storage.favItems = loadJSON(FILES.FAV_ITEMS)
 Storage.favEmotes = loadJSON(FILES.FAV_EMOTES)
@@ -47,14 +45,12 @@ Storage.favBundles = loadJSON(FILES.FAV_BUNDLES)
 Storage.teleportLocations = loadJSON(FILES.TELEPORT)
 Storage.appSettings = loadJSON(FILES.SETTINGS)
 
--- Convert fav players to set
 local favPlayerIds = loadJSON(FILES.FAV)
 Storage.favSet = {}
 for _, id in ipairs(favPlayerIds) do
     Storage.favSet[tostring(id)] = true
 end
 
--- Defaults
 local defaults = {
     wallpaperUrl = "",
     themeIndex = 1,

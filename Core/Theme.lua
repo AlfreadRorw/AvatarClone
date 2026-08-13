@@ -1,4 +1,3 @@
--- Core/Theme.lua
 return {
     BG = Color3.fromRGB(255, 255, 255),
     Card = Color3.fromRGB(245, 245, 245),

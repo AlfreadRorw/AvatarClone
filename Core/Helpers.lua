@@ -1,4 +1,3 @@
--- Core/Helpers.lua
 local TweenService = game:GetService("TweenService")
 local T = _G.T or {}
 
@@ -54,7 +53,6 @@ function Helpers.showDynamicNotification(text, color)
     if _G.showDynamicNotification then
         _G.showDynamicNotification(text, color)
     elseif _G.dil and _G.di then
-        -- Fallback ke Dynamic Island
         _G.dil.Text = text
         _G.dil.TextColor3 = Color3.new(1, 1, 1)
         _G.diStroke.Color = color or Color3.new(1, 1, 1)

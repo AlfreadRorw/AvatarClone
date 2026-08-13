@@ -56,15 +56,9 @@ _G.Phone = Phone
 local Icons = Load("Core/Icons.lua")
 _G.Icons = Icons
 
--- PENTING: BuildIcons.lua HARUS di-load sebelum semua Applications/*.lua.
--- Setiap file di Applications/ membaca _G.appContent, _G.buildAppIcon, dll
--- pada saat file itu sendiri di-load (baris atas file, bukan di dalam fungsi),
--- dan nilai itu di-assign ke variabel LOKAL. Kalau BuildIcons.lua belum jalan,
--- _G.appContent masih nil saat dibaca, dan variabel lokal appContent di tiap
--- app akan tetap nil selamanya walau _G.appContent diisi belakangan.
 Load("Core/BuildIcons.lua")
 
--- Applications (load SETELAH BuildIcons.lua)
+-- Applications
 local AppList = {
     "Applications/Players.lua",
     "Applications/Clone.lua",

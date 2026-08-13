@@ -1,7 +1,6 @@
--- Core/BuildIcons.lua
 local T = _G.T
 local Helpers = _G.Helpers
-local Phone = _G.Phone -- Return dari Core/Phone.lua
+local Phone = _G.Phone
 
 local appGrid = Phone.appGrid
 local dockBg = Phone.dockBg

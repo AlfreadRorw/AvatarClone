@@ -1,6 +1,6 @@
 return {
     TOOL_NAME = "Phone",
-    PASSCODE = "2006",
+    PASSCODE = "2006",  -- tidak dipakai lagi (diganti Firebase key)
     CLONE_BATCH_SIZE = 5,
     CLONE_DELAY = 6,
     REMOTE_PATH = "Remotes.Command.CommandEvent",
