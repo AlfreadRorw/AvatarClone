@@ -11,7 +11,7 @@ return {
     -- Links
     BUY_KEY_URL = "https://discord.gg/yourdiscord",
     
-    -- Logo untuk notifikasi loading
+    -- Logo
     LogoURL = "https://files.catbox.moe/io8o2d.png",
     LogoLocalPath = "PhoneIDViewer_Logo.png",
     
@@ -20,8 +20,8 @@ return {
     WhatsAppURL = "https://wa.me/6281234567890",
     TelegramURL = "https://t.me/yourusername",
     
-    -- Social Media Icons (URL gambar 1:1 - PNG transparan)
-    DiscordIconURL = "https://cdn-icons-png.flaticon.com/512/5968/5968756.png",
-    WhatsAppIconURL = "https://cdn-icons-png.flaticon.com/512/733/733585.png",
-    TelegramIconURL = "https://cdn-icons-png.flaticon.com/512/5968/5968804.png",
+    -- Social Media Icons (Catbox Links)
+    DiscordIconURL = "https://files.catbox.moe/discord.png",
+    WhatsAppIconURL = "https://files.catbox.moe/whatsapp.png",
+    TelegramIconURL = "https://files.catbox.moe/telegram.png",
 }

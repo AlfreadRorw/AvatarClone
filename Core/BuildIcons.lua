@@ -176,6 +176,8 @@ buildAppIcon("Lookup", 14, appGrid, function() _G.openApp("Player Lookup", _G.op
 buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner", _G.openServerJoinerApp) end)
 buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
 buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
+-- NotifWeb icon
+buildAppIcon("NotifWeb", 18, appGrid, function() _G.openApp("Notifications", _G.openNotifWebApp) end)
 
 return {
     buildAppIcon = buildAppIcon,

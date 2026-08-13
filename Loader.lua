@@ -107,7 +107,9 @@ local AppList = {
     {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
     {path = "Applications/Messages.lua", name = "Messages"},
     {path = "Applications/Command.lua", name = "Command"},
+    {path = "Applications/NotifWeb.lua", name = "NotifWeb"},
     {path = "Applications/Settings.lua", name = "Settings"},
+    
 }
 
 for _, app in ipairs(AppList) do

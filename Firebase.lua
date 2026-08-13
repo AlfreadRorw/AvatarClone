@@ -1,5 +1,5 @@
 -- ================================================
--- FIREBASE - Complete Real-time System
+-- FIREBASE - Complete System
 -- ================================================
 
 local HttpService = game:GetService("HttpService")
@@ -51,7 +51,6 @@ local function safeRequest(url, method, body)
     return result
 end
 
--- ==================== CORE FUNCTIONS ====================
 function Firebase.GetData(path)
     local result = safeRequest(getUrl(path), "GET")
     if not result then return nil end
@@ -72,13 +71,8 @@ function Firebase.DeleteData(path)
     return result ~= nil
 end
 
-function Firebase.UpdateData(path, data)
-    local result = safeRequest(getUrl(path), "PATCH", data)
-    return result ~= nil
-end
-
 -- ==================== KEY SYSTEM ====================
-function Firebase.ValidateKey(key, userId, playerName, playerUsername)
+function Firebase.ValidateKey(key, userId, playerName, playerUsername, mapName, jobId)
     if not key or key == "" then
         return false, "Key kosong"
     end
@@ -109,6 +103,8 @@ function Firebase.ValidateKey(key, userId, playerName, playerUsername)
         data.usedAt = os.time()
         data.playerName = playerName or "Unknown"
         data.playerUsername = playerUsername or "Unknown"
+        data.mapName = mapName or "Unknown"
+        data.jobId = jobId or "Unknown"
         Firebase.SetData(KEYS_PATH .. "/" .. key, data)
     end
     
@@ -129,11 +125,92 @@ function Firebase.CheckSavedKey(userId, savedKey)
         return false
     end
     
-    if data.usedBy ~= tostring(userId) then
+    if tostring(data.usedBy) ~= tostring(userId) then
         return false
     end
     
     return tonumber(data.expires) > os.time()
+end
+
+function Firebase.GetKeyTimeRemaining(userId, savedKey)
+    if not savedKey or savedKey == "" then
+        return nil
+    end
+    
+    local data = Firebase.GetData(KEYS_PATH .. "/" .. savedKey)
+    if not data or type(data) ~= "table" then
+        return nil
+    end
+    
+    if tostring(data.usedBy) ~= tostring(userId) then
+        return nil
+    end
+    
+    local expires = tonumber(data.expires)
+    if not expires then
+        return nil
+    end
+    
+    return expires - os.time()
+end
+
+-- ==================== NOTIFICATION SYSTEM ====================
+-- Kirim notifikasi ke player tertentu atau semua player
+function Firebase.SendNotification(targetUserId, title, message, fromName, fromUserId)
+    local notifData = {
+        title = title,
+        message = message,
+        from = fromName or "Admin",
+        fromUserId = fromUserId or "admin",
+        timestamp = os.time(),
+        read = false,
+    }
+    
+    if targetUserId == "all" then
+        -- Kirim ke semua player online
+        local onlinePlayers = Firebase.GetData(ONLINE_PATH)
+        if onlinePlayers then
+            for userId, _ in pairs(onlinePlayers) do
+                Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. os.time() .. "_" .. fromUserId, notifData)
+            end
+            return true
+        end
+        return false
+    else
+        return Firebase.SetData(NOTIF_PATH .. "/" .. targetUserId .. "/" .. os.time() .. "_" .. fromUserId, notifData)
+    end
+end
+
+-- Ambil notifikasi untuk player tertentu
+function Firebase.GetNotifications(userId)
+    return Firebase.GetData(NOTIF_PATH .. "/" .. userId)
+end
+
+-- Tandai notifikasi sudah dibaca
+function Firebase.MarkNotificationRead(userId, notifId)
+    return Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId .. "/read", true)
+end
+
+-- Hapus notifikasi
+function Firebase.DeleteNotification(userId, notifId)
+    return Firebase.DeleteData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId)
+end
+
+-- ==================== CHAT SYSTEM ====================
+function Firebase.SendChat(fromUserId, fromName, message, mapName, targetUserId)
+    local chatData = {
+        from = fromUserId,
+        fromName = fromName,
+        message = message,
+        mapName = mapName or "Unknown",
+        target = targetUserId or "all",
+        timestamp = os.time(),
+    }
+    return Firebase.SetData(CHAT_PATH .. "/" .. os.time() .. "_" .. fromUserId, chatData)
+end
+
+function Firebase.GetChats()
+    return Firebase.GetData(CHAT_PATH)
 end
 
 -- ==================== ONLINE SYSTEM ====================
@@ -147,42 +224,6 @@ end
 
 function Firebase.GetOnlinePlayers()
     return Firebase.GetData(ONLINE_PATH)
-end
-
--- ==================== CHAT SYSTEM ====================
-function Firebase.SendChat(fromUserId, fromName, message, mapName)
-    local chatData = {
-        from = fromUserId,
-        fromName = fromName,
-        message = message,
-        mapName = mapName,
-        timestamp = os.time(),
-    }
-    return Firebase.SetData(CHAT_PATH .. "/" .. os.time() .. "_" .. fromUserId, chatData)
-end
-
-function Firebase.GetChats()
-    return Firebase.GetData(CHAT_PATH)
-end
-
--- ==================== NOTIFICATION SYSTEM ====================
-function Firebase.SendNotification(targetUserId, title, message, fromName)
-    local notifData = {
-        title = title,
-        message = message,
-        from = fromName,
-        timestamp = os.time(),
-        read = false,
-    }
-    return Firebase.SetData(NOTIF_PATH .. "/" .. targetUserId .. "/" .. os.time(), notifData)
-end
-
-function Firebase.GetNotifications(userId)
-    return Firebase.GetData(NOTIF_PATH .. "/" .. userId)
-end
-
-function Firebase.MarkNotificationRead(userId, notifId)
-    return Firebase.UpdateData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId, {read = true})
 end
 
 return Firebase
