@@ -1,5 +1,5 @@
 -- ================================================
--- FIREBASE - Complete System
+-- FIREBASE - Complete with Map Names
 -- ================================================
 
 local HttpService = game:GetService("HttpService")
@@ -94,7 +94,7 @@ function Firebase.ValidateKey(key, userId, playerName, playerUsername, mapName, 
         return false, "Key sudah kedaluwarsa"
     end
     
-    if data.usedBy and data.usedBy ~= tostring(userId) then
+    if data.usedBy and tostring(data.usedBy) ~= tostring(userId) then
         return false, "Key sudah digunakan player lain"
     end
     
@@ -154,66 +154,39 @@ function Firebase.GetKeyTimeRemaining(userId, savedKey)
     return expires - os.time()
 end
 
--- ==================== NOTIFICATION SYSTEM ====================
--- Kirim notifikasi ke player tertentu atau semua player
-function Firebase.SendNotification(targetUserId, title, message, fromName, fromUserId)
+-- ==================== NOTIFICATION ====================
+function Firebase.SendNotification(targetUserId, title, message, fromName)
     local notifData = {
         title = title,
         message = message,
         from = fromName or "Admin",
-        fromUserId = fromUserId or "admin",
         timestamp = os.time(),
         read = false,
     }
     
     if targetUserId == "all" then
-        -- Kirim ke semua player online
         local onlinePlayers = Firebase.GetData(ONLINE_PATH)
         if onlinePlayers then
             for userId, _ in pairs(onlinePlayers) do
-                Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. os.time() .. "_" .. fromUserId, notifData)
+                Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. os.time(), notifData)
             end
             return true
         end
         return false
     else
-        return Firebase.SetData(NOTIF_PATH .. "/" .. targetUserId .. "/" .. os.time() .. "_" .. fromUserId, notifData)
+        return Firebase.SetData(NOTIF_PATH .. "/" .. targetUserId .. "/" .. os.time(), notifData)
     end
 end
 
--- Ambil notifikasi untuk player tertentu
 function Firebase.GetNotifications(userId)
     return Firebase.GetData(NOTIF_PATH .. "/" .. userId)
 end
 
--- Tandai notifikasi sudah dibaca
-function Firebase.MarkNotificationRead(userId, notifId)
-    return Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId .. "/read", true)
-end
-
--- Hapus notifikasi
 function Firebase.DeleteNotification(userId, notifId)
     return Firebase.DeleteData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId)
 end
 
--- ==================== CHAT SYSTEM ====================
-function Firebase.SendChat(fromUserId, fromName, message, mapName, targetUserId)
-    local chatData = {
-        from = fromUserId,
-        fromName = fromName,
-        message = message,
-        mapName = mapName or "Unknown",
-        target = targetUserId or "all",
-        timestamp = os.time(),
-    }
-    return Firebase.SetData(CHAT_PATH .. "/" .. os.time() .. "_" .. fromUserId, chatData)
-end
-
-function Firebase.GetChats()
-    return Firebase.GetData(CHAT_PATH)
-end
-
--- ==================== ONLINE SYSTEM ====================
+-- ==================== ONLINE ====================
 function Firebase.SetOnline(userId, playerData)
     return Firebase.SetData(ONLINE_PATH .. "/" .. userId, playerData)
 end

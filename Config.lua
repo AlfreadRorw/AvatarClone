@@ -20,8 +20,15 @@ return {
     WhatsAppURL = "https://wa.me/6281234567890",
     TelegramURL = "https://t.me/yourusername",
     
-    -- Social Media Icons (Catbox Links)
-    DiscordIconURL = "https://files.catbox.moe/discord.png",
-    WhatsAppIconURL = "https://files.catbox.moe/whatsapp.png",
-    TelegramIconURL = "https://files.catbox.moe/telegram.png",
+    -- Social Media Icons (Catbox)
+    DiscordIconURL = "https://files.catbox.moe/lgxgw4.jpg",
+    WhatsAppIconURL = "https://files.catbox.moe/ef6pfn.jpg",
+    TelegramIconURL = "https://files.catbox.moe/ugzz6k.jpg",
+    
+    -- Map Names (PlaceId -> Map Name)
+    MapNames = {
+        [133943904733338] = "Main Game",
+        [7041939546] = "Lobby",
+        [1818] = "Baseplate",
+    },
 }
