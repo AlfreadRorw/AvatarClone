@@ -6,6 +6,7 @@
 
 local KEY_CHECK_ROOT = "/keys"
 local USER_KEY_ROOT  = "/user_keys"
+local REGISTRY_ROOT  = "/registered_players"
 
 -- Sekali gate ini lolos dalam sesi berjalan ini, jangan tampilkan lagi
 -- walaupun requireValidKey() dipanggil ulang (misal tiap buka phone).
@@ -38,6 +39,22 @@ local function getLocalPlayer()
         or nil
 end
 
+-- ================= DAFTARKAN PLAYER KE REGISTRY =================
+-- Ditulis ke /registered_players/{UserId} setiap kali key sukses divalidasi
+-- (baik lewat input manual maupun auto-check saat rejoin). Modul lain (mis.
+-- Applications/Messages.lua) bisa baca path ini via firebaseGet(REGISTRY_ROOT)
+-- untuk tahu siapa saja yang sudah teraktivasi, tanpa perlu tau soal key sama sekali.
+local function registerPlayerAccess(lp, expiresAt)
+    if not lp then return end
+    pcall(firebaseSet, REGISTRY_ROOT .. "/" .. tostring(lp.UserId), {
+        userId      = lp.UserId,
+        username    = lp.Name,
+        displayName = lp.DisplayName,
+        expiresAt   = expiresAt,
+        lastSeenAt  = os.time(),
+    })
+end
+
 -- ================= CEK KEY AKTIF (AUTO-LOGIN) =================
 local function checkExistingAccess()
     local lp = getLocalPlayer()
@@ -54,6 +71,7 @@ local function checkExistingAccess()
     local ok2, keyData = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. userKey.code)
     if ok2 and keyData and type(keyData) == "table" and keyData.expiresAt then
         if os.time() <= keyData.expiresAt then
+            registerPlayerAccess(lp, keyData.expiresAt)
             return true, keyData.expiresAt
         end
     end
@@ -72,16 +90,23 @@ local function tryActivateKey(code)
         return false, "Key tidak boleh kosong."
     end
 
-    local ok, keyData = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
+    local ok, keyData, fetchErr = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
 
-    -- pcall gagal total (network/firebase error) -> coba sekali lagi sebelum nyerah
-    if not ok then
+    -- pcall gagal total (lemparan error) ATAU firebaseGet sendiri melaporkan
+    -- gagal koneksi (fetchErr terisi) -> coba sekali lagi sebelum nyerah
+    if not ok or (keyData == nil and fetchErr) then
         task.wait(0.6)
-        ok, keyData = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
+        ok, keyData, fetchErr = pcall(firebaseGet, KEY_CHECK_ROOT .. "/" .. code)
     end
 
     if not ok then
+        warn("[KeySystem] pcall firebaseGet gagal: " .. tostring(keyData))
         return false, "Gagal terhubung ke server. Cek koneksi lalu coba lagi."
+    end
+
+    if keyData == nil and fetchErr then
+        warn("[KeySystem] firebaseGet gagal: " .. tostring(fetchErr))
+        return false, "Gagal terhubung ke server (" .. tostring(fetchErr):sub(1, 60) .. "). Coba lagi."
     end
 
     if not keyData or type(keyData) ~= "table" then
@@ -95,6 +120,7 @@ local function tryActivateKey(code)
             if keyData.expiresAt and now > keyData.expiresAt then
                 return false, "Key kamu sudah expired. Silakan beli key baru."
             end
+            registerPlayerAccess(lp, keyData.expiresAt)
             return true, "Key valid, selamat datang kembali!", keyData.expiresAt
         else
             return false, "Key ini sudah dipakai oleh pemain lain."
@@ -121,6 +147,8 @@ local function tryActivateKey(code)
         expiresAt     = expiresAt,
         durationLabel = keyData.durationLabel,
     })
+
+    registerPlayerAccess(lp, expiresAt)
 
     sessionUnlocked = true
     return true, "Key berhasil diaktifkan! Selamat menikmati.", expiresAt
@@ -164,4 +192,17 @@ function requireValidKey(onDone)
             onDone(true)
         end)
     end)
+end
+
+-- ================= HELPER PUBLIK: DAFTAR PLAYER TERAKTIVASI =================
+-- Dipakai modul lain (mis. Applications/Messages.lua) untuk tahu siapa saja
+-- yang key-nya sudah pernah divalidasi, tanpa perlu tahu soal Firebase path
+-- atau struktur key sama sekali. Return table: { [userId] = {username=..,
+-- displayName=.., expiresAt=.., lastSeenAt=..}, ... } atau {} kalau gagal fetch.
+function _G.getRegisteredPlayers()
+    local ok, data = pcall(firebaseGet, REGISTRY_ROOT)
+    if ok and type(data) == "table" then
+        return data
+    end
+    return {}
 end

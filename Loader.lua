@@ -50,52 +50,64 @@ _G.Storage = Storage
 local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
--- Key system: load & jalankan gate
--- requireValidKey() akan cek Firebase apakah user sudah punya key aktif.
--- Kalau belum, muncul UI minta key.
--- Semua build UI dilakukan di dalam callback supaya tidak jalan sebelum key valid.
+-- Key system: load dulu (openPhone butuh requireValidKey tersedia)
 Load("KeyGateUI.lua")
 Load("KeySystem.lua")
 
-requireValidKey(function(granted)
-    if not granted then return end
+-- ================= LOAD SEMUA MODUL DARI AWAL =================
+-- Floating icon SELALU muncul begitu join, tidak menunggu key.
+-- Key baru dicek pas player TAP floating icon (lihat pembungkus
+-- openPhone di bagian bawah file ini).
+local Phone = Load("Core/Phone.lua")
+_G.Phone = Phone
 
-    local Phone = Load("Core/Phone.lua")
-    _G.Phone = Phone
+local Icons = Load("Core/Icons.lua")
+_G.Icons = Icons
 
-    local Icons = Load("Core/Icons.lua")
-    _G.Icons = Icons
+Load("Core/BuildIcons.lua")
 
-    Load("Core/BuildIcons.lua")
+local AppList = {
+    "Applications/Players.lua",
+    "Applications/Clone.lua",
+    "Applications/Body.lua",
+    "Applications/Accessory.lua",
+    "Applications/Preset.lua",
+    "Applications/Favorites.lua",
+    "Applications/Items.lua",
+    "Applications/Teleport.lua",
+    "Applications/Size.lua",
+    "Applications/Volume.lua",
+    "Applications/Friends.lua",
+    "Applications/Server.lua",
+    "Applications/Bundle.lua",
+    "Applications/AvatarItems.lua",
+    "Applications/Lookup.lua",
+    "Applications/ServerJoiner.lua",
+    "Applications/WhoOnline.lua",
+    "Applications/Messages.lua",
+    "Applications/Command.lua",
+    "Applications/Settings.lua",
+}
 
-    local AppList = {
-        "Applications/Players.lua",
-        "Applications/Clone.lua",
-        "Applications/Body.lua",
-        "Applications/Accessory.lua",
-        "Applications/Preset.lua",
-        "Applications/Favorites.lua",
-        "Applications/Items.lua",
-        "Applications/Teleport.lua",
-        "Applications/Size.lua",
-        "Applications/Volume.lua",
-        "Applications/Friends.lua",
-        "Applications/Server.lua",
-        "Applications/Bundle.lua",
-        "Applications/AvatarItems.lua",
-        "Applications/Lookup.lua",
-        "Applications/ServerJoiner.lua",
-        "Applications/WhoOnline.lua",
-        "Applications/Messages.lua",
-        "Applications/Command.lua",
-        "Applications/Settings.lua",
-    }
+for _, path in ipairs(AppList) do
+    Load(path)
+end
 
-    for _, path in ipairs(AppList) do
-        Load(path)
-    end
+Load("Core/FloatingIcon.lua")
 
-    Load("Core/FloatingIcon.lua")
+-- ================= GATE DI TITIK BUKA PHONE =================
+-- Core/Phone.lua sudah mendefinisikan _G.openPhone() versi "polos" (langsung
+-- buka tanpa cek apapun). Kita bungkus di sini supaya SETIAP kali floating
+-- icon di-tap, key dicek dulu lewat requireValidKey(). Karena KeySystem
+-- punya sessionUnlocked + cek expiresAt di Firebase, popup key HANYA akan
+-- muncul kalau memang belum pernah valid di sesi ini / key sudah expired —
+-- bukan nanya berkali-kali.
+local rawOpenPhone = _G.openPhone
+_G.openPhone = function()
+    requireValidKey(function(granted)
+        if not granted then return end
+        rawOpenPhone()
+    end)
+end
 
-    print("[PhoneIDViewer] All modules loaded!")
-end)
+print("[PhoneIDViewer] All modules loaded!")
