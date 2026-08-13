@@ -1,257 +1,187 @@
-local T           = _G.T
-local Helpers     = _G.Helpers
-local Storage     = _G.Storage
-local phone       = _G.phone
-local goHome      = _G.goHome
+-- Core/BuildIcons.lua
+local T = _G.T
+local Helpers = _G.Helpers
+local Phone = _G.Phone -- Return dari Core/Phone.lua
 
-local Players     = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
-local Workspace   = game:GetService("Workspace")
-local UIS         = game:GetService("UserInputService")
-local TweenService= game:GetService("TweenService")
+local appGrid = Phone.appGrid
+local dockBg = Phone.dockBg
+local dockGrid = Phone.dockGrid
+local gridLayout = Phone.gridLayout
 
-local PHONE_SIZE_PORTRAIT = UDim2.new(0,320,0,560)
-local PHONE_SIZE = PHONE_SIZE_PORTRAIT
-local phoneIcon  = nil
-local mouseDown  = false
-local mouseMoved = false
-local dragStart  = nil
-local iconStartPos = nil
+local iconBuilders = _G.Icons or {}
 
-local function isPortrait()
-    local cam = Workspace.CurrentCamera
-    if not cam then return true end
-    return cam.ViewportSize.Y >= cam.ViewportSize.X
-end
-
-local function applyPhoneSize()
-    local cam = Workspace.CurrentCamera
-    if not cam then return end
-    local vp = cam.ViewportSize
-    if vp.X > vp.Y then
-        local phoneW = math.min(vp.X-10, 520)
-        local phoneH = math.min(vp.Y-10, 320)
-        PHONE_SIZE = UDim2.new(0,phoneW,0,phoneH)
-        phone.Position = UDim2.new(0.5,0,0.5,0)
+local function buildAppIcon(name, order, parent, onOpen)
+    local container = Instance.new("Frame", parent)
+    container.Size = UDim2.new(0, 74, 0, 92)
+    container.BackgroundTransparency = 1
+    container.LayoutOrder = order
+    
+    local btn = Instance.new("TextButton", container)
+    btn.Size = UDim2.new(0, 58, 0, 58)
+    btn.Position = UDim2.new(0.5, -29, 0, 2)
+    btn.BackgroundColor3 = Color3.fromRGB(248, 248, 252)
+    btn.Text = ""
+    btn.AutoButtonColor = false
+    Helpers.corner(btn, 16)
+    Helpers.stroke(btn, Color3.fromRGB(215, 215, 220), 1, 0.4)
+    Helpers.pressFX(btn)
+    
+    local iconFrame = Instance.new("Frame", btn)
+    iconFrame.Size = UDim2.new(0, 40, 0, 40)
+    iconFrame.Position = UDim2.new(0.5, -20, 0.5, -20)
+    iconFrame.BackgroundTransparency = 1
+    
+    local builder = iconBuilders[name]
+    if builder then
+        builder(iconFrame, T.Text or Color3.fromRGB(30, 30, 30))
     else
-        PHONE_SIZE = PHONE_SIZE_PORTRAIT
-        phone.Position = UDim2.new(0.5,0,0.52,0)
+        local letter = Instance.new("TextLabel", iconFrame)
+        letter.Size = UDim2.new(1, 0, 1, 0)
+        letter.BackgroundTransparency = 1
+        letter.Text = string.sub(name, 1, 1):upper()
+        letter.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
+        letter.Font = Enum.Font.GothamBlack
+        letter.TextSize = 22
     end
-    if phone.Visible then
-        Helpers.tween(phone, {Size=PHONE_SIZE, Position=phone.Position}, 0.3, Enum.EasingStyle.Quart)
+    
+    local label = Instance.new("TextLabel", container)
+    label.Size = UDim2.new(1, 0, 0, 28)
+    label.Position = UDim2.new(0, 0, 0, 63)
+    label.BackgroundTransparency = 1
+    label.Text = name
+    label.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
+    label.Font = Enum.Font.GothamMedium
+    label.TextSize = 10
+    label.TextWrapped = true
+    label.TextXAlignment = Enum.TextXAlignment.Center
+    
+    btn.MouseButton1Click:Connect(onOpen)
+    return container
+end
+
+-- ================= APP SCREEN =================
+local sh = Phone.sh
+local appScr = Instance.new("Frame", sh)
+appScr.Size = UDim2.new(1, 0, 1, 0)
+appScr.Position = UDim2.new(1, 0, 0, 0)
+appScr.BackgroundTransparency = 1
+appScr.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
+appScr.ClipsDescendants = true
+
+local appHdr = Instance.new("Frame", appScr)
+appHdr.Size = UDim2.new(1, -12, 0, 36)
+appHdr.Position = UDim2.new(0, 6, 0, 0)
+appHdr.BackgroundTransparency = 1
+
+local backBtn = Instance.new("TextButton", appHdr)
+backBtn.Size = UDim2.new(0, 50, 0, 28)
+backBtn.Position = UDim2.new(0, 0, 0, 4)
+backBtn.BackgroundColor3 = T.Card or Color3.fromRGB(245, 245, 245)
+backBtn.Text = "< Back"
+backBtn.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
+backBtn.Font = Enum.Font.GothamBold
+backBtn.TextSize = 11
+backBtn.AutoButtonColor = false
+Helpers.corner(backBtn, 8)
+Helpers.pressFX(backBtn)
+
+local appTitle = Instance.new("TextLabel", appHdr)
+appTitle.Size = UDim2.new(1, -120, 0, 28)
+appTitle.Position = UDim2.new(0, 56, 0, 4)
+appTitle.BackgroundTransparency = 1
+appTitle.Text = ""
+appTitle.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
+appTitle.Font = Enum.Font.GothamBlack
+appTitle.TextSize = 14
+appTitle.TextXAlignment = Enum.TextXAlignment.Left
+
+local appContent = Instance.new("ScrollingFrame", appScr)
+appContent.Size = UDim2.new(1, -12, 1, -44)
+appContent.Position = UDim2.new(0, 6, 0, 42)
+appContent.BackgroundTransparency = 1
+appContent.BorderSizePixel = 0
+appContent.ScrollBarThickness = 3
+appContent.ScrollBarImageColor3 = T.Accent or Color3.fromRGB(30, 30, 30)
+appContent.CanvasSize = UDim2.new(0, 0, 0, 0)
+appContent.AutomaticCanvasSize = Enum.AutomaticSize.Y
+
+local acl = Instance.new("UIListLayout", appContent)
+acl.Padding = UDim.new(0, 8)
+acl.SortOrder = Enum.SortOrder.LayoutOrder
+
+local function clearAppContent()
+    for _, c in ipairs(appContent:GetChildren()) do
+        if not c:IsA("UIListLayout") then c:Destroy() end
     end
 end
 
-local function getGuiParent()
-    local ok, r = pcall(function()
-        if gethui then return gethui() end
-        return game:GetService("CoreGui")
-    end)
-    return ok and r or game:GetService("CoreGui")
+local currOpener = nil
+
+function _G.goHome()
+    if _G.PhoneState.isLocked then return end
+    Phone.home.Visible = true
+    appScr.BackgroundTransparency = 1
+    Helpers.tween(appScr, {Position = UDim2.new(1, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
+    Helpers.tween(Phone.home, {Position = UDim2.new(0, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
 end
 
-local function createFloatingIcon()
-    if phoneIcon then pcall(function() phoneIcon:Destroy() end) phoneIcon = nil end
-
-    local iconGui = Instance.new("ScreenGui")
-    iconGui.Name = "PhoneIcon"
-    iconGui.ResetOnSpawn = false
-    iconGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    iconGui.DisplayOrder = 999
-    iconGui.IgnoreGuiInset = true
-    pcall(function() iconGui.Parent = game:GetService("CoreGui") end)
-    if not iconGui.Parent then iconGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-    local iconContainer = Instance.new("Frame", iconGui)
-    iconContainer.Size = UDim2.new(0,65,0,105)
-    iconContainer.Position = UDim2.new(0,15,0.5,-52)
-    iconContainer.BackgroundTransparency = 1
-    iconContainer.ZIndex = 1000
-
-    -- Phone body
-    local phoneBody = Instance.new("Frame", iconContainer)
-    phoneBody.Size = UDim2.new(0,50,0,88)
-    phoneBody.Position = UDim2.new(0.5,-25,0.5,-44)
-    phoneBody.BackgroundColor3 = Color3.fromRGB(15,15,18)
-    phoneBody.ZIndex = 1001
-    Helpers.corner(phoneBody, 12)
-    Helpers.stroke(phoneBody, Color3.fromRGB(45,45,50), 2, 0)
-
-    local bodyGrad = Instance.new("UIGradient", phoneBody)
-    bodyGrad.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(28,28,32)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(12,12,16))
-    })
-    bodyGrad.Rotation = 135
-
-    -- Screen
-    local screen = Instance.new("Frame", phoneBody)
-    screen.Size = UDim2.new(1,-6,1,-30)
-    screen.Position = UDim2.new(0,3,0,20)
-    screen.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    screen.ZIndex = 1002
-    Helpers.corner(screen, 8)
-
-    -- Wallpaper
-    local wallpaper = Instance.new("Frame", screen)
-    wallpaper.Size = UDim2.new(1,-4,1,-14)
-    wallpaper.Position = UDim2.new(0.5,0,0,13)
-    wallpaper.AnchorPoint = Vector2.new(0.5,0)
-    wallpaper.BackgroundColor3 = Color3.fromRGB(10,10,15)
-    wallpaper.ZIndex = 1003
-    Helpers.corner(wallpaper, 6)
-
-    -- App icons on wallpaper
-    local iconPositions = {
-        {x=3,y=6},{x=14,y=6},{x=25,y=6},
-        {x=3,y=17},{x=14,y=17},{x=25,y=17},
-    }
-    local iconColors = {
-        Color3.fromRGB(100,160,255), Color3.fromRGB(255,120,120),
-        Color3.fromRGB(80,210,80),   Color3.fromRGB(255,200,50),
-        Color3.fromRGB(180,100,255), Color3.fromRGB(255,160,60),
-    }
-    for i, pos in ipairs(iconPositions) do
-        local ic = Instance.new("Frame", wallpaper)
-        ic.Size = UDim2.new(0,8,0,8)
-        ic.Position = UDim2.new(0,pos.x,0,pos.y)
-        ic.BackgroundColor3 = iconColors[i]
-        ic.BorderSizePixel = 0
-        ic.ZIndex = 1004
-        Helpers.corner(ic, 2.5)
-    end
-
-    -- Dynamic Island
-    local di2 = Instance.new("Frame", phoneBody)
-    di2.Size = UDim2.new(0,24,0,5)
-    di2.Position = UDim2.new(0.5,-12,0,6)
-    di2.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    di2.ZIndex = 1020
-    Helpers.corner(di2, 3)
-
-    -- Home bar
-    local hb = Instance.new("Frame", phoneBody)
-    hb.Size = UDim2.new(0,22,0,3)
-    hb.Position = UDim2.new(0.5,-11,1,-5)
-    hb.BackgroundColor3 = Color3.fromRGB(255,255,255)
-    hb.BackgroundTransparency = 0.6
-    hb.BorderSizePixel = 0
-    hb.ZIndex = 1020
-    Helpers.corner(hb, 2)
-
-    -- Click button
-    local clickBtn = Instance.new("TextButton", iconContainer)
-    clickBtn.Size = UDim2.new(0,55,0,95)
-    clickBtn.Position = UDim2.new(0.5,-27,0.5,-47)
-    clickBtn.BackgroundTransparency = 1
-    clickBtn.Text = ""
-    clickBtn.ZIndex = 1030
-    clickBtn.AutoButtonColor = false
-
-    clickBtn.MouseEnter:Connect(function()
-        Helpers.tween(phoneBody, {Size=UDim2.new(0,54,0,94)}, 0.15)
-    end)
-    clickBtn.MouseLeave:Connect(function()
-        if not mouseDown then
-            Helpers.tween(phoneBody, {Size=UDim2.new(0,50,0,88)}, 0.15)
-        end
-    end)
-
-    -- Toggle phone
-    clickBtn.MouseButton1Click:Connect(function()
-        if mouseMoved then return end
-        if phone.Visible then
-            Helpers.tween(phone, {Size=UDim2.new(0,0,0,0)}, 0.25)
-            task.delay(0.25, function()
-                phone.Visible = false
-            end)
-        else
-            applyPhoneSize()
-            phone.Visible = true
-            phone.Size = UDim2.new(0,0,0,0)
-            Helpers.tween(phone, {Size=PHONE_SIZE}, 0.3, Enum.EasingStyle.Back)
-            local state = _G.PhoneState
-            local lock  = _G.PhoneLock
-            if state.isLocked and lock then
-                lock.Visible = true
-            else
-                goHome()
-            end
-        end
-    end)
-
-    -- Drag
-    clickBtn.MouseButton1Down:Connect(function()
-        mouseDown   = true
-        mouseMoved  = false
-        dragStart   = UIS:GetMouseLocation()
-        iconStartPos = iconContainer.Position
-    end)
-
-    clickBtn.MouseButton1Up:Connect(function()
-        mouseDown = false
-        task.wait(0.1)
-        mouseMoved = false
-    end)
-
-    UIS.InputChanged:Connect(function(input)
-        if not mouseDown then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
-            local pos = UIS:GetMouseLocation()
-            if not dragStart then return end
-            local delta = pos - dragStart
-            if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then
-                mouseMoved = true
-            end
-            if mouseMoved then
-                local newX = iconStartPos.X.Offset + delta.X
-                local newY = iconStartPos.Y.Offset + delta.Y
-                local sv   = Workspace.CurrentCamera.ViewportSize
-                newX = math.clamp(newX, 5, sv.X-70)
-                newY = math.clamp(newY, 5, sv.Y-110)
-                iconContainer.Position = UDim2.new(0,newX,0,newY)
-            end
-        end
-    end)
-
-    phoneIcon = iconGui
-    return iconGui
+function _G.openApp(title, fn)
+    if _G.PhoneState.isLocked then return end
+    Phone.home.Visible = false
+    appScr.BackgroundTransparency = 0
+    appScr.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
+    appTitle.Text = title
+    clearAppContent()
+    currOpener = fn
+    fn()
+    appScr.Position = UDim2.new(1, 0, 0, 0)
+    Helpers.tween(appScr, {Position = UDim2.new(0, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
+    _G.showDynamicNotification(title, T.Accent)
 end
 
--- Init
-task.spawn(function()
-    task.wait(1)
-    createFloatingIcon()
-    task.wait(0.5)
-    -- Auto open
-    applyPhoneSize()
-    phone.Visible = true
-    phone.Size = UDim2.new(0,0,0,0)
-    Helpers.tween(phone, {Size=PHONE_SIZE}, 0.3, Enum.EasingStyle.Back)
-    local lock = _G.PhoneLock
-    if lock then lock.Visible = true end
-end)
-
--- Respawn monitor
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    if not phoneIcon or not phoneIcon.Parent then
-        createFloatingIcon()
+function _G.refreshCurr()
+    if currOpener then
+        clearAppContent()
+        currOpener()
     end
-end)
+end
 
--- Orientation monitor
-task.spawn(function()
-    local lastLandscape = nil
-    while true do
-        task.wait(0.3)
-        local cam = Workspace.CurrentCamera
-        if not cam then continue end
-        local isLand = cam.ViewportSize.X > cam.ViewportSize.Y
-        if isLand ~= lastLandscape then
-            lastLandscape = isLand
-            applyPhoneSize()
-        end
-    end
-end)
+backBtn.MouseButton1Click:Connect(_G.goHome)
+
+-- Export
+_G.buildAppIcon = buildAppIcon
+_G.appContent = appContent
+_G.appScr = appScr
+_G.appTitle = appTitle
+
+-- ================= DOCK ICONS =================
+buildAppIcon("Profile", 1, dockBg, function() _G.openApp("Profile", _G.openProfileApp) end)
+buildAppIcon("Command", 2, dockBg, function() _G.openApp("Commands", _G.openCommandApp) end)
+buildAppIcon("Settings", 3, dockBg, function() _G.openApp("Settings", _G.openSettingsApp) end)
+
+-- ================= GRID ICONS =================
+buildAppIcon("Players", 1, appGrid, function() _G.openApp("Players", _G.openPlayersApp) end)
+buildAppIcon("Clone", 2, appGrid, function() _G.openApp("Clone", _G.openCloneApp) end)
+buildAppIcon("Body", 3, appGrid, function() _G.openApp("Body", _G.openBodyApp) end)
+buildAppIcon("Accs", 4, appGrid, function() _G.openApp("Accessory", _G.openAccessoryApp) end)
+buildAppIcon("Preset", 5, appGrid, function() _G.openApp("Preset", _G.openPresetApp) end)
+buildAppIcon("Favs", 6, appGrid, function() _G.openApp("Favorites", _G.openFavoritesApp) end)
+buildAppIcon("Items", 7, appGrid, function() _G.openApp("Items", _G.openItemsApp) end)
+buildAppIcon("Teleport", 8, appGrid, function() _G.openApp("Save & Teleport", _G.openTeleportApp) end)
+buildAppIcon("Size", 9, appGrid, function() _G.openApp("Size", _G.openSizeApp) end)
+buildAppIcon("Volume", 10, appGrid, function() _G.openApp("Volume", _G.openVolumeApp) end)
+buildAppIcon("Friends", 11, appGrid, function() _G.openApp("Friends", _G.openFriendsApp) end)
+buildAppIcon("Server", 12, appGrid, function() _G.openApp("Server", _G.openServerApp) end)
+buildAppIcon("Bundle", 13, appGrid, function() _G.openApp("Bundle", _G.openBundleApp) end)
+buildAppIcon("Lookup", 14, appGrid, function() _G.openApp("Player Lookup", _G.openPlayerLookupApp) end)
+buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner", _G.openServerJoinerApp) end)
+buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
+buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
+
+return {
+    buildAppIcon = buildAppIcon,
+    appScr = appScr,
+    appContent = appContent,
+    appTitle = appTitle,
+    clearAppContent = clearAppContent,
+}

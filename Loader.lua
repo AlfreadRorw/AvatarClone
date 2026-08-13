@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE ID VIEWER - Main Loader
+-- PHONE ID VIEWER - Modular Loader
 -- by AlfreadRorw
 -- ================================================
 
@@ -10,51 +10,51 @@ local function Load(path)
         return loadstring(game:HttpGet(BASE_URL .. path, true))()
     end)
     if not ok then
-        warn("[PhoneIDViewer] Failed to load: " .. path)
-        warn("Error: " .. tostring(result))
+        warn("[PhoneIDViewer] Failed: " .. path .. " | " .. tostring(result))
     end
     return ok and result or nil
 end
 
--- ================================================
--- SERVICES
--- ================================================
+-- Services
 local Services = {
-    Players          = game:GetService("Players"),
-    TweenService     = game:GetService("TweenService"),
+    Players = game:GetService("Players"),
+    TweenService = game:GetService("TweenService"),
     UserInputService = game:GetService("UserInputService"),
-    HttpService      = game:GetService("HttpService"),
-    Workspace        = game:GetService("Workspace"),
-    RunService       = game:GetService("RunService"),
-    ReplicatedStorage= game:GetService("ReplicatedStorage"),
-    SoundService     = game:GetService("SoundService"),
-    TeleportService  = game:GetService("TeleportService"),
-    CoreGui          = game:GetService("CoreGui"),
+    HttpService = game:GetService("HttpService"),
+    Workspace = game:GetService("Workspace"),
+    RunService = game:GetService("RunService"),
+    ReplicatedStorage = game:GetService("ReplicatedStorage"),
+    SoundService = game:GetService("SoundService"),
+    TeleportService = game:GetService("TeleportService"),
+    CoreGui = game:GetService("CoreGui"),
     MarketplaceService = game:GetService("MarketplaceService"),
 }
+_G.Services = Services
 
 local LocalPlayer = Services.Players.LocalPlayer
+_G.LocalPlayer = LocalPlayer
 
--- ================================================
--- LOAD ORDER
--- ================================================
-
--- 1. Config (harus pertama)
+-- Load order
 local Config = Load("Config.lua")
+_G.Config = Config
 
--- 2. Core modules
-local Theme    = Load("Core/Theme.lua")
-local Helpers  = Load("Core/Helpers.lua")
-local Storage  = Load("Core/Storage.lua")
+local Theme = Load("Core/Theme.lua")
+_G.T = Theme
+
+local Helpers = Load("Core/Helpers.lua")
+_G.Helpers = Helpers
+
+local Storage = Load("Core/Storage.lua")
+_G.Storage = Storage
+
 local Firebase = Load("Firebase.lua")
+_G.Firebase = Firebase
 
--- 3. Phone GUI (frame, lock, home)
 local Phone = Load("Core/Phone.lua")
 
--- 4. Icon builders
 local Icons = Load("Core/Icons.lua")
 
--- 5. Applications
+-- Applications
 local AppList = {
     "Applications/Players.lua",
     "Applications/Clone.lua",
@@ -82,10 +82,7 @@ for _, path in ipairs(AppList) do
     Load(path)
 end
 
--- 6. Build home icons (setelah semua app loaded)
 Load("Core/BuildIcons.lua")
-
--- 7. Floating icon + drag
 Load("Core/FloatingIcon.lua")
 
 print("[PhoneIDViewer] All modules loaded!")
