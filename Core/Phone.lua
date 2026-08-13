@@ -1,6 +1,6 @@
 -- ================================================
 -- PHONE GUI - Main Phone Frame
--- Fixed Version with Firebase Key System
+-- Key Entry di Dalam Phone (Bukan Fullscreen)
 -- ================================================
 
 local Services = _G.Services
@@ -13,10 +13,9 @@ local LocalPlayer = _G.LocalPlayer
 
 local appSettings = Storage.appSettings
 
--- Helper functions (local alias)
+-- Helper aliases
 local corner = Helpers.corner
 local stroke = Helpers.stroke
-local gradient = Helpers.gradient
 local tween = Helpers.tween
 local pressFX = Helpers.pressFX
 
@@ -220,42 +219,24 @@ gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ==================== KEY ENTRY OVERLAY ====================
--- Fullscreen overlay hitam pekat
-local keyOverlay = Instance.new("Frame", gui)
-keyOverlay.Size = UDim2.new(1, 0, 1, 0)
-keyOverlay.Position = UDim2.new(0, 0, 0, 0)
-keyOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-keyOverlay.BackgroundTransparency = 0
-keyOverlay.ZIndex = 500
-keyOverlay.Visible = false
-keyOverlay.BorderSizePixel = 0
+-- ==================== KEY ENTRY SCREEN (DI DALAM PHONE) ====================
+local keyScreen = Instance.new("Frame", sa)
+keyScreen.Size = UDim2.new(1, 0, 1, 0)
+keyScreen.Position = UDim2.new(0, 0, 0, 0)
+keyScreen.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+keyScreen.ZIndex = 80
+keyScreen.Visible = false
+keyScreen.BorderSizePixel = 0
+corner(keyScreen, 30)
 
--- Card container
-local keyCard = Instance.new("Frame", keyOverlay)
-keyCard.Size = UDim2.new(0, 300, 0, 420)
-keyCard.Position = UDim2.new(0.5, -150, 0.5, -210)
-keyCard.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
-keyCard.BorderSizePixel = 0
-keyCard.ZIndex = 501
-corner(keyCard, 20)
-stroke(keyCard, Color3.fromRGB(255, 255, 255), 2, 0.8)
-
--- Gradient untuk card
-local cardGradient = Instance.new("UIGradient", keyCard)
-cardGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 30)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 15))
-})
-cardGradient.Rotation = 135
-
--- Icon kunci (built from frames)
-local lockIconFrame = Instance.new("Frame", keyCard)
+-- ==================== KEY ENTRY CONTENT ====================
+-- Icon kunci
+local lockIconFrame = Instance.new("Frame", keyScreen)
 lockIconFrame.Size = UDim2.new(0, 70, 0, 70)
-lockIconFrame.Position = UDim2.new(0.5, -35, 0, 30)
+lockIconFrame.Position = UDim2.new(0.5, -35, 0, 50)
 lockIconFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 lockIconFrame.BackgroundTransparency = 0.9
-lockIconFrame.ZIndex = 502
+lockIconFrame.ZIndex = 81
 corner(lockIconFrame, 100)
 stroke(lockIconFrame, Color3.fromRGB(255, 255, 255), 2, 0.5)
 
@@ -264,15 +245,15 @@ local lockBody = Instance.new("Frame", lockIconFrame)
 lockBody.Size = UDim2.new(0, 30, 0, 24)
 lockBody.Position = UDim2.new(0.5, -15, 0.5, -5)
 lockBody.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-lockBody.ZIndex = 503
+lockBody.ZIndex = 82
 corner(lockBody, 5)
 
--- Shackle kunci
+-- Shackle
 local lockShackle = Instance.new("Frame", lockIconFrame)
 lockShackle.Size = UDim2.new(0, 18, 0, 20)
 lockShackle.Position = UDim2.new(0.5, -9, 0.2, 0)
 lockShackle.BackgroundTransparency = 1
-lockShackle.ZIndex = 503
+lockShackle.ZIndex = 82
 stroke(lockShackle, Color3.fromRGB(255, 255, 255), 3, 0)
 corner(lockShackle, 100)
 
@@ -281,71 +262,84 @@ local keyhole = Instance.new("Frame", lockBody)
 keyhole.Size = UDim2.new(0, 8, 0, 8)
 keyhole.Position = UDim2.new(0.5, -4, 0.5, -4)
 keyhole.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-keyhole.ZIndex = 504
+keyhole.ZIndex = 83
 corner(keyhole, 100)
 
 -- Title
-local keyTitle = Instance.new("TextLabel", keyCard)
+local keyTitle = Instance.new("TextLabel", keyScreen)
 keyTitle.Size = UDim2.new(1, 0, 0, 30)
-keyTitle.Position = UDim2.new(0, 0, 0, 120)
+keyTitle.Position = UDim2.new(0, 0, 0, 140)
 keyTitle.BackgroundTransparency = 1
 keyTitle.Text = "ACCESS KEY"
 keyTitle.TextColor3 = Color3.new(1, 1, 1)
 keyTitle.Font = Enum.Font.GothamBlack
-keyTitle.TextSize = 22
-keyTitle.ZIndex = 502
+keyTitle.TextSize = 20
+keyTitle.ZIndex = 81
 
 -- Subtitle
-local keySub = Instance.new("TextLabel", keyCard)
+local keySub = Instance.new("TextLabel", keyScreen)
 keySub.Size = UDim2.new(1, 0, 0, 20)
-keySub.Position = UDim2.new(0, 0, 0, 155)
+keySub.Position = UDim2.new(0, 0, 0, 175)
 keySub.BackgroundTransparency = 1
 keySub.Text = "Masukkan key untuk membuka phone"
 keySub.TextColor3 = Color3.fromRGB(150, 150, 160)
 keySub.Font = Enum.Font.Gotham
 keySub.TextSize = 11
-keySub.ZIndex = 502
+keySub.ZIndex = 81
 
--- Input
-local keyInput = Instance.new("TextBox", keyCard)
-keyInput.Size = UDim2.new(1, -40, 0, 50)
-keyInput.Position = UDim2.new(0, 20, 0, 190)
-keyInput.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+-- Input field
+local keyInput = Instance.new("TextBox", keyScreen)
+keyInput.Size = UDim2.new(1, -40, 0, 45)
+keyInput.Position = UDim2.new(0, 20, 0, 210)
+keyInput.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 keyInput.TextColor3 = Color3.new(1, 1, 1)
 keyInput.PlaceholderText = "KEY-XXXXXXXX"
 keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
 keyInput.Font = Enum.Font.GothamBold
-keyInput.TextSize = 20
+keyInput.TextSize = 18
 keyInput.TextXAlignment = Enum.TextXAlignment.Center
 keyInput.ClearTextOnFocus = false
-keyInput.ZIndex = 503
+keyInput.ZIndex = 82
 corner(keyInput, 10)
 stroke(keyInput, Color3.fromRGB(255, 255, 255), 1, 0.7)
 
--- Status
-local keyStatus = Instance.new("TextLabel", keyCard)
+-- Description di bawah text box
+local keyDesc = Instance.new("TextLabel", keyScreen)
+keyDesc.Size = UDim2.new(1, -40, 0, 40)
+keyDesc.Position = UDim2.new(0, 20, 0, 258)
+keyDesc.BackgroundTransparency = 1
+keyDesc.Text = "Key hanya bisa digunakan 1x per player.\nKey akan otomatis terikat ke akun Roblox Anda."
+keyDesc.TextColor3 = Color3.fromRGB(120, 120, 140)
+keyDesc.Font = Enum.Font.Gotham
+keyDesc.TextSize = 10
+keyDesc.TextWrapped = true
+keyDesc.TextXAlignment = Enum.TextXAlignment.Center
+keyDesc.ZIndex = 81
+
+-- Status label
+local keyStatus = Instance.new("TextLabel", keyScreen)
 keyStatus.Size = UDim2.new(1, 0, 0, 25)
-keyStatus.Position = UDim2.new(0, 0, 0, 250)
+keyStatus.Position = UDim2.new(0, 0, 0, 305)
 keyStatus.BackgroundTransparency = 1
 keyStatus.Text = ""
 keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
 keyStatus.Font = Enum.Font.GothamBold
 keyStatus.TextSize = 11
-keyStatus.ZIndex = 502
+keyStatus.ZIndex = 81
 
 -- Spinner
-local spinnerFrame = Instance.new("Frame", keyCard)
+local spinnerFrame = Instance.new("Frame", keyScreen)
 spinnerFrame.Size = UDim2.new(0, 30, 0, 30)
-spinnerFrame.Position = UDim2.new(0.5, -15, 0, 250)
+spinnerFrame.Position = UDim2.new(0.5, -15, 0, 305)
 spinnerFrame.BackgroundTransparency = 1
 spinnerFrame.Visible = false
-spinnerFrame.ZIndex = 503
+spinnerFrame.ZIndex = 82
 
 local spinnerRing = Instance.new("Frame", spinnerFrame)
 spinnerRing.Size = UDim2.new(0, 24, 0, 24)
 spinnerRing.Position = UDim2.new(0.5, -12, 0.5, -12)
 spinnerRing.BackgroundTransparency = 1
-spinnerRing.ZIndex = 504
+spinnerRing.ZIndex = 83
 stroke(spinnerRing, Color3.fromRGB(255, 255, 255), 3, 0)
 corner(spinnerRing, 100)
 
@@ -353,7 +347,7 @@ local spinnerDot = Instance.new("Frame", spinnerRing)
 spinnerDot.Size = UDim2.new(0, 6, 0, 6)
 spinnerDot.Position = UDim2.new(0.5, -3, 0, -2)
 spinnerDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-spinnerDot.ZIndex = 505
+spinnerDot.ZIndex = 84
 corner(spinnerDot, 100)
 
 local function animateSpinner()
@@ -366,29 +360,56 @@ local function animateSpinner()
 end
 
 -- Submit button
-local submitBtn = Instance.new("TextButton", keyCard)
-submitBtn.Size = UDim2.new(1, -40, 0, 50)
-submitBtn.Position = UDim2.new(0, 20, 0, 290)
+local submitBtn = Instance.new("TextButton", keyScreen)
+submitBtn.Size = UDim2.new(1, -40, 0, 45)
+submitBtn.Position = UDim2.new(0, 20, 0, 340)
 submitBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 submitBtn.Text = "UNLOCK"
 submitBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
 submitBtn.Font = Enum.Font.GothamBlack
-submitBtn.TextSize = 16
+submitBtn.TextSize = 15
 submitBtn.AutoButtonColor = false
-submitBtn.ZIndex = 503
+submitBtn.ZIndex = 82
 corner(submitBtn, 10)
 pressFX(submitBtn)
 
--- Info
-local keyInfo = Instance.new("TextLabel", keyCard)
+-- Buy button
+local buyBtn = Instance.new("TextButton", keyScreen)
+buyBtn.Size = UDim2.new(1, -40, 0, 40)
+buyBtn.Position = UDim2.new(0, 20, 0, 395)
+buyBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+buyBtn.Text = "BUY KEY"
+buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+buyBtn.Font = Enum.Font.GothamBold
+buyBtn.TextSize = 13
+buyBtn.AutoButtonColor = false
+buyBtn.ZIndex = 82
+corner(buyBtn, 10)
+stroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.5)
+pressFX(buyBtn)
+
+-- Info bawah
+local keyInfo = Instance.new("TextLabel", keyScreen)
 keyInfo.Size = UDim2.new(1, 0, 0, 20)
-keyInfo.Position = UDim2.new(0, 0, 0, 355)
+keyInfo.Position = UDim2.new(0, 0, 0, 445)
 keyInfo.BackgroundTransparency = 1
 keyInfo.Text = "1 key = 1 player | Auto-lock saat expired"
 keyInfo.TextColor3 = Color3.fromRGB(80, 80, 90)
 keyInfo.Font = Enum.Font.Gotham
-keyInfo.TextSize = 10
-keyInfo.ZIndex = 502
+keyInfo.TextSize = 9
+keyInfo.ZIndex = 81
+
+-- Buy button click
+buyBtn.MouseButton1Click:Connect(function()
+    local url = Config.BUY_KEY_URL or "https://discord.gg/"
+    -- Buka link di browser
+    pcall(function()
+        setclipboard(url)
+    end)
+    _G.showDynamicNotification("Link copied to clipboard!", Color3.fromRGB(255, 200, 50))
+    keyStatus.Text = "Link: " .. url
+    keyStatus.TextColor3 = Color3.fromRGB(0, 200, 255)
+end)
 
 -- ==================== KEY FUNCTIONS ====================
 local function submitKey()
@@ -431,11 +452,11 @@ local function submitKey()
             keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
             
             -- Shake
-            tween(keyInput, {Position = UDim2.new(0, 15, 0, 190)}, 0.05)
+            tween(keyInput, {Position = UDim2.new(0, 15, 0, 210)}, 0.05)
             task.wait(0.05)
-            tween(keyInput, {Position = UDim2.new(0, 25, 0, 190)}, 0.05)
+            tween(keyInput, {Position = UDim2.new(0, 25, 0, 210)}, 0.05)
             task.wait(0.05)
-            tween(keyInput, {Position = UDim2.new(0, 20, 0, 190)}, 0.05)
+            tween(keyInput, {Position = UDim2.new(0, 20, 0, 210)}, 0.05)
             
             keyInput.Text = ""
         end
@@ -460,7 +481,7 @@ _G.PhoneState = {
 
 -- ==================== PHONE FUNCTIONS ====================
 function _G.showKeyEntry()
-    keyOverlay.Visible = true
+    keyScreen.Visible = true
     keyInput.Text = ""
     keyStatus.Text = ""
     task.wait(0.1)
@@ -468,12 +489,12 @@ function _G.showKeyEntry()
 end
 
 function _G.hideKeyEntry()
-    keyOverlay.Visible = false
+    keyScreen.Visible = false
 end
 
 function _G.unlock()
     _G.PhoneState.isLocked = false
-    keyOverlay.Visible = false
+    keyScreen.Visible = false
     keyInput.Text = ""
     keyStatus.Text = ""
     _G.goHome()
@@ -516,9 +537,6 @@ function _G.closePhone()
     tween(phone, {Size = UDim2.new(0, 0, 0, 0)}, 0.22)
     task.delay(0.22, function()
         phone.Visible = false
-        if _G.PhoneState.isLocked then
-            keyOverlay.Visible = false
-        end
     end)
 end
 
@@ -550,7 +568,7 @@ return {
     dockGrid = dockGrid,
     appGrid = appGrid,
     gridLayout = gridLayout,
-    keyOverlay = keyOverlay,
+    keyScreen = keyScreen,
     isPortrait = isPortrait,
     getGridIconSize = getGridIconSize,
     PHONE_SIZE = PHONE_SIZE,
