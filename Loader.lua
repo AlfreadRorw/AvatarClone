@@ -5,9 +5,15 @@
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
 
+-- Cache-buster: raw.githubusercontent.com CDN sering nyimpen cache file lama
+-- selama beberapa menit walau file di GitHub sudah diupdate. Menempelkan
+-- query param unik (waktu join) memaksa CDN ambil versi terbaru tiap kali
+-- script ini dijalankan ulang (rejoin/execute lagi).
+local CACHE_BUSTER = "?v=" .. tostring(os.time())
+
 local function Load(path)
     local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE_URL .. path, true))()
+        return loadstring(game:HttpGet(BASE_URL .. path .. CACHE_BUSTER, true))()
     end)
     if not ok then
         warn("[PhoneIDViewer] Failed: " .. path .. " | " .. tostring(result))
