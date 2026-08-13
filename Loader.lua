@@ -34,7 +34,7 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- Load order
+-- Load pondasi dulu (sebelum key system, karena key system butuh Firebase & helpers)
 local Config = Load("Config.lua")
 _G.Config = Config
 
@@ -50,48 +50,51 @@ _G.Storage = Storage
 local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
-local Phone = Load("Core/Phone.lua")
-_G.Phone = Phone
+-- Key system: load & jalankan gate
+-- requireValidKey() akan cek Firebase apakah user sudah punya key aktif.
+-- Kalau belum, muncul UI minta key.
+-- Semua build UI dilakukan di dalam callback supaya tidak jalan sebelum key valid.
+Load("KeySystem.lua")
 
-local Icons = Load("Core/Icons.lua")
-_G.Icons = Icons
+requireValidKey(function(granted)
+    if not granted then return end
 
--- PENTING: BuildIcons.lua HARUS di-load sebelum semua Applications/*.lua.
--- Setiap file di Applications/ membaca _G.appContent, _G.buildAppIcon, dll
--- pada saat file itu sendiri di-load (baris atas file, bukan di dalam fungsi),
--- dan nilai itu di-assign ke variabel LOKAL. Kalau BuildIcons.lua belum jalan,
--- _G.appContent masih nil saat dibaca, dan variabel lokal appContent di tiap
--- app akan tetap nil selamanya walau _G.appContent diisi belakangan.
-Load("Core/BuildIcons.lua")
+    local Phone = Load("Core/Phone.lua")
+    _G.Phone = Phone
 
--- Applications (load SETELAH BuildIcons.lua)
-local AppList = {
-    "Applications/Players.lua",
-    "Applications/Clone.lua",
-    "Applications/Body.lua",
-    "Applications/Accessory.lua",
-    "Applications/Preset.lua",
-    "Applications/Favorites.lua",
-    "Applications/Items.lua",
-    "Applications/Teleport.lua",
-    "Applications/Size.lua",
-    "Applications/Volume.lua",
-    "Applications/Friends.lua",
-    "Applications/Server.lua",
-    "Applications/Bundle.lua",
-    "Applications/AvatarItems.lua",
-    "Applications/Lookup.lua",
-    "Applications/ServerJoiner.lua",
-    "Applications/WhoOnline.lua",
-    "Applications/Messages.lua",
-    "Applications/Command.lua",
-    "Applications/Settings.lua",
-}
+    local Icons = Load("Core/Icons.lua")
+    _G.Icons = Icons
 
-for _, path in ipairs(AppList) do
-    Load(path)
-end
+    Load("Core/BuildIcons.lua")
 
-Load("Core/FloatingIcon.lua")
+    local AppList = {
+        "Applications/Players.lua",
+        "Applications/Clone.lua",
+        "Applications/Body.lua",
+        "Applications/Accessory.lua",
+        "Applications/Preset.lua",
+        "Applications/Favorites.lua",
+        "Applications/Items.lua",
+        "Applications/Teleport.lua",
+        "Applications/Size.lua",
+        "Applications/Volume.lua",
+        "Applications/Friends.lua",
+        "Applications/Server.lua",
+        "Applications/Bundle.lua",
+        "Applications/AvatarItems.lua",
+        "Applications/Lookup.lua",
+        "Applications/ServerJoiner.lua",
+        "Applications/WhoOnline.lua",
+        "Applications/Messages.lua",
+        "Applications/Command.lua",
+        "Applications/Settings.lua",
+    }
 
-print("[PhoneIDViewer] All modules loaded!")
+    for _, path in ipairs(AppList) do
+        Load(path)
+    end
+
+    Load("Core/FloatingIcon.lua")
+
+    print("[PhoneIDViewer] All modules loaded!")
+end)
