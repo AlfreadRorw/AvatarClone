@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE ID VIEWER - Modular Loader (Fast Version)
+-- PHONE ID VIEWER - Modular Loader (FIXED)
 -- ================================================
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
@@ -14,7 +14,7 @@ local function Load(path)
     return ok and result or nil
 end
 
--- Services
+-- ==================== SERVICES ====================
 local Services = {
     Players = game:GetService("Players"),
     TweenService = game:GetService("TweenService"),
@@ -33,43 +33,39 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- ==================== LOAD CORE DULU ====================
+-- ==================== LOAD ORDER (PENTING!) ====================
+-- 1. Config dulu
 local Config = Load("Config.lua")
 _G.Config = Config
 
+-- 2. Theme
 local Theme = Load("Core/Theme.lua")
 _G.T = Theme
 
+-- 3. Helpers
 local Helpers = Load("Core/Helpers.lua")
 _G.Helpers = Helpers
 
--- ==================== TAMPILKAN LOADING NOTIFICATION ====================
-Load("Core/LoadingNotif.lua")
-_G.showLoadingNotification()
+-- 4. Storage (SEBELUM Firebase dan Phone)
+local Storage = Load("Core/Storage.lua")
+_G.Storage = Storage
 
--- ==================== LOAD SEMUA MODUL SECARA PARALEL ====================
--- Gunakan task.spawn agar tidak blocking
-task.spawn(function()
-    local Storage = Load("Core/Storage.lua")
-    _G.Storage = Storage
-end)
+-- 5. Firebase (SEBELUM Phone)
+local Firebase = Load("Firebase.lua")
+_G.Firebase = Firebase
 
-task.spawn(function()
-    local Firebase = Load("Firebase.lua")
-    _G.Firebase = Firebase
-end)
+-- 6. Phone (SETELAH Storage dan Firebase tersedia)
+local Phone = Load("Core/Phone.lua")
+_G.Phone = Phone
 
-task.spawn(function()
-    local Phone = Load("Core/Phone.lua")
-    _G.Phone = Phone
-end)
+-- 7. Icons
+local Icons = Load("Core/Icons.lua")
+_G.Icons = Icons
 
-task.spawn(function()
-    local Icons = Load("Core/Icons.lua")
-    _G.Icons = Icons
-end)
+-- 8. BuildIcons (SETELAH Phone dan Icons)
+Load("Core/BuildIcons.lua")
 
--- ==================== LOAD APPLICATIONS PARALEL ====================
+-- 9. Applications (SETELAH BuildIcons)
 local AppList = {
     "Applications/Players.lua",
     "Applications/Clone.lua",
@@ -93,39 +89,14 @@ local AppList = {
     "Applications/Settings.lua",
 }
 
--- Load aplikasi secara paralel
 for _, path in ipairs(AppList) do
-    task.spawn(function()
-        Load(path)
-    end)
+    Load(path)
 end
 
--- ==================== SIMULASI PROGRESS (CEPAT) ====================
-task.spawn(function()
-    local totalSteps = 25
-    local steps = {
-        "Storage", "Firebase", "Phone GUI", "Icons",
-        "Players", "Clone", "Body", "Accessory", "Preset",
-        "Favorites", "Items", "Teleport", "Size", "Volume",
-        "Friends", "Server", "Bundle", "AvatarItems", "Lookup",
-        "ServerJoiner", "WhoOnline", "Messages", "Command",
-        "Settings", "Floating Icon"
-    }
-    
-    -- Update progress cepat (0.15 detik per step)
-    for i, stepName in ipairs(steps) do
-        _G.updateLoadingProgress(i, totalSteps, stepName)
-        task.wait(0.15) -- Cepat, total ~3.75 detik
-    end
-    
-    -- Tunggu sebentar untuk memastikan semua loaded
-    task.wait(0.5)
-    
-    -- Load FloatingIcon
-    Load("Core/FloatingIcon.lua")
-    
-    -- Selesai
-    _G.finishLoading()
-    
-    print("[PhoneIDViewer] All modules loaded!")
-end)
+-- 10. FloatingIcon (TERAKHIR)
+Load("Core/FloatingIcon.lua")
+
+print("[PhoneIDViewer] All modules loaded successfully!")
+print("[PhoneIDViewer] Phone:", _G.Phone and "OK" or "FAILED")
+print("[PhoneIDViewer] Firebase:", _G.Firebase and "OK" or "FAILED")
+print("[PhoneIDViewer] Storage:", _G.Storage and "OK" or "FAILED")
