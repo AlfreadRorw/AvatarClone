@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE GUI - Complete Fixed with Build Lock Icon
+-- PHONE GUI - Fixed + Upgraded Key Entry Design
 -- ================================================
 
 local Services = _G.Services
@@ -34,10 +34,22 @@ local function safeStroke(obj, color, thickness, transparency)
     end)
 end
 
-local function safeTween(obj, props, time, easingStyle)
+local function safeGradient(obj, colors, rotation)
+    pcall(function()
+        if obj then
+            local g = Instance.new("UIGradient")
+            g.Color = colors
+            g.Rotation = rotation or 0
+            g.Parent = obj
+            return g
+        end
+    end)
+end
+
+local function safeTween(obj, props, time, easingStyle, easingDir)
     pcall(function()
         if obj and obj.Parent then
-            game:GetService("TweenService"):Create(obj, TweenInfo.new(time or 0.25, easingStyle or Enum.EasingStyle.Quart, Enum.EasingDirection.Out), props):Play()
+            game:GetService("TweenService"):Create(obj, TweenInfo.new(time or 0.25, easingStyle or Enum.EasingStyle.Quart, easingDir or Enum.EasingDirection.Out), props):Play()
         end
     end)
 end
@@ -53,6 +65,18 @@ local function safePressFX(btn)
             safeTween(btn, {Size = origSize}, 0.1)
         end)
     end)
+end
+
+local function safeCall(fn, ...)
+    local args = {...}
+    local ok, res = pcall(function()
+        return fn(table.unpack(args))
+    end)
+    if not ok then
+        warn("[PhoneGUI] Error:", res)
+        return false, nil
+    end
+    return true, res
 end
 
 -- ==================== GUI ROOT ====================
@@ -87,6 +111,7 @@ phone.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
 phone.BorderSizePixel = 0
 phone.Visible = false
 phone.ClipsDescendants = true
+phone.ZIndex = 1
 phone.Parent = gui
 safeCorner(phone, 38)
 safeStroke(phone, T.Accent or Color3.fromRGB(30, 30, 30), 2, 0.15)
@@ -100,6 +125,7 @@ sa.Position = UDim2.new(0, 8, 0, 8)
 sa.BackgroundColor3 = T.BG or Color3.fromRGB(255, 255, 255)
 sa.BorderSizePixel = 0
 sa.ClipsDescendants = true
+sa.ZIndex = 1
 sa.Parent = phone
 safeCorner(sa, 30)
 
@@ -194,12 +220,14 @@ sh.Size = UDim2.new(1, 0, 1, -60)
 sh.Position = UDim2.new(0, 0, 0, 34)
 sh.BackgroundTransparency = 1
 sh.ClipsDescendants = true
+sh.ZIndex = 1
 sh.Parent = sa
 
 local home = Instance.new("Frame")
 home.Size = UDim2.new(1, 0, 1, 0)
 home.BackgroundTransparency = 1
 home.ClipsDescendants = true
+home.ZIndex = 1
 home.Parent = sh
 
 local homeWall = Instance.new("Frame")
@@ -253,155 +281,290 @@ gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 gridLayout.Parent = appGrid
 
--- ==================== KEY SCREEN (MODERN) ====================
+-- ================================================================
+-- ==================== KEY SCREEN (UPGRADED) ====================
+-- ================================================================
+
 local keyScreen = Instance.new("Frame")
 keyScreen.Size = UDim2.new(1, 0, 1, 0)
 keyScreen.Position = UDim2.new(0, 0, 0, 0)
-keyScreen.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
-keyScreen.ZIndex = 80
+keyScreen.BackgroundColor3 = Color3.fromRGB(8, 8, 14)
+keyScreen.ZIndex = 200          -- dinaikkan supaya selalu di atas home/dock
 keyScreen.Visible = false
 keyScreen.BorderSizePixel = 0
 keyScreen.ClipsDescendants = true
 keyScreen.Parent = sa
 safeCorner(keyScreen, 30)
 
--- Gradient
+-- Background gradient utama
 local keyBgGradient = Instance.new("UIGradient")
 keyBgGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 30)),
-    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(10, 10, 16)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 35))
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(18, 14, 32)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(8, 8, 14)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(12, 20, 36)),
 })
 keyBgGradient.Rotation = 135
 keyBgGradient.Parent = keyScreen
 
--- Key Content
+-- Glow blobs dekoratif (radial-ish dengan blur transparansi pakai frame bulat besar)
+local function makeGlow(size, pos, color, transparency, zindex)
+    local glow = Instance.new("Frame")
+    glow.Size = size
+    glow.Position = pos
+    glow.AnchorPoint = Vector2.new(0.5, 0.5)
+    glow.BackgroundColor3 = color
+    glow.BackgroundTransparency = transparency
+    glow.BorderSizePixel = 0
+    glow.ZIndex = zindex or 201
+    glow.Parent = keyScreen
+    safeCorner(glow, 500)
+    return glow
+end
+
+local glow1 = makeGlow(UDim2.new(0, 220, 0, 220), UDim2.new(0, 20, 0, 40), Color3.fromRGB(120, 90, 255), 0.85, 201)
+local glow2 = makeGlow(UDim2.new(0, 180, 0, 180), UDim2.new(1, -20, 0, 120), Color3.fromRGB(80, 200, 255), 0.88, 201)
+
+-- Animasi glow melayang pelan
+task.spawn(function()
+    while keyScreen.Parent do
+        safeTween(glow1, {Position = UDim2.new(0, 40, 0, 70)}, 3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        safeTween(glow2, {Position = UDim2.new(1, -40, 0, 90)}, 3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        task.wait(3.5)
+        safeTween(glow1, {Position = UDim2.new(0, 20, 0, 40)}, 3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        safeTween(glow2, {Position = UDim2.new(1, -20, 0, 120)}, 3.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+        task.wait(3.5)
+    end
+end)
+
+-- Key Content Wrapper (buat animasi masuk)
 local keyContent = Instance.new("Frame")
-keyContent.Size = UDim2.new(1, -40, 1, -40)
-keyContent.Position = UDim2.new(0, 20, 0, 20)
+keyContent.Size = UDim2.new(1, -44, 1, -44)
+keyContent.Position = UDim2.new(0, 22, 0, 22)
 keyContent.BackgroundTransparency = 1
-keyContent.ZIndex = 82
+keyContent.ZIndex = 210
 keyContent.Parent = keyScreen
 
 local keyLayout = Instance.new("UIListLayout")
-keyLayout.Padding = UDim.new(0, 12)
+keyLayout.Padding = UDim.new(0, 14)
 keyLayout.SortOrder = Enum.SortOrder.LayoutOrder
 keyLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 keyLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 keyLayout.Parent = keyContent
 
--- ==================== BUILD LOCK ICON ====================
+-- Spacer atas fleksibel biar konten center vertikal enak
+local topSpacer = Instance.new("Frame")
+topSpacer.Size = UDim2.new(1, 0, 0, 4)
+topSpacer.BackgroundTransparency = 1
+topSpacer.LayoutOrder = 0
+topSpacer.Parent = keyContent
+
+-- ==================== BUILD LOCK ICON (UPGRADED, CUSTOM) ====================
+local lockOuterRing = Instance.new("Frame")
+lockOuterRing.Size = UDim2.new(0, 96, 0, 96)
+lockOuterRing.BackgroundTransparency = 1
+lockOuterRing.LayoutOrder = 1
+lockOuterRing.ZIndex = 211
+lockOuterRing.Parent = keyContent
+
+-- Ring animasi berputar di belakang icon
+local ringSpin = Instance.new("Frame")
+ringSpin.Size = UDim2.new(1, 0, 1, 0)
+ringSpin.Position = UDim2.new(0.5, 0, 0.5, 0)
+ringSpin.AnchorPoint = Vector2.new(0.5, 0.5)
+ringSpin.BackgroundTransparency = 1
+ringSpin.ZIndex = 211
+ringSpin.Parent = lockOuterRing
+safeStroke(ringSpin, Color3.fromRGB(140, 110, 255), 2, 0.55)
+safeCorner(ringSpin, 500)
+
+task.spawn(function()
+    local rot = 0
+    while ringSpin.Parent do
+        rot = (rot + 1) % 360
+        ringSpin.Rotation = rot
+        task.wait(0.03)
+    end
+end)
+
+-- Container gembok dengan gradient premium
 local lockContainer = Instance.new("Frame")
-lockContainer.Size = UDim2.new(0, 80, 0, 80)
+lockContainer.Size = UDim2.new(0, 78, 0, 78)
+lockContainer.Position = UDim2.new(0.5, 0, 0.5, 0)
+lockContainer.AnchorPoint = Vector2.new(0.5, 0.5)
 lockContainer.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-lockContainer.BackgroundTransparency = 0.9
-lockContainer.LayoutOrder = 0
-lockContainer.ZIndex = 83
-lockContainer.Parent = keyContent
-safeCorner(lockContainer, 20)
-safeStroke(lockContainer, Color3.fromRGB(255, 255, 255), 2, 0.8)
+lockContainer.BackgroundTransparency = 0.92
+lockContainer.ZIndex = 212
+lockContainer.Parent = lockOuterRing
+safeCorner(lockContainer, 24)
+safeStroke(lockContainer, Color3.fromRGB(180, 160, 255), 1.5, 0.5)
+safeGradient(lockContainer, ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(140, 110, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 200, 255)),
+}), 90)
 
 -- Badan gembok
 local lockBody = Instance.new("Frame")
-lockBody.Size = UDim2.new(0, 40, 0, 32)
-lockBody.Position = UDim2.new(0.5, -20, 0.5, -4)
+lockBody.Size = UDim2.new(0, 36, 0, 28)
+lockBody.Position = UDim2.new(0.5, 0, 0.58, 0)
+lockBody.AnchorPoint = Vector2.new(0.5, 0.5)
 lockBody.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-lockBody.ZIndex = 84
+lockBody.ZIndex = 213
 lockBody.Parent = lockContainer
 safeCorner(lockBody, 8)
+safeGradient(lockBody, ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(220, 215, 255)),
+}), 90)
 
--- Lubang kunci
+-- Lubang kunci (persegi bawah)
 local keyhole = Instance.new("Frame")
-keyhole.Size = UDim2.new(0, 10, 0, 14)
-keyhole.Position = UDim2.new(0.5, -5, 0.5, -7)
-keyhole.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-keyhole.ZIndex = 85
+keyhole.Size = UDim2.new(0, 8, 0, 11)
+keyhole.Position = UDim2.new(0.5, 0, 0.62, 0)
+keyhole.AnchorPoint = Vector2.new(0.5, 0.5)
+keyhole.BackgroundColor3 = Color3.fromRGB(100, 80, 200)
+keyhole.ZIndex = 214
 keyhole.Parent = lockBody
-safeCorner(keyhole, 5)
+safeCorner(keyhole, 3)
 
 -- Lingkaran lubang kunci
 local keyholeCircle = Instance.new("Frame")
-keyholeCircle.Size = UDim2.new(0, 10, 0, 10)
-keyholeCircle.Position = UDim2.new(0.5, -5, 0.5, -10)
-keyholeCircle.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-keyholeCircle.ZIndex = 86
+keyholeCircle.Size = UDim2.new(0, 9, 0, 9)
+keyholeCircle.Position = UDim2.new(0.5, 0, 0.32, 0)
+keyholeCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+keyholeCircle.BackgroundColor3 = Color3.fromRGB(100, 80, 200)
+keyholeCircle.ZIndex = 214
 keyholeCircle.Parent = lockBody
 safeCorner(keyholeCircle, 100)
 
--- Shackle (lengkungan atas)
+-- Shackle (lengkungan atas) - dibentuk dari stroke arc-like pakai frame + corner besar
 local shackle = Instance.new("Frame")
-shackle.Size = UDim2.new(0, 22, 0, 20)
-shackle.Position = UDim2.new(0.5, -11, 0.5, -22)
-shackle.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-shackle.ZIndex = 84
+shackle.Size = UDim2.new(0, 26, 0, 24)
+shackle.Position = UDim2.new(0.5, 0, 0.30, 0)
+shackle.AnchorPoint = Vector2.new(0.5, 0.5)
+shackle.BackgroundTransparency = 1
+shackle.ZIndex = 213
 shackle.Parent = lockContainer
+
+local shackleStroke = Instance.new("UIStroke")
+shackleStroke.Color = Color3.fromRGB(255, 255, 255)
+shackleStroke.Thickness = 4
+shackleStroke.Parent = shackle
 safeCorner(shackle, 100)
 
--- Lubang shackle
-local shackleHole = Instance.new("Frame")
-shackleHole.Size = UDim2.new(0, 10, 0, 10)
-shackleHole.Position = UDim2.new(0.5, -5, 0.5, -17)
-shackleHole.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
-shackleHole.ZIndex = 85
-shackleHole.Parent = lockContainer
-safeCorner(shackleHole, 100)
+-- Mask bawah shackle biar keliatan seperti "U" terbuka ke bawah menyatu ke body
+local shackleMask = Instance.new("Frame")
+shackleMask.Size = UDim2.new(1, 4, 0, 14)
+shackleMask.Position = UDim2.new(0.5, 0, 1, 4)
+shackleMask.AnchorPoint = Vector2.new(0.5, 0.5)
+shackleMask.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+shackleMask.BackgroundTransparency = 0.92
+shackleMask.BorderSizePixel = 0
+shackleMask.ZIndex = 213
+shackleMask.Parent = lockContainer
+
+-- Spacer kecil
+local spacer1 = Instance.new("Frame")
+spacer1.Size = UDim2.new(1, 0, 0, 2)
+spacer1.BackgroundTransparency = 1
+spacer1.LayoutOrder = 2
+spacer1.Parent = keyContent
 
 -- ==================== TITLE ====================
 local keyTitle = Instance.new("TextLabel")
-keyTitle.Size = UDim2.new(1, 0, 0, 34)
+keyTitle.Size = UDim2.new(1, 0, 0, 32)
 keyTitle.BackgroundTransparency = 1
-keyTitle.Text = "PHONE ID VIEWER"
+keyTitle.Text = "ACCESS REQUIRED"
 keyTitle.TextColor3 = Color3.new(1, 1, 1)
 keyTitle.Font = Enum.Font.GothamBlack
 keyTitle.TextSize = 22
-keyTitle.LayoutOrder = 1
-keyTitle.ZIndex = 83
+keyTitle.LayoutOrder = 3
+keyTitle.ZIndex = 211
 keyTitle.Parent = keyContent
 
 -- ==================== DESCRIPTION ====================
 local keyDesc = Instance.new("TextLabel")
-keyDesc.Size = UDim2.new(1, -20, 0, 30)
+keyDesc.Size = UDim2.new(1, -10, 0, 32)
 keyDesc.BackgroundTransparency = 1
-keyDesc.Text = "Masukkan access key untuk membuka semua fitur premium."
-keyDesc.TextColor3 = Color3.fromRGB(150, 150, 170)
+keyDesc.Text = "Masukkan access key kamu untuk membuka semua fitur premium"
+keyDesc.TextColor3 = Color3.fromRGB(160, 160, 190)
 keyDesc.Font = Enum.Font.Gotham
-keyDesc.TextSize = 11
+keyDesc.TextSize = 12
 keyDesc.TextWrapped = true
-keyDesc.LayoutOrder = 2
-keyDesc.ZIndex = 83
+keyDesc.LayoutOrder = 4
+keyDesc.ZIndex = 211
 keyDesc.Parent = keyContent
 
--- ==================== INPUT CONTAINER ====================
-local inputContainer = Instance.new("Frame")
-inputContainer.Size = UDim2.new(1, 0, 0, 50)
-inputContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
-inputContainer.LayoutOrder = 3
-inputContainer.ZIndex = 84
-inputContainer.Parent = keyContent
-safeCorner(inputContainer, 14)
-safeStroke(inputContainer, Color3.fromRGB(255, 255, 255), 1, 0.8)
+-- Spacer sebelum input
+local spacer2 = Instance.new("Frame")
+spacer2.Size = UDim2.new(1, 0, 0, 4)
+spacer2.BackgroundTransparency = 1
+spacer2.LayoutOrder = 5
+spacer2.Parent = keyContent
 
--- Key icon kecil di input
-local keyIconSmall = Instance.new("Frame")
-keyIconSmall.Size = UDim2.new(0, 16, 0, 12)
-keyIconSmall.Position = UDim2.new(0, 10, 0.5, -6)
-keyIconSmall.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
-keyIconSmall.ZIndex = 85
-keyIconSmall.Parent = inputContainer
-safeCorner(keyIconSmall, 3)
+-- ==================== INPUT CONTAINER (UPGRADED) ====================
+local inputContainer = Instance.new("Frame")
+inputContainer.Size = UDim2.new(1, 0, 0, 52)
+inputContainer.BackgroundColor3 = Color3.fromRGB(20, 18, 34)
+inputContainer.LayoutOrder = 6
+inputContainer.ZIndex = 211
+inputContainer.Parent = keyContent
+safeCorner(inputContainer, 16)
+
+local inputStroke = safeStroke and nil
+local inputStrokeObj = Instance.new("UIStroke")
+inputStrokeObj.Color = Color3.fromRGB(120, 100, 220)
+inputStrokeObj.Thickness = 1.5
+inputStrokeObj.Transparency = 0.4
+inputStrokeObj.Parent = inputContainer
+
+-- Key icon kecil di input (bentuk kunci sederhana: lingkaran + batang + gigi)
+local keyIconHolder = Instance.new("Frame")
+keyIconHolder.Size = UDim2.new(0, 22, 0, 16)
+keyIconHolder.Position = UDim2.new(0, 14, 0.5, 0)
+keyIconHolder.AnchorPoint = Vector2.new(0, 0.5)
+keyIconHolder.BackgroundTransparency = 1
+keyIconHolder.ZIndex = 212
+keyIconHolder.Parent = inputContainer
 
 local keyIconCircle = Instance.new("Frame")
-keyIconCircle.Size = UDim2.new(0, 6, 0, 6)
-keyIconCircle.Position = UDim2.new(0, 15, 0.5, -12)
-keyIconCircle.BackgroundColor3 = Color3.fromRGB(150, 150, 170)
-keyIconCircle.ZIndex = 85
-keyIconCircle.Parent = inputContainer
+keyIconCircle.Size = UDim2.new(0, 10, 0, 10)
+keyIconCircle.Position = UDim2.new(0, 0, 0.5, 0)
+keyIconCircle.AnchorPoint = Vector2.new(0, 0.5)
+keyIconCircle.BackgroundTransparency = 1
+keyIconCircle.ZIndex = 212
+keyIconCircle.Parent = keyIconHolder
+local kicStroke = Instance.new("UIStroke")
+kicStroke.Color = Color3.fromRGB(160, 150, 220)
+kicStroke.Thickness = 2
+kicStroke.Parent = keyIconCircle
 safeCorner(keyIconCircle, 100)
+
+local keyIconBar = Instance.new("Frame")
+keyIconBar.Size = UDim2.new(0, 12, 0, 3)
+keyIconBar.Position = UDim2.new(0, 9, 0.5, -1.5)
+keyIconBar.BackgroundColor3 = Color3.fromRGB(160, 150, 220)
+keyIconBar.ZIndex = 212
+keyIconBar.Parent = keyIconHolder
+safeCorner(keyIconBar, 2)
+
+local keyIconTooth1 = Instance.new("Frame")
+keyIconTooth1.Size = UDim2.new(0, 3, 0, 6)
+keyIconTooth1.Position = UDim2.new(0, 15, 0.5, -1.5)
+keyIconTooth1.BackgroundColor3 = Color3.fromRGB(160, 150, 220)
+keyIconTooth1.ZIndex = 212
+keyIconTooth1.Parent = keyIconHolder
+
+local keyIconTooth2 = Instance.new("Frame")
+keyIconTooth2.Size = UDim2.new(0, 3, 0, 4)
+keyIconTooth2.Position = UDim2.new(0, 19, 0.5, -1.5)
+keyIconTooth2.BackgroundColor3 = Color3.fromRGB(160, 150, 220)
+keyIconTooth2.ZIndex = 212
+keyIconTooth2.Parent = keyIconHolder
 
 -- TextBox
 local keyInput = Instance.new("TextBox")
-keyInput.Size = UDim2.new(1, -40, 1, 0)
-keyInput.Position = UDim2.new(0, 36, 0, 0)
+keyInput.Size = UDim2.new(1, -85, 1, 0)
+keyInput.Position = UDim2.new(0, 44, 0, 0)
 keyInput.BackgroundTransparency = 1
 keyInput.Text = ""
 keyInput.PlaceholderText = "KEY-XXXXXXXX"
@@ -411,108 +574,212 @@ keyInput.Font = Enum.Font.GothamBold
 keyInput.TextSize = 15
 keyInput.TextXAlignment = Enum.TextXAlignment.Left
 keyInput.ClearTextOnFocus = false
-keyInput.ZIndex = 85
+keyInput.ZIndex = 212
 keyInput.Parent = inputContainer
+
+-- Paste button kecil di kanan input
+local pasteBtn = Instance.new("TextButton")
+pasteBtn.Size = UDim2.new(0, 34, 0, 34)
+pasteBtn.Position = UDim2.new(1, -42, 0.5, 0)
+pasteBtn.AnchorPoint = Vector2.new(0, 0.5)
+pasteBtn.BackgroundColor3 = Color3.fromRGB(120, 100, 220)
+pasteBtn.BackgroundTransparency = 0.85
+pasteBtn.Text = "📋"
+pasteBtn.TextSize = 14
+pasteBtn.AutoButtonColor = false
+pasteBtn.ZIndex = 212
+pasteBtn.Parent = inputContainer
+safeCorner(pasteBtn, 10)
+safePressFX(pasteBtn)
+
+pasteBtn.MouseButton1Click:Connect(function()
+    local ok, clip = pcall(function() return getclipboard() end)
+    if ok and clip and clip ~= "" then
+        keyInput.Text = clip
+        _G.showDynamicNotification("Key ditempel!", Color3.fromRGB(120, 100, 220))
+    end
+end)
+
+-- Fokus glow di border input saat difokus
+keyInput.Focused:Connect(function()
+    safeTween(inputStrokeObj, {Transparency = 0.1}, 0.2)
+end)
+keyInput.FocusLost:Connect(function()
+    safeTween(inputStrokeObj, {Transparency = 0.4}, 0.2)
+end)
 
 -- ==================== STATUS LABEL ====================
 local keyStatus = Instance.new("TextLabel")
-keyStatus.Size = UDim2.new(1, 0, 0, 22)
+keyStatus.Size = UDim2.new(1, 0, 0, 20)
 keyStatus.BackgroundTransparency = 1
 keyStatus.Text = ""
 keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
 keyStatus.Font = Enum.Font.GothamBold
 keyStatus.TextSize = 11
-keyStatus.LayoutOrder = 4
-keyStatus.ZIndex = 83
+keyStatus.LayoutOrder = 7
+keyStatus.ZIndex = 211
 keyStatus.Parent = keyContent
 
--- ==================== UNLOCK BUTTON ====================
+-- ==================== UNLOCK BUTTON (UPGRADED) ====================
 local submitBtn = Instance.new("TextButton")
-submitBtn.Size = UDim2.new(1, 0, 0, 48)
+submitBtn.Size = UDim2.new(1, 0, 0, 50)
 submitBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-submitBtn.Text = "UNLOCK"
-submitBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+submitBtn.Text = "🔓  UNLOCK"
+submitBtn.TextColor3 = Color3.fromRGB(20, 15, 40)
 submitBtn.Font = Enum.Font.GothamBlack
 submitBtn.TextSize = 16
 submitBtn.AutoButtonColor = false
-submitBtn.LayoutOrder = 5
-submitBtn.ZIndex = 84
+submitBtn.LayoutOrder = 8
+submitBtn.ZIndex = 211
 submitBtn.Parent = keyContent
-safeCorner(submitBtn, 14)
+safeCorner(submitBtn, 16)
+safeGradient(submitBtn, ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(220, 220, 245)),
+}), 90)
 safePressFX(submitBtn)
+
+-- Loading spinner overlay di tombol (dipakai saat checking)
+local loadingDot = Instance.new("Frame")
+loadingDot.Size = UDim2.new(0, 8, 0, 8)
+loadingDot.AnchorPoint = Vector2.new(0.5, 0.5)
+loadingDot.Position = UDim2.new(0.5, 0, 0.5, 0)
+loadingDot.BackgroundColor3 = Color3.fromRGB(120, 100, 220)
+loadingDot.Visible = false
+loadingDot.ZIndex = 212
+loadingDot.Parent = submitBtn
+safeCorner(loadingDot, 100)
+
+local loadingSpin
+local function startLoading()
+    submitBtn.Text = ""
+    loadingDot.Visible = true
+    loadingSpin = true
+    task.spawn(function()
+        local t = 0
+        while loadingSpin do
+            t = t + 0.05
+            loadingDot.Position = UDim2.new(0.5 + math.cos(t * 6) * 0.15, 0, 0.5 + math.sin(t * 6) * 0.15, 0)
+            task.wait(0.03)
+        end
+    end)
+end
+local function stopLoading(text)
+    loadingSpin = false
+    loadingDot.Visible = false
+    submitBtn.Text = text or "🔓  UNLOCK"
+end
 
 -- ==================== BUY BUTTON ====================
 local buyBtn = Instance.new("TextButton")
-buyBtn.Size = UDim2.new(1, 0, 0, 40)
+buyBtn.Size = UDim2.new(1, 0, 0, 42)
 buyBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-buyBtn.BackgroundTransparency = 0.9
-buyBtn.Text = "💳 BUY KEY"
+buyBtn.BackgroundTransparency = 0.92
+buyBtn.Text = "💳  BUY KEY"
 buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 buyBtn.Font = Enum.Font.GothamBold
 buyBtn.TextSize = 13
 buyBtn.AutoButtonColor = false
-buyBtn.LayoutOrder = 6
-buyBtn.ZIndex = 84
+buyBtn.LayoutOrder = 9
+buyBtn.ZIndex = 211
 buyBtn.Parent = keyContent
-safeCorner(buyBtn, 10)
-safeStroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.6)
+safeCorner(buyBtn, 12)
+safeStroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.65)
 safePressFX(buyBtn)
 
 -- ==================== VERSION INFO ====================
 local buildInfo = Instance.new("TextLabel")
 buildInfo.Size = UDim2.new(1, 0, 0, 16)
 buildInfo.BackgroundTransparency = 1
-buildInfo.Text = "Build v2.1.0 | © 2025 " .. (Config.DEVELOPER_USERNAME or "AlfreadR0rw")
+buildInfo.Text = "Build v2.2.0 | © 2025 " .. (Config.DEVELOPER_USERNAME or "AlfreadR0rw")
 buildInfo.TextColor3 = Color3.fromRGB(80, 80, 100)
 buildInfo.Font = Enum.Font.Gotham
 buildInfo.TextSize = 8
-buildInfo.LayoutOrder = 7
-buildInfo.ZIndex = 83
+buildInfo.LayoutOrder = 10
+buildInfo.ZIndex = 211
 buildInfo.Parent = keyContent
 
 -- ==================== FUNCTIONS ====================
+local isSubmitting = false
+
+local function shakeInput()
+    pcall(function()
+        local origPos = inputContainer.Position
+        safeTween(inputContainer, {Position = origPos + UDim2.new(0, 8, 0, 0)}, 0.06)
+        task.delay(0.06, function()
+            safeTween(inputContainer, {Position = origPos - UDim2.new(0, 8, 0, 0)}, 0.06)
+            task.delay(0.06, function()
+                safeTween(inputContainer, {Position = origPos}, 0.06)
+            end)
+        end)
+    end)
+end
+
 local function submitKey()
+    if isSubmitting then return end
+
     local key = keyInput.Text:upper():gsub("%s", "")
-    
+
     if key == "" then
         keyStatus.Text = "⚠️ Masukkan key terlebih dahulu"
         keyStatus.TextColor3 = Color3.fromRGB(255, 200, 50)
+        shakeInput()
         return
     end
-    
+
+    isSubmitting = true
+    startLoading()
+    keyStatus.Text = "⏳ Checking key..."
+    keyStatus.TextColor3 = Color3.fromRGB(200, 190, 255)
+
     if Firebase and Firebase.ValidateKey then
-        keyStatus.Text = "⏳ Checking key..."
-        keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
-        
         task.spawn(function()
-            local ok, result = pcall(function()
+            local ok, isValid, message = pcall(function()
                 return Firebase.ValidateKey(key, LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name)
             end)
-            
-            if ok and result then
-                local isValid, message = result
-                if isValid then
-                    keyStatus.Text = "✅ " .. (message or "Key valid!")
-                    keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
-                    
-                    if Storage.saveKey then
-                        Storage.saveKey(key)
-                    end
-                    
+
+            -- pcall mengembalikan (ok, ...results). Perbaiki unpack:
+            if ok then
+                -- result asli ada di isValid, message posisi kedua dari return function
+            end
+
+            isSubmitting = false
+            stopLoading()
+
+            if ok then
+                local valid, msg = isValid, message
+                if valid then
+                    keyStatus.Text = "✅ " .. (msg or "Key valid!")
+                    keyStatus.TextColor3 = Color3.fromRGB(0, 255, 130)
+
+                    pcall(function()
+                        if Storage.saveKey then
+                            Storage.saveKey(key)
+                        end
+                    end)
+
                     task.wait(0.8)
                     _G.unlock()
                 else
-                    keyStatus.Text = "❌ " .. (message or "Key tidak valid")
-                    keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    keyStatus.Text = "❌ " .. (msg or "Key tidak valid")
+                    keyStatus.TextColor3 = Color3.fromRGB(255, 90, 90)
+                    shakeInput()
                 end
             else
+                warn("[Phone] Firebase.ValidateKey error:", isValid)
                 keyStatus.Text = "❌ Gagal terhubung ke server"
-                keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+                keyStatus.TextColor3 = Color3.fromRGB(255, 90, 90)
+                shakeInput()
             end
         end)
     else
-        task.wait(0.5)
-        _G.unlock()
+        -- Tidak ada Firebase configured — fallback langsung unlock (dev/testing mode)
+        task.spawn(function()
+            task.wait(0.5)
+            isSubmitting = false
+            stopLoading()
+            _G.unlock()
+        end)
     end
 end
 
@@ -525,7 +792,7 @@ end)
 buyBtn.MouseButton1Click:Connect(function()
     local url = Config.BUY_KEY_URL or "https://discord.gg/yourdiscord"
     pcall(function() setclipboard(url) end)
-    _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(255, 180, 50))
+    _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(180, 150, 255))
 end)
 
 -- ==================== STATE ====================
@@ -541,8 +808,16 @@ function _G.showKeyEntry()
     keyScreen.Visible = true
     keyInput.Text = ""
     keyStatus.Text = ""
+    isSubmitting = false
+    stopLoading()
+
+    -- Animasi masuk: fade + scale dari kecil
+    keyContent.Position = UDim2.new(0, 22, 0.05, 22)
+    keyContent.BackgroundTransparency = 1
+    safeTween(keyContent, {Position = UDim2.new(0, 22, 0, 22)}, 0.35, Enum.EasingStyle.Back)
+
     task.wait(0.1)
-    keyInput:CaptureFocus()
+    pcall(function() keyInput:CaptureFocus() end)
 end
 
 function _G.hideKeyEntry()
@@ -555,7 +830,7 @@ function _G.unlock()
     keyInput.Text = ""
     keyStatus.Text = ""
     if _G.goHome then _G.goHome() end
-    _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 100))
+    _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 130))
 end
 
 function _G.openPhone()
@@ -563,34 +838,72 @@ function _G.openPhone()
     phone.Visible = true
     phone.Size = UDim2.new(0, 0, 0, 0)
     safeTween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
-    
+
     if _G.PhoneState.isLocked then
-        -- Cek saved key dulu
-        local savedKey = nil
-        if Storage.getSavedKey then
-            savedKey = Storage.getSavedKey()
-        end
-        
-        if savedKey and savedKey ~= "" and Firebase and Firebase.CheckSavedKey then
-            local ok, isValid = pcall(function()
-                return Firebase.CheckSavedKey(LocalPlayer.UserId, savedKey)
+        task.spawn(function()
+            local savedKey = nil
+
+            -- Ambil saved key dengan aman
+            local okGet, resGet = pcall(function()
+                if Storage.getSavedKey then
+                    return Storage.getSavedKey()
+                end
+                return nil
             end)
-            
-            if ok and isValid then
-                _G.PhoneState.isLocked = false
-                task.wait(0.3)
-                if _G.goHome then _G.goHome() end
-                _G.showDynamicNotification("✅ Welcome back!", Color3.fromRGB(0, 255, 100))
-                return
+            if okGet then
+                savedKey = resGet
             else
-                if Storage.clearSavedKey then
-                    Storage.clearSavedKey()
+                warn("[Phone] Storage.getSavedKey error:", resGet)
+            end
+
+            local autoUnlocked = false
+
+            if savedKey and savedKey ~= "" and Firebase and Firebase.CheckSavedKey then
+                local done = false
+                local isValid = false
+
+                task.spawn(function()
+                    local okCheck, resCheck = pcall(function()
+                        return Firebase.CheckSavedKey(LocalPlayer.UserId, savedKey)
+                    end)
+                    if okCheck then
+                        isValid = resCheck
+                    else
+                        warn("[Phone] Firebase.CheckSavedKey error:", resCheck)
+                    end
+                    done = true
+                end)
+
+                -- Timeout manual 5 detik supaya tidak menggantung
+                local waited = 0
+                while not done and waited < 5 do
+                    task.wait(0.1)
+                    waited = waited + 0.1
+                end
+
+                if done and isValid then
+                    autoUnlocked = true
+                    _G.PhoneState.isLocked = false
+                    if _G.goHome then _G.goHome() end
+                    _G.showDynamicNotification("✅ Welcome back!", Color3.fromRGB(0, 255, 130))
+                else
+                    if not done then
+                        warn("[Phone] Firebase.CheckSavedKey timeout")
+                    end
+                    pcall(function()
+                        if Storage.clearSavedKey then
+                            Storage.clearSavedKey()
+                        end
+                    end)
                 end
             end
-        end
-        
-        task.wait(0.5)
-        _G.showKeyEntry()
+
+            -- Fallback tegas: kalau belum unlocked, SELALU tampilkan key entry
+            if not autoUnlocked then
+                task.wait(0.3)
+                _G.showKeyEntry()
+            end
+        end)
     else
         if _G.goHome then
             _G.goHome()
@@ -617,13 +930,17 @@ local function setPlayerOnline()
             jobId = game.JobId,
             lastUpdate = os.time(),
         }
-        Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        pcall(function()
+            Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        end)
     end
 end
 
 local function removePlayerOnline()
     if Firebase and Firebase.RemoveOnline then
-        Firebase.RemoveOnline(LocalPlayer.UserId)
+        pcall(function()
+            Firebase.RemoveOnline(LocalPlayer.UserId)
+        end)
     end
 end
 
