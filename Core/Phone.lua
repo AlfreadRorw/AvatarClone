@@ -617,31 +617,10 @@ end)
 
 buyBtn.MouseButton1Click:Connect(function()
     local url = Config.BUY_KEY_URL or "https://discord.gg/yourdiscord"
-    
-    -- Coba buka browser langsung
-    local opened = false
-    
-    -- Method 1: GuiService:OpenBrowserWindow
-    pcall(function()
-        if game:GetService("GuiService"):OpenBrowserWindow then
-            game:GetService("GuiService"):OpenBrowserWindow(url)
-            opened = true
-        end
-    end)
-    
-    -- Method 2: setclipboard + notifikasi jika tidak bisa buka browser
-    if not opened then
-        pcall(function()
-            if setclipboard then
-                setclipboard(url)
-            elseif Helpers and Helpers.copyToClipboard then
-                Helpers.copyToClipboard(url)
-            end
-        end)
-        _G.showDynamicNotification("Link disalin! Buka browser manual", Color3.fromRGB(255, 180, 50))
-    else
-        _G.showDynamicNotification("Membuka browser...", Color3.fromRGB(0, 255, 100))
+    if Helpers and Helpers.copyToClipboard then
+        Helpers.copyToClipboard(url)
     end
+    _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(255, 180, 50))
 end)
 
 -- ==================== STATE ====================
