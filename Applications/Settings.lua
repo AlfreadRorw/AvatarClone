@@ -1,5 +1,5 @@
 -- ================================================
--- SETTINGS APP - Final Version with All Features
+-- SETTINGS APP - Fixed Lifecycle, Performance, Validation
 -- ================================================
 
 local Services = _G.Services
@@ -11,7 +11,7 @@ local T = _G.T
 local Helpers = _G.Helpers
 local Storage = _G.Storage
 local Firebase = _G.Firebase
-local Config = _G.Config
+local Config = _G.Config or {}
 local Assets = _G.Assets
 
 local appContent = _G.appContent
@@ -22,20 +22,76 @@ local stroke = Helpers.stroke
 local tween = Helpers.tween
 local pressFX = Helpers.pressFX
 
--- ==================== COLORS ====================
+-- ==================== DARK THEME COLORS ====================
 local colors = {
-    card = Color3.fromRGB(255, 255, 255),
-    cardHover = Color3.fromRGB(248, 248, 252),
-    accent = Color3.fromRGB(30, 30, 35),
-    accent2 = Color3.fromRGB(0, 150, 255),
+    card = Color3.fromRGB(25, 25, 32),
+    card2 = Color3.fromRGB(30, 30, 38),
+    cardHover = Color3.fromRGB(35, 35, 45),
+    accent = Color3.fromRGB(255, 255, 255),
+    accent2 = Color3.fromRGB(0, 200, 255),
     gold = Color3.fromRGB(255, 180, 50),
-    green = Color3.fromRGB(0, 200, 100),
-    red = Color3.fromRGB(255, 80, 80),
-    text = Color3.fromRGB(30, 30, 35),
-    text2 = Color3.fromRGB(100, 100, 110),
-    text3 = Color3.fromRGB(150, 150, 160),
-    border = Color3.fromRGB(220, 220, 225),
+    green = Color3.fromRGB(0, 230, 118),
+    red = Color3.fromRGB(255, 82, 82),
+    text = Color3.fromRGB(255, 255, 255),
+    text2 = Color3.fromRGB(170, 170, 180),
+    text3 = Color3.fromRGB(100, 100, 115),
+    border = Color3.fromRGB(45, 45, 55),
 }
+
+-- ==================== LIFECYCLE MANAGER ====================
+local SettingsLifecycle = {
+    active = false,
+    tasks = {},
+    connections = {},
+}
+
+local function addTask(fn)
+    local taskId = #SettingsLifecycle.tasks + 1
+    SettingsLifecycle.tasks[taskId] = task(fn)
+    return taskId
+end
+
+local function addConnection(conn)
+    table.insert(SettingsLifecycle.connections, conn)
+    return conn
+end
+
+local function cleanupSettings()
+    SettingsLifecycle.active = false
+    
+    -- Cancel all tasks
+    for _, taskId in ipairs(SettingsLifecycle.tasks) do
+        pcall(function() task.cancel(taskId) end)
+    end
+    SettingsLifecycle.tasks = {}
+    
+    -- Disconnect all connections
+    for _, conn in ipairs(SettingsLifecycle.connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    SettingsLifecycle.connections = {}
+end
+
+-- Register cleanup to global
+table.insert(_G.AvatarCloneCleanupTasks or {}, cleanupSettings)
+
+-- ==================== SAFE DEPENDENCY CHECK ====================
+local function getConfigValue(key, default)
+    if Config and Config[key] ~= nil then
+        return Config[key]
+    end
+    return default
+end
+
+local function getAssetIcon(name)
+    if Assets and Assets.GetIcon then
+        local icon = Assets.GetIcon(name)
+        if icon and icon ~= "" then
+            return icon
+        end
+    end
+    return "" -- Safe fallback
+end
 
 -- ==================== BUILDER FUNCTIONS ====================
 local function createSection(title, order)
@@ -49,7 +105,6 @@ local function createSection(title, order)
     layout.Padding = UDim.new(0, 8)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- Title with accent line
     local titleFrame = Instance.new("Frame", section)
     titleFrame.Size = UDim2.new(1, 0, 0, 25)
     titleFrame.BackgroundTransparency = 1
@@ -94,11 +149,14 @@ end
 
 -- ==================== OPEN SETTINGS APP ====================
 function _G.openSettingsApp()
-    -- ==================== KEY TIMER SECTION ====================
+    -- Cleanup previous instance
+    cleanupSettings()
+    SettingsLifecycle.active = true
+    
+    -- ==================== KEY TIMER (OPTIMIZED) ====================
     local timerSection = createSection("KEY STATUS", 1)
     local timerCard = createCard(timerSection, 1)
 
-    -- Timer label
     local timerLabel = Instance.new("TextLabel", timerCard)
     timerLabel.Size = UDim2.new(1, 0, 0, 16)
     timerLabel.BackgroundTransparency = 1
@@ -109,7 +167,6 @@ function _G.openSettingsApp()
     timerLabel.TextXAlignment = Enum.TextXAlignment.Center
     timerLabel.LayoutOrder = 0
 
-    -- Timer display
     local timerDisplay = Instance.new("TextLabel", timerCard)
     timerDisplay.Size = UDim2.new(1, 0, 0, 40)
     timerDisplay.BackgroundTransparency = 1
@@ -119,7 +176,6 @@ function _G.openSettingsApp()
     timerDisplay.TextSize = 28
     timerDisplay.LayoutOrder = 1
 
-    -- Status badge
     local statusBadge = Instance.new("TextLabel", timerCard)
     statusBadge.Size = UDim2.new(0, 90, 0, 20)
     statusBadge.Position = UDim2.new(0.5, -45, 0, 58)
@@ -132,47 +188,68 @@ function _G.openSettingsApp()
     statusBadge.LayoutOrder = 2
     corner(statusBadge, 10)
 
-    -- Timer update function
-    local function updateTimer()
+    -- Optimized timer: fetch expiry once, countdown locally
+    local keyExpiryTimestamp = nil
+    local lastFirebaseCheck = 0
+    
+    local function fetchKeyExpiry()
         local savedKey = nil
         if Storage and Storage.appSettings then
             savedKey = Storage.appSettings.savedKey
         end
-
-        if savedKey and savedKey ~= "" and Firebase and Firebase.GetKeyTimeRemaining then
-            local ok, remaining = pcall(function()
-                return Firebase.GetKeyTimeRemaining(LocalPlayer.UserId, savedKey)
+        
+        if not savedKey or savedKey == "" then
+            keyExpiryTimestamp = nil
+            return nil
+        end
+        
+        if Firebase and Firebase.GetData then
+            local ok, keyData = pcall(function()
+                return Firebase.GetData("keys/" .. savedKey)
             end)
-
-            if ok and remaining and remaining > 0 then
-                local hours = math.floor(remaining / 3600)
-                local minutes = math.floor((remaining % 3600) / 60)
-                local seconds = remaining % 60
-
-                timerDisplay.Text = string.format("%02d:%02d:%02d", hours, minutes, seconds)
-
-                if remaining > 3600 then
-                    timerDisplay.TextColor3 = colors.green
-                    statusBadge.Text = "ACTIVE"
-                    statusBadge.TextColor3 = colors.green
-                    statusBadge.BackgroundColor3 = colors.green
-                elseif remaining > 600 then
-                    timerDisplay.TextColor3 = colors.gold
-                    statusBadge.Text = "WARNING"
-                    statusBadge.TextColor3 = colors.gold
-                    statusBadge.BackgroundColor3 = colors.gold
-                else
-                    timerDisplay.TextColor3 = colors.red
-                    statusBadge.Text = "CRITICAL"
-                    statusBadge.TextColor3 = colors.red
-                    statusBadge.BackgroundColor3 = colors.red
-                end
+            
+            if ok and keyData and keyData.expires then
+                keyExpiryTimestamp = tonumber(keyData.expires)
+                return keyExpiryTimestamp
+            end
+        end
+        
+        keyExpiryTimestamp = nil
+        return nil
+    end
+    
+    local function updateTimerDisplay()
+        local now = os.time()
+        
+        -- Refresh from Firebase every 30 seconds
+        if (now - lastFirebaseCheck) >= 30 then
+            fetchKeyExpiry()
+            lastFirebaseCheck = now
+        end
+        
+        if keyExpiryTimestamp and keyExpiryTimestamp > now then
+            local remaining = keyExpiryTimestamp - now
+            local hours = math.floor(remaining / 3600)
+            local minutes = math.floor((remaining % 3600) / 60)
+            local seconds = remaining % 60
+            
+            timerDisplay.Text = string.format("%02d:%02d:%02d", hours, minutes, seconds)
+            
+            if remaining > 3600 then
+                timerDisplay.TextColor3 = colors.green
+                statusBadge.Text = "ACTIVE"
+                statusBadge.TextColor3 = colors.green
+                statusBadge.BackgroundColor3 = colors.green
+            elseif remaining > 600 then
+                timerDisplay.TextColor3 = colors.gold
+                statusBadge.Text = "WARNING"
+                statusBadge.TextColor3 = colors.gold
+                statusBadge.BackgroundColor3 = colors.gold
             else
-                timerDisplay.Text = "NO KEY"
-                timerDisplay.TextColor3 = colors.text3
-                statusBadge.Text = "INACTIVE"
-                statusBadge.TextColor3 = colors.text3
-                statusBadge.BackgroundColor3 = colors.text3
+                timerDisplay.TextColor3 = colors.red
+                statusBadge.Text = "CRITICAL"
+                statusBadge.TextColor3 = colors.red
+                statusBadge.BackgroundColor3 = colors.red
             end
         else
             timerDisplay.Text = "NO KEY"
@@ -182,14 +259,19 @@ function _G.openSettingsApp()
             statusBadge.BackgroundColor3 = colors.text3
         end
     end
-
-    -- Jalankan timer loop
-    task.spawn(function()
-        while timerDisplay.Parent do
-            updateTimer()
+    
+    -- Initial fetch
+    fetchKeyExpiry()
+    lastFirebaseCheck = os.time()
+    
+    -- Local countdown loop (no HTTP every second)
+    local timerTask = task.spawn(function()
+        while SettingsLifecycle.active and timerDisplay.Parent do
+            updateTimerDisplay()
             task.wait(1)
         end
     end)
+    table.insert(SettingsLifecycle.tasks, timerTask)
 
     -- ==================== DEVELOPER PROFILE ====================
     local devSection = createSection("DEVELOPER", 2)
@@ -200,7 +282,6 @@ function _G.openSettingsApp()
     devHeader.BackgroundTransparency = 1
     devHeader.LayoutOrder = 0
 
-    -- Avatar with gold border
     local avatarFrame = Instance.new("Frame", devHeader)
     avatarFrame.Size = UDim2.new(0, 48, 0, 48)
     avatarFrame.Position = UDim2.new(0, 10, 0.5, -24)
@@ -214,23 +295,24 @@ function _G.openSettingsApp()
     avatarImage.Size = UDim2.new(1, -6, 1, -6)
     avatarImage.Position = UDim2.new(0, 3, 0, 3)
     avatarImage.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    avatarImage.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. (Config.DEVELOPER_USER_ID or LocalPlayer.UserId) .. "&width=100&height=100&format=png"
+    
+    -- Safe developer ID
+    local devUserId = getConfigValue("DEVELOPER_USER_ID", nil) or LocalPlayer.UserId
+    avatarImage.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. devUserId .. "&width=100&height=100&format=png"
     avatarImage.ZIndex = 3
     corner(avatarImage, 100)
 
-    -- Developer name
     local devName = Instance.new("TextLabel", devHeader)
     devName.Size = UDim2.new(1, -65, 0, 22)
     devName.Position = UDim2.new(0, 65, 0, 12)
     devName.BackgroundTransparency = 1
-    devName.Text = Config.DEVELOPER_USERNAME or "AlfreadR0rw"
+    devName.Text = getConfigValue("DEVELOPER_USERNAME", "AlfreadR0rw")
     devName.TextColor3 = colors.text
     devName.Font = Enum.Font.GothamBlack
     devName.TextSize = 14
     devName.TextXAlignment = Enum.TextXAlignment.Left
     devName.ZIndex = 2
 
-    -- Role badge
     local devRole = Instance.new("TextLabel", devHeader)
     devRole.Size = UDim2.new(0, 50, 0, 18)
     devRole.Position = UDim2.new(0, 65, 0, 36)
@@ -242,26 +324,27 @@ function _G.openSettingsApp()
     devRole.ZIndex = 2
     corner(devRole, 9)
 
-    -- User ID
-    local devUserId = Instance.new("TextLabel", devHeader)
-    devUserId.Size = UDim2.new(1, -65, 0, 14)
-    devUserId.Position = UDim2.new(0, 120, 0, 38)
-    devUserId.BackgroundTransparency = 1
-    devUserId.Text = "ID: " .. (Config.DEVELOPER_USER_ID or LocalPlayer.UserId)
-    devUserId.TextColor3 = colors.text3
-    devUserId.Font = Enum.Font.Code
-    devUserId.TextSize = 9
-    devUserId.TextXAlignment = Enum.TextXAlignment.Left
-    devUserId.ZIndex = 2
-
     -- ==================== SOCIAL MEDIA ====================
     local socialSection = createSection("SOCIAL MEDIA", 3)
     local socialCard = createCard(socialSection, 1)
 
-    local function createSocialButton(parent, order, name, iconName, link)
+    local function isPlaceholderLink(url)
+        if not url or url == "" then
+            return true
+        end
+        if url:find("yourdiscord") or url:find("yourusername") or url:find("6281234567890") then
+            return true
+        end
+        return false
+    end
+
+    local function createSocialButton(parent, order, name, iconName, linkKey)
+        local link = getConfigValue(linkKey, "")
+        local isConfigured = not isPlaceholderLink(link)
+        
         local btn = Instance.new("TextButton", parent)
         btn.Size = UDim2.new(1, 0, 0, 50)
-        btn.BackgroundColor3 = colors.cardHover
+        btn.BackgroundColor3 = colors.card2
         btn.LayoutOrder = order
         btn.AutoButtonColor = false
         btn.BorderSizePixel = 0
@@ -269,11 +352,12 @@ function _G.openSettingsApp()
         stroke(btn, colors.border, 1, 0.3)
         pressFX(btn)
 
-        -- Icon dari Assets
+        -- Icon
         local iconFrame = Instance.new("Frame", btn)
         iconFrame.Size = UDim2.new(0, 34, 0, 34)
         iconFrame.Position = UDim2.new(0, 8, 0.5, -17)
         iconFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        iconFrame.BackgroundTransparency = 0.9
         iconFrame.ZIndex = 2
         corner(iconFrame, 10)
 
@@ -281,7 +365,7 @@ function _G.openSettingsApp()
         iconImage.Size = UDim2.new(1, -8, 1, -8)
         iconImage.Position = UDim2.new(0, 4, 0, 4)
         iconImage.BackgroundTransparency = 1
-        iconImage.Image = Assets.GetIcon(iconName)
+        iconImage.Image = getAssetIcon(iconName)
         iconImage.ScaleType = Enum.ScaleType.Fit
         iconImage.ZIndex = 3
 
@@ -300,83 +384,42 @@ function _G.openSettingsApp()
         subLbl.Size = UDim2.new(1, -55, 0, 16)
         subLbl.Position = UDim2.new(0, 50, 0, 28)
         subLbl.BackgroundTransparency = 1
-        subLbl.Text = "Klik untuk copy link"
-        subLbl.TextColor3 = colors.text3
+        subLbl.Text = isConfigured and "Klik untuk copy link" or "Link belum dikonfigurasi"
+        subLbl.TextColor3 = isConfigured and colors.text3 or colors.red
         subLbl.Font = Enum.Font.Gotham
         subLbl.TextSize = 8
         subLbl.TextXAlignment = Enum.TextXAlignment.Left
         subLbl.ZIndex = 2
 
         btn.MouseButton1Click:Connect(function()
-            Helpers.copyToClipboard(link)
-            _G.showDynamicNotification(name .. " link copied!", colors.accent2)
+            if not isConfigured then
+                _G.showDynamicNotification(name .. " link belum dikonfigurasi", colors.red)
+                return
+            end
+            
+            local copyOk = Helpers.copyToClipboard(link)
+            if copyOk then
+                _G.showDynamicNotification(name .. " link copied!", colors.accent2)
+            else
+                _G.showDynamicNotification("Clipboard unavailable", colors.red)
+            end
         end)
 
         return btn
     end
 
-    createSocialButton(socialCard, 0, "Discord", "discord", Config.DiscordURL or "")
-    createSocialButton(socialCard, 1, "WhatsApp", "whatsapp", Config.WhatsAppURL or "")
-    createSocialButton(socialCard, 2, "Telegram", "telegram", Config.TelegramURL or "")
-
-    -- ==================== TOGGLES ====================
-    local toggleSection = createSection("PENGATURAN", 4)
-    local toggleCard = createCard(toggleSection, 1)
-
-    local function createToggleRow(parent, order, title, description, initialState, onChange)
-        local row = Instance.new("Frame", parent)
-        row.Size = UDim2.new(1, 0, 0, 42)
-        row.BackgroundTransparency = 1
-        row.LayoutOrder = order
-
-        local textFrame = Instance.new("Frame", row)
-        textFrame.Size = UDim2.new(1, -60, 1, 0)
-        textFrame.BackgroundTransparency = 1
-
-        local titleLbl = Instance.new("TextLabel", textFrame)
-        titleLbl.Size = UDim2.new(1, 0, 0, 20)
-        titleLbl.BackgroundTransparency = 1
-        titleLbl.Text = title
-        titleLbl.TextColor3 = colors.text
-        titleLbl.Font = Enum.Font.GothamBold
-        titleLbl.TextSize = 11
-        titleLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-        local descLbl = Instance.new("TextLabel", textFrame)
-        descLbl.Size = UDim2.new(1, 0, 0, 16)
-        descLbl.Position = UDim2.new(0, 0, 0, 20)
-        descLbl.BackgroundTransparency = 1
-        descLbl.Text = description
-        descLbl.TextColor3 = colors.text3
-        descLbl.Font = Enum.Font.Gotham
-        descLbl.TextSize = 8
-        descLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-        local toggle = Helpers.buildToggle(row, initialState, onChange)
-        toggle.Position = UDim2.new(1, -50, 0.5, -13)
-
-        return row
-    end
-
-    createToggleRow(toggleCard, 0, "Dynamic Island", "Notifikasi di atas layar", appSettings.toastEnabled ~= false, function(state)
-        appSettings.toastEnabled = state
-        Storage.persistSettings()
-        _G.showDynamicNotification("Toast " .. (state and "ON" or "OFF"), colors.accent2)
-    end)
-
-    createToggleRow(toggleCard, 1, "Glow Effect", "Efek cahaya di pinggir phone", appSettings.glowEnabled ~= false, function(state)
-        appSettings.glowEnabled = state
-        Storage.persistSettings()
-    end)
+    createSocialButton(socialCard, 0, "Discord", "discord", "DiscordURL")
+    createSocialButton(socialCard, 1, "WhatsApp", "whatsapp", "WhatsAppURL")
+    createSocialButton(socialCard, 2, "Telegram", "telegram", "TelegramURL")
 
     -- ==================== QUICK ACTIONS ====================
-    local actionSection = createSection("AKSI CEPAT", 5)
+    local actionSection = createSection("AKSI CEPAT", 4)
     local actionCard = createCard(actionSection, 1)
 
     local function createActionButton(parent, order, title, iconName, onClick)
         local btn = Instance.new("TextButton", parent)
         btn.Size = UDim2.new(1, 0, 0, 42)
-        btn.BackgroundColor3 = colors.cardHover
+        btn.BackgroundColor3 = colors.card2
         btn.LayoutOrder = order
         btn.AutoButtonColor = false
         btn.BorderSizePixel = 0
@@ -384,12 +427,11 @@ function _G.openSettingsApp()
         stroke(btn, colors.border, 1, 0.3)
         pressFX(btn)
 
-        -- Icon
         local iconImage = Instance.new("ImageLabel", btn)
         iconImage.Size = UDim2.new(0, 22, 0, 22)
         iconImage.Position = UDim2.new(0, 10, 0.5, -11)
         iconImage.BackgroundTransparency = 1
-        iconImage.Image = Assets.GetIcon(iconName)
+        iconImage.Image = getAssetIcon(iconName)
         iconImage.ScaleType = Enum.ScaleType.Fit
         iconImage.ZIndex = 2
 
@@ -403,39 +445,63 @@ function _G.openSettingsApp()
         titleLbl.TextSize = 11
         titleLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-        btn.MouseButton1Click:Connect(onClick)
+        if type(onClick) == "function" then
+            btn.MouseButton1Click:Connect(onClick)
+        end
+
         return btn
     end
 
     createActionButton(actionCard, 0, "Rejoin Server", "wifi", function()
-        pcall(function()
+        local ok, err = pcall(function()
             TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId)
         end)
+        if not ok then
+            _G.showDynamicNotification("Rejoin gagal: " .. tostring(err), colors.red)
+        end
     end)
 
     createActionButton(actionCard, 1, "Copy User ID", "clipboard", function()
-        Helpers.copyToClipboard(tostring(LocalPlayer.UserId))
-        _G.showDynamicNotification("User ID copied!", colors.green)
+        local copyOk = Helpers.copyToClipboard(tostring(LocalPlayer.UserId))
+        if copyOk then
+            _G.showDynamicNotification("User ID copied!", colors.green)
+        else
+            _G.showDynamicNotification("Clipboard unavailable", colors.red)
+        end
     end)
 
     createActionButton(actionCard, 2, "Copy Key", "keys", function()
         local savedKey = appSettings.savedKey
         if savedKey and savedKey ~= "" then
-            Helpers.copyToClipboard(savedKey)
-            _G.showDynamicNotification("Key copied!", colors.green)
+            local copyOk = Helpers.copyToClipboard(savedKey)
+            if copyOk then
+                _G.showDynamicNotification("Key copied!", colors.green)
+            else
+                _G.showDynamicNotification("Clipboard unavailable", colors.red)
+            end
         else
             _G.showDynamicNotification("No key saved", colors.red)
         end
     end)
 
     createActionButton(actionCard, 3, "Buy Key", "link", function()
-        local url = Config.BUY_KEY_URL or "https://discord.gg/"
-        Helpers.copyToClipboard(url)
-        _G.showDynamicNotification("Link copied!", colors.gold)
+        local url = getConfigValue("BUY_KEY_URL", "")
+        
+        if isPlaceholderLink(url) then
+            _G.showDynamicNotification("Link belum dikonfigurasi", colors.red)
+            return
+        end
+        
+        local copyOk = Helpers.copyToClipboard(url)
+        if copyOk then
+            _G.showDynamicNotification("Link copied!", colors.gold)
+        else
+            _G.showDynamicNotification("Clipboard unavailable", colors.red)
+        end
     end)
 
     -- ==================== MAP INFO ====================
-    local mapSection = createSection("MAP INFO", 6)
+    local mapSection = createSection("MAP INFO", 5)
     local mapCard = createCard(mapSection, 1)
 
     local mapRow = Instance.new("Frame", mapCard)
@@ -447,7 +513,7 @@ function _G.openSettingsApp()
     mapIcon.Size = UDim2.new(0, 20, 0, 20)
     mapIcon.Position = UDim2.new(0, 10, 0.5, -10)
     mapIcon.BackgroundTransparency = 1
-    mapIcon.Image = Assets.GetIcon("website")
+    mapIcon.Image = getAssetIcon("website")
     mapIcon.ScaleType = Enum.ScaleType.Fit
     mapIcon.ZIndex = 2
 
@@ -462,42 +528,31 @@ function _G.openSettingsApp()
     mapNameLbl.TextXAlignment = Enum.TextXAlignment.Left
     mapNameLbl.ZIndex = 2
 
-    -- Load map name
-    task.spawn(function()
-        local success, result = pcall(function()
+    -- Map name with lifecycle-aware task
+    local mapTask = task.spawn(function()
+        local ok, result = pcall(function()
             return MarketplaceService:GetProductInfo(game.PlaceId)
         end)
-        if success and result and result.Name then
-            mapNameLbl.Text = result.Name
+        if ok and result and result.Name then
+            if mapNameLbl.Parent then
+                mapNameLbl.Text = result.Name
+            end
         else
-            mapNameLbl.Text = "Unknown Map"
+            if mapNameLbl.Parent then
+                mapNameLbl.Text = "Unknown Map"
+            end
         end
     end)
-
-    -- Job ID
-    local jobRow = Instance.new("Frame", mapCard)
-    jobRow.Size = UDim2.new(1, 0, 0, 25)
-    jobRow.BackgroundTransparency = 1
-    jobRow.LayoutOrder = 1
-
-    local jobLbl = Instance.new("TextLabel", jobRow)
-    jobLbl.Size = UDim2.new(1, 0, 1, 0)
-    jobLbl.BackgroundTransparency = 1
-    jobLbl.Text = "Job ID: " .. game.JobId
-    jobLbl.TextColor3 = colors.text3
-    jobLbl.Font = Enum.Font.Code
-    jobLbl.TextSize = 9
-    jobLbl.TextXAlignment = Enum.TextXAlignment.Center
-    jobLbl.ZIndex = 2
+    table.insert(SettingsLifecycle.tasks, mapTask)
 
     -- ==================== INFO ====================
-    local infoSection = createSection("INFO", 7)
+    local infoSection = createSection("INFO", 6)
     local infoCard = createCard(infoSection, 1)
 
     local infoLbl = Instance.new("TextLabel", infoCard)
     infoLbl.Size = UDim2.new(1, 0, 0, 20)
     infoLbl.BackgroundTransparency = 1
-    infoLbl.Text = "Version 2.2.0"
+    infoLbl.Text = "Version 2.3.0"
     infoLbl.TextColor3 = colors.text3
     infoLbl.Font = Enum.Font.Gotham
     infoLbl.TextSize = 9
@@ -507,7 +562,7 @@ function _G.openSettingsApp()
     local copyrightLbl = Instance.new("TextLabel", infoCard)
     copyrightLbl.Size = UDim2.new(1, 0, 0, 16)
     copyrightLbl.BackgroundTransparency = 1
-    copyrightLbl.Text = "Copyright 2024 " .. (Config.DEVELOPER_USERNAME or "AlfreadR0rw")
+    copyrightLbl.Text = "Copyright 2024 " .. getConfigValue("DEVELOPER_USERNAME", "AlfreadR0rw")
     copyrightLbl.TextColor3 = colors.text3
     copyrightLbl.Font = Enum.Font.Gotham
     copyrightLbl.TextSize = 8

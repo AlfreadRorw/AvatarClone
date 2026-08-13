@@ -1,17 +1,77 @@
 -- ================================================
--- PHONE ID VIEWER - Modular Loader (FIXED)
+-- AVATARCLONE LOADER - Full Rewrite with AppRegistry
 -- ================================================
+
+-- Duplicate execution guard
+if _G.AvatarCloneLoaded then
+    warn("[AvatarClone] Already loaded. Cleaning up previous instance...")
+    if _G.AvatarCloneCleanup then
+        _G.AvatarCloneCleanup()
+    end
+end
+
+_G.AvatarCloneLoaded = true
+_G.AvatarCloneCleanup = function()
+    -- Cleanup function will be populated by modules
+    for _, cleanup in ipairs(_G.AvatarCloneCleanupTasks or {}) do
+        pcall(cleanup)
+    end
+    _G.AvatarCloneCleanupTasks = {}
+    _G.AvatarCloneLoaded = false
+end
+
+_G.AvatarCloneCleanupTasks = {}
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
 
+local LoadStats = {
+    loaded = 0,
+    failed = 0,
+    skipped = 0,
+    errors = {},
+}
+
+-- ==================== LOAD FUNCTION ====================
 local function Load(path)
-    local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE_URL .. path, true))()
-    end)
-    if not ok then
-        warn("[PhoneIDViewer] Failed: " .. path .. " | " .. tostring(result))
+    local function logError(stage, err)
+        local msg = string.format("[AvatarClone][ERROR] Module: %s | Stage: %s | Error: %s", path, stage, tostring(err))
+        warn(msg)
+        table.insert(LoadStats.errors, msg)
+        LoadStats.failed = LoadStats.failed + 1
     end
-    return ok and result or nil
+
+    -- Stage 1: HTTP Download
+    local httpOk, source = pcall(function()
+        return game:HttpGet(BASE_URL .. path, true)
+    end)
+    
+    if not httpOk then
+        logError("http", source)
+        return nil
+    end
+    
+    -- Stage 2: Loadstring
+    local loadOk, loadedFunc = pcall(function()
+        return loadstring(source)
+    end)
+    
+    if not loadOk or not loadedFunc then
+        logError("loadstring", loadedFunc or "Invalid source")
+        return nil
+    end
+    
+    -- Stage 3: Execution
+    local execOk, result = pcall(function()
+        return loadedFunc()
+    end)
+    
+    if not execOk then
+        logError("execute", result)
+        return nil
+    end
+    
+    LoadStats.loaded = LoadStats.loaded + 1
+    return result
 end
 
 -- ==================== SERVICES ====================
@@ -33,104 +93,99 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- ==================== LOAD CORE MODULES ====================
+-- ==================== APP REGISTRY ====================
+_G.AppRegistry = {}
+
+local function registerApp(name, opener)
+    _G.AppRegistry[name] = {
+        opener = opener,
+        available = type(opener) == "function",
+    }
+end
+
+-- ==================== LOAD CONFIG ====================
+print("[AvatarClone] Loading Config...")
 local Config = Load("Config.lua")
+
+if not Config then
+    error("[AvatarClone] CRITICAL: Config failed to load. Initialization aborted.")
+end
+
 _G.Config = Config
 
-local Theme = Load("Core/Theme.lua")
-_G.T = Theme
+-- ==================== LOAD CORE MODULES ====================
+local coreModules = {
+    {path = "Core/Theme.lua", name = "Theme"},
+    {path = "Core/Helpers.lua", name = "Helpers"},
+    {path = "Core/Assets.lua", name = "Assets"},
+    {path = "Core/Storage.lua", name = "Storage"},
+    {path = "Firebase.lua", name = "Firebase"},
+    {path = "Core/Phone.lua", name = "Phone"},
+    {path = "Core/Icons.lua", name = "Icons"},
+    {path = "Core/LoadingNotif.lua", name = "LoadingNotif"},
+}
 
-local Helpers = Load("Core/Helpers.lua")
-_G.Helpers = Helpers
-
--- Setelah Helpers, sebelum Storage
-local Assets = Load("Core/Assets.lua")
-_G.Assets = Assets
-
--- ==================== LOADING NOTIFICATION ====================
-Load("Core/LoadingNotif.lua")
-
--- ==================== LOAD MODULES WITH PROGRESS ====================
-local totalSteps = 25
+local totalSteps = #coreModules + 3 + 1 -- core + 3 apps + floating icon
 local currentStep = 0
 
-local function updateProgress(stepName)
+local function updateProgress(name)
     currentStep = currentStep + 1
     if _G.updateLoadingProgress then
-        _G.updateLoadingProgress(currentStep, totalSteps, stepName)
+        _G.updateLoadingProgress(currentStep, totalSteps, name)
     end
 end
 
--- Tampilkan loading notification
+-- Show loading notification
 if _G.showLoadingNotification then
     _G.showLoadingNotification()
 end
 
--- Load Storage
-updateProgress("Storage")
-local Storage = Load("Core/Storage.lua")
-_G.Storage = Storage
-
--- Load Firebase
-updateProgress("Firebase")
-local Firebase = Load("Firebase.lua")
-_G.Firebase = Firebase
-
--- Load Phone
-updateProgress("Phone GUI")
-local Phone = Load("Core/Phone.lua")
-_G.Phone = Phone
-
--- Load Icons
-updateProgress("Icons")
-local Icons = Load("Core/Icons.lua")
-_G.Icons = Icons
-
--- Load BuildIcons
-updateProgress("Build Icons")
-Load("Core/BuildIcons.lua")
-
--- ==================== LOAD APPLICATIONS ====================
-local AppList = {
-    {path = "Applications/Players.lua", name = "Players"},
-    {path = "Applications/Clone.lua", name = "Clone"},
-    {path = "Applications/Body.lua", name = "Body"},
-    {path = "Applications/Accessory.lua", name = "Accessory"},
-    {path = "Applications/Preset.lua", name = "Preset"},
-    {path = "Applications/Favorites.lua", name = "Favorites"},
-    {path = "Applications/Items.lua", name = "Items"},
-    {path = "Applications/Teleport.lua", name = "Teleport"},
-    {path = "Applications/Size.lua", name = "Size"},
-    {path = "Applications/Volume.lua", name = "Volume"},
-    {path = "Applications/Friends.lua", name = "Friends"},
-    {path = "Applications/Server.lua", name = "Server"},
-    {path = "Applications/Bundle.lua", name = "Bundle"},
-    {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
-    {path = "Applications/Lookup.lua", name = "Lookup"},
-    {path = "Applications/ServerJoiner.lua", name = "ServerJoiner"},
-    {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
-    {path = "Applications/Messages.lua", name = "Messages"},
-    {path = "Applications/Command.lua", name = "Command"},
-    {path = "Applications/NotifWeb.lua", name = "NotifWeb"},
-    {path = "Applications/Settings.lua", name = "Settings"},
-    
-}
-
-for _, app in ipairs(AppList) do
-    updateProgress(app.name)
-    Load(app.path)
+-- Load core modules
+for _, module in ipairs(coreModules) do
+    updateProgress(module.name)
+    local result = Load(module.path)
+    if result then
+        _G[module.name] = result
+    end
 end
 
--- Load FloatingIcon
-updateProgress("Floating Icon")
+-- ==================== LOAD APPLICATIONS (ONLY AVAILABLE) ====================
+local availableApps = {
+    {path = "Applications/Players.lua", name = "Players", register = "Players"},
+    {path = "Applications/NotifWeb.lua", name = "NotifWeb", register = "NotifWeb"},
+    {path = "Applications/Settings.lua", name = "Settings", register = "Settings"},
+}
+
+for _, app in ipairs(availableApps) do
+    updateProgress(app.name)
+    local result = Load(app.path)
+    if result then
+        registerApp(app.register, _G["open" .. app.register .. "App"])
+    end
+end
+
+-- ==================== BUILD ICONS (AFTER APPS LOADED) ====================
+updateProgress("BuildIcons")
+Load("Core/BuildIcons.lua")
+
+-- ==================== FLOATING ICON ====================
+updateProgress("FloatingIcon")
 Load("Core/FloatingIcon.lua")
 
--- Selesai
+-- ==================== FINAL REPORT ====================
 if _G.finishLoading then
     _G.finishLoading()
 end
 
-print("[PhoneIDViewer] All modules loaded successfully!")
-print("[PhoneIDViewer] Phone:", _G.Phone and "OK" or "FAILED")
-print("[PhoneIDViewer] Firebase:", _G.Firebase and "OK" or "FAILED")
-print("[PhoneIDViewer] Storage:", _G.Storage and "OK" or "FAILED")
+print("[AvatarClone] ============ LOAD REPORT ============")
+print(string.format("[AvatarClone] Loaded: %d | Failed: %d | Skipped: %d", LoadStats.loaded, LoadStats.failed, LoadStats.skipped))
+
+if LoadStats.failed > 0 then
+    print("[AvatarClone] Loaded with errors!")
+    for _, err in ipairs(LoadStats.errors) do
+        warn(err)
+    end
+else
+    print("[AvatarClone] All modules loaded successfully!")
+end
+print("[AvatarClone] =====================================")

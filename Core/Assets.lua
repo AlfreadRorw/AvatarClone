@@ -1,87 +1,120 @@
 -- ================================================
--- ASSETS MANAGER - Download & Cache Local Icons
+-- ASSETS MANAGER - Safe Filesystem Handling
 -- ================================================
 
-local Services = _G.Services
-local HttpService = Services.HttpService
-local Config = _G.Config
+local Config = _G.Config or {}
 
 local Assets = {}
 
 local ROOT = "PhoneIDViewer/Assets/Icons"
-local LOGO_PATH = "PhoneIDViewer/Assets/Logo.png"
+local LOGO_PATH = Config.LogoLocalPath or "PhoneIDViewer/Assets/Logo.png"
 
--- Helper untuk download file jika belum ada
+local DEBUG = Config.DEBUG or false
+
+local function log(...)
+    if DEBUG then
+        print("[Assets]", ...)
+    end
+end
+
+-- Check if filesystem functions are available
+local function hasFilesystem()
+    return type(isfile) == "function" and type(writefile) == "function"
+end
+
+local function hasCustomAsset()
+    return type(getcustomasset) == "function"
+end
+
+-- Ensure file exists, download if needed
 local function ensureFile(localPath, url)
-    if not isfile(localPath) then
-        pcall(function()
-            writefile(localPath, game:HttpGet(url))
-            print("[Assets] Downloaded:", localPath)
-        end)
+    if not hasFilesystem() then
+        return false, "filesystem_unavailable"
     end
-    return isfile(localPath)
+    
+    if isfile(localPath) then
+        return true, nil
+    end
+    
+    local ok, err = pcall(function()
+        writefile(localPath, game:HttpGet(url))
+    end)
+    
+    if not ok then
+        log("Download failed:", localPath, err)
+        return false, tostring(err)
+    end
+    
+    log("Downloaded:", localPath)
+    return true, nil
 end
 
--- Muat logo notifikasi
+-- Get logo
 function Assets.GetLogo()
-    local logoPath = Config.LogoLocalPath or LOGO_PATH
-    if ensureFile(logoPath, Config.LogoURL) then
-        if getcustomasset then
-            local ok, result = pcall(function()
-                return getcustomasset(logoPath)
-            end)
-            if ok and result then
-                return result
-            end
+    local logoPath = LOGO_PATH
+    local ok, err = ensureFile(logoPath, Config.LogoURL or "")
+    
+    if ok and hasCustomAsset() then
+        local customOk, customResult = pcall(function()
+            return getcustomasset(logoPath)
+        end)
+        if customOk and customResult then
+            return customResult
         end
-        return Config.LogoURL
     end
-    return Config.LogoURL
+    
+    return Config.LogoURL or ""
 end
 
--- Muat icon berdasarkan nama
+-- Get icon by name
 function Assets.GetIcon(iconName)
     local iconURL = Config.IconURLs and Config.IconURLs[iconName]
+    
     if not iconURL then
-        return ""
+        log("Icon URL not found:", iconName)
+        return "" -- Empty string is safer than nil
     end
-
+    
     local localPath = ROOT .. "/" .. iconName .. ".png"
-    if ensureFile(localPath, iconURL) then
-        if getcustomasset then
-            local ok, result = pcall(function()
-                return getcustomasset(localPath)
-            end)
-            if ok and result then
-                return result
-            end
+    local ok, err = ensureFile(localPath, iconURL)
+    
+    if ok and hasCustomAsset() then
+        local customOk, customResult = pcall(function()
+            return getcustomasset(localPath)
+        end)
+        if customOk and customResult then
+            return customResult
         end
-        return iconURL
     end
+    
+    -- Fallback to URL
     return iconURL
 end
 
--- Cek apakah icon sudah terdownload
-function Assets.IsIconCached(iconName)
-    local localPath = ROOT .. "/" .. iconName .. ".png"
-    return isfile(localPath)
-end
-
--- Preload semua icon
+-- Preload all icons (synchronous to ensure availability)
 function Assets.PreloadAll()
-    task.spawn(function()
-        if Config.IconURLs then
-            for name, url in pairs(Config.IconURLs) do
-                local localPath = ROOT .. "/" .. name .. ".png"
-                ensureFile(localPath, url)
+    if not hasFilesystem() then
+        log("Filesystem not available, using remote URLs")
+        return
+    end
+    
+    local count = 0
+    if Config.IconURLs then
+        for name, url in pairs(Config.IconURLs) do
+            local localPath = ROOT .. "/" .. name .. ".png"
+            local ok = ensureFile(localPath, url)
+            if ok then
+                count = count + 1
             end
         end
-        ensureFile(Config.LogoLocalPath or LOGO_PATH, Config.LogoURL)
-        print("[Assets] All assets loaded!")
-    end)
+    end
+    
+    ensureFile(LOGO_PATH, Config.LogoURL or "")
+    
+    log("Preloaded", count, "icons")
 end
 
--- Preload otomatis
+-- Preload synchronously
 Assets.PreloadAll()
 
 return Assets

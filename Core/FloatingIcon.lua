@@ -1,5 +1,5 @@
 -- ================================================
--- FLOATING ICON - Muncul Cepat
+-- FLOATING ICON - With Connection Cleanup
 -- ================================================
 
 local Services = _G.Services
@@ -8,24 +8,45 @@ local UserInputService = Services.UserInputService
 local TweenService = Services.TweenService
 local Helpers = _G.Helpers
 
+local corner = Helpers.corner
+local stroke = Helpers.stroke
+local tween = Helpers.tween
+
 local phoneIcon = nil
+local connections = {}
 local isDragging = false
 local dragStart = nil
 local iconStartPos = nil
 local clickMoved = false
 local btn, container
-local isHovering = false
 local hasAppeared = false
 
-local corner = Helpers.corner
-local stroke = Helpers.stroke
-local tween = Helpers.tween
+local function disconnectAll()
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    connections = {}
+end
+
+-- Register cleanup
+table.insert(_G.AvatarCloneCleanupTasks or {}, function()
+    disconnectAll()
+    if phoneIcon then
+        pcall(function() phoneIcon:Destroy() end)
+        phoneIcon = nil
+    end
+end)
 
 local function createFloatingIcon()
-    if phoneIcon then pcall(function() phoneIcon:Destroy() end) end
+    disconnectAll()
+    
+    if phoneIcon then
+        pcall(function() phoneIcon:Destroy() end)
+        phoneIcon = nil
+    end
 
     local gui = Instance.new("ScreenGui")
-    gui.Name = "PhoneIcon"
+    gui.Name = "FloatingIcon"
     gui.ResetOnSpawn = false
     gui.IgnoreGuiInset = true
     gui.DisplayOrder = 999
@@ -41,7 +62,7 @@ local function createFloatingIcon()
     container.ZIndex = 10
 
     btn = Instance.new("TextButton", container)
-    btn.Size = UDim2.new(0, 0, 0, 0)
+    btn.Size = UDim2.new(0, 50, 0, 80)
     btn.Position = UDim2.new(0.5, -25, 0.5, -40)
     btn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     btn.Text = ""
@@ -50,6 +71,7 @@ local function createFloatingIcon()
     corner(btn, 14)
     stroke(btn, Color3.fromRGB(255, 255, 255), 2, 0.7)
 
+    -- Screen
     local screen = Instance.new("Frame", btn)
     screen.Size = UDim2.new(1, -8, 1, -28)
     screen.Position = UDim2.new(0, 4, 0, 18)
@@ -57,6 +79,7 @@ local function createFloatingIcon()
     screen.ZIndex = 3
     corner(screen, 6)
 
+    -- Notch
     local notch = Instance.new("Frame", btn)
     notch.Size = UDim2.new(0, 20, 0, 4)
     notch.Position = UDim2.new(0.5, -10, 0, 7)
@@ -64,6 +87,7 @@ local function createFloatingIcon()
     notch.ZIndex = 4
     corner(notch, 2)
 
+    -- Phone icon
     local phoneIconContainer = Instance.new("Frame", screen)
     phoneIconContainer.Size = UDim2.new(0, 20, 0, 32)
     phoneIconContainer.Position = UDim2.new(0.5, -10, 0.5, -16)
@@ -78,20 +102,7 @@ local function createFloatingIcon()
     phoneBody.ZIndex = 6
     corner(phoneBody, 3)
 
-    local speakerDot = Instance.new("Frame", phoneBody)
-    speakerDot.Size = UDim2.new(0, 4, 0, 2)
-    speakerDot.Position = UDim2.new(0.5, -2, 0, 2)
-    speakerDot.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    speakerDot.ZIndex = 7
-    corner(speakerDot, 1)
-
-    local homeDot = Instance.new("Frame", phoneBody)
-    homeDot.Size = UDim2.new(0, 3, 0, 3)
-    homeDot.Position = UDim2.new(0.5, -1.5, 1, -5)
-    homeDot.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    homeDot.ZIndex = 7
-    corner(homeDot, 100)
-
+    -- LED dot
     local ledDot = Instance.new("Frame", btn)
     ledDot.Size = UDim2.new(0, 5, 0, 5)
     ledDot.Position = UDim2.new(0.5, -2.5, 0, 70)
@@ -99,8 +110,8 @@ local function createFloatingIcon()
     ledDot.ZIndex = 5
     corner(ledDot, 100)
 
-    -- Drag system
-    btn.InputBegan:Connect(function(input)
+    -- Drag system with cleanup
+    local inputBeganConn = btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = true
             clickMoved = false
@@ -108,14 +119,17 @@ local function createFloatingIcon()
             iconStartPos = container.AbsolutePosition
         end
     end)
+    table.insert(connections, inputBeganConn)
 
-    btn.InputEnded:Connect(function(input)
+    local inputEndedConn = btn.InputEnded:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = false
+            clickMoved = false
         end
     end)
+    table.insert(connections, inputEndedConn)
 
-    UserInputService.InputChanged:Connect(function(input)
+    local inputChangedConn = UserInputService.InputChanged:Connect(function(input)
         if not isDragging then return end
         
         if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
@@ -140,22 +154,10 @@ local function createFloatingIcon()
             end
         end
     end)
-
-    -- Hover
-    btn.MouseEnter:Connect(function()
-        isHovering = true
-        tween(btn, {Size = UDim2.new(0, 54, 0, 86)}, 0.2)
-    end)
-
-    btn.MouseLeave:Connect(function()
-        isHovering = false
-        if hasAppeared then
-            tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.2)
-        end
-    end)
+    table.insert(connections, inputChangedConn)
 
     -- Click
-    btn.MouseButton1Click:Connect(function()
+    local clickConn = btn.MouseButton1Click:Connect(function()
         if clickMoved then return end
         
         local phoneFrame = _G.Phone and _G.Phone.phone
@@ -166,35 +168,18 @@ local function createFloatingIcon()
             if _G.openPhone then _G.openPhone() end
         end
     end)
-
-    -- Animasi muncul cepat
-    task.spawn(function()
-        task.wait(0.1)
-        tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.4, Enum.EasingStyle.Back)
-        hasAppeared = true
-    end)
+    table.insert(connections, clickConn)
 
     phoneIcon = gui
-    print("[FloatingIcon] Created!")
+    hasAppeared = true
 end
 
--- ==================== INIT ====================
--- Langsung muncul tanpa menunggu loading selesai
+-- Init
 task.spawn(function()
     task.wait(1)
     createFloatingIcon()
 end)
 
--- ==================== MONITOR ====================
-task.spawn(function()
-    while true do
-        task.wait(5)
-        if not phoneIcon or not phoneIcon.Parent then
-            if hasAppeared then
-                createFloatingIcon()
-            end
-        end
-    end
-end)
-
-print("[FloatingIcon] Module ready!")
+return {
+    createFloatingIcon = createFloatingIcon,
+}
