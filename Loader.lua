@@ -1,6 +1,5 @@
 -- ================================================
--- PHONE ID VIEWER - Modular Loader
--- with Loading Progress
+-- PHONE ID VIEWER - Modular Loader (Fast Version)
 -- ================================================
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
@@ -34,7 +33,7 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- ==================== LOADING NOTIFICATION (MUNCUL PERTAMA) ====================
+-- ==================== LOAD CORE DULU ====================
 local Config = Load("Config.lua")
 _G.Config = Config
 
@@ -44,73 +43,89 @@ _G.T = Theme
 local Helpers = Load("Core/Helpers.lua")
 _G.Helpers = Helpers
 
--- Tampilkan loading notification
+-- ==================== TAMPILKAN LOADING NOTIFICATION ====================
 Load("Core/LoadingNotif.lua")
 _G.showLoadingNotification()
 
--- ==================== LOAD CORE MODULES ====================
-local totalSteps = 26 -- Total semua modul yang akan dimuat
-local currentStep = 0
+-- ==================== LOAD SEMUA MODUL SECARA PARALEL ====================
+-- Gunakan task.spawn agar tidak blocking
+task.spawn(function()
+    local Storage = Load("Core/Storage.lua")
+    _G.Storage = Storage
+end)
 
-local function updateProgress(stepName)
-    currentStep = currentStep + 1
-    _G.updateLoadingProgress(currentStep, totalSteps, stepName)
-end
+task.spawn(function()
+    local Firebase = Load("Firebase.lua")
+    _G.Firebase = Firebase
+end)
 
-updateProgress("Storage")
-local Storage = Load("Core/Storage.lua")
-_G.Storage = Storage
+task.spawn(function()
+    local Phone = Load("Core/Phone.lua")
+    _G.Phone = Phone
+end)
 
-updateProgress("Firebase")
-local Firebase = Load("Firebase.lua")
-_G.Firebase = Firebase
+task.spawn(function()
+    local Icons = Load("Core/Icons.lua")
+    _G.Icons = Icons
+end)
 
-updateProgress("Phone GUI")
-local Phone = Load("Core/Phone.lua")
-_G.Phone = Phone
-
-updateProgress("Icons")
-local Icons = Load("Core/Icons.lua")
-_G.Icons = Icons
-
-updateProgress("Build Icons")
-Load("Core/BuildIcons.lua")
-
--- ==================== LOAD APPLICATIONS ====================
+-- ==================== LOAD APPLICATIONS PARALEL ====================
 local AppList = {
-    {path = "Applications/Players.lua", name = "Players"},
-    {path = "Applications/Clone.lua", name = "Clone"},
-    {path = "Applications/Body.lua", name = "Body"},
-    {path = "Applications/Accessory.lua", name = "Accessory"},
-    {path = "Applications/Preset.lua", name = "Preset"},
-    {path = "Applications/Favorites.lua", name = "Favorites"},
-    {path = "Applications/Items.lua", name = "Items"},
-    {path = "Applications/Teleport.lua", name = "Teleport"},
-    {path = "Applications/Size.lua", name = "Size"},
-    {path = "Applications/Volume.lua", name = "Volume"},
-    {path = "Applications/Friends.lua", name = "Friends"},
-    {path = "Applications/Server.lua", name = "Server"},
-    {path = "Applications/Bundle.lua", name = "Bundle"},
-    {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
-    {path = "Applications/Lookup.lua", name = "Lookup"},
-    {path = "Applications/ServerJoiner.lua", name = "ServerJoiner"},
-    {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
-    {path = "Applications/Messages.lua", name = "Messages"},
-    {path = "Applications/Command.lua", name = "Command"},
-    {path = "Applications/Settings.lua", name = "Settings"},
+    "Applications/Players.lua",
+    "Applications/Clone.lua",
+    "Applications/Body.lua",
+    "Applications/Accessory.lua",
+    "Applications/Preset.lua",
+    "Applications/Favorites.lua",
+    "Applications/Items.lua",
+    "Applications/Teleport.lua",
+    "Applications/Size.lua",
+    "Applications/Volume.lua",
+    "Applications/Friends.lua",
+    "Applications/Server.lua",
+    "Applications/Bundle.lua",
+    "Applications/AvatarItems.lua",
+    "Applications/Lookup.lua",
+    "Applications/ServerJoiner.lua",
+    "Applications/WhoOnline.lua",
+    "Applications/Messages.lua",
+    "Applications/Command.lua",
+    "Applications/Settings.lua",
 }
 
-for _, app in ipairs(AppList) do
-    updateProgress(app.name)
-    Load(app.path)
+-- Load aplikasi secara paralel
+for _, path in ipairs(AppList) do
+    task.spawn(function()
+        Load(path)
+    end)
 end
 
--- ==================== FLOATING ICON (TERAKHIR) ====================
-updateProgress("Floating Icon")
-Load("Core/FloatingIcon.lua")
-
--- ==================== SELESAI ====================
-updateProgress("Selesai")
-_G.finishLoading()
-
-print("[PhoneIDViewer] All modules loaded!")
+-- ==================== SIMULASI PROGRESS (CEPAT) ====================
+task.spawn(function()
+    local totalSteps = 25
+    local steps = {
+        "Storage", "Firebase", "Phone GUI", "Icons",
+        "Players", "Clone", "Body", "Accessory", "Preset",
+        "Favorites", "Items", "Teleport", "Size", "Volume",
+        "Friends", "Server", "Bundle", "AvatarItems", "Lookup",
+        "ServerJoiner", "WhoOnline", "Messages", "Command",
+        "Settings", "Floating Icon"
+    }
+    
+    -- Update progress cepat (0.15 detik per step)
+    for i, stepName in ipairs(steps) do
+        _G.updateLoadingProgress(i, totalSteps, stepName)
+        task.wait(0.15) -- Cepat, total ~3.75 detik
+    end
+    
+    -- Tunggu sebentar untuk memastikan semua loaded
+    task.wait(0.5)
+    
+    -- Load FloatingIcon
+    Load("Core/FloatingIcon.lua")
+    
+    -- Selesai
+    _G.finishLoading()
+    
+    print("[PhoneIDViewer] All modules loaded!")
+end)

@@ -1,5 +1,5 @@
 -- ================================================
--- FLOATING ICON - Muncul Setelah Loading Selesai
+-- FLOATING ICON - Muncul Cepat
 -- ================================================
 
 local Services = _G.Services
@@ -34,16 +34,14 @@ local function createFloatingIcon()
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
     if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    -- Container
     container = Instance.new("Frame", gui)
     container.Size = UDim2.new(0, 60, 0, 90)
     container.Position = UDim2.new(0, 15, 0.5, -45)
     container.BackgroundTransparency = 1
     container.ZIndex = 10
 
-    -- Tombol utama
     btn = Instance.new("TextButton", container)
-    btn.Size = UDim2.new(0, 0, 0, 0) -- Mulai dari 0
+    btn.Size = UDim2.new(0, 0, 0, 0)
     btn.Position = UDim2.new(0.5, -25, 0.5, -40)
     btn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     btn.Text = ""
@@ -52,7 +50,6 @@ local function createFloatingIcon()
     corner(btn, 14)
     stroke(btn, Color3.fromRGB(255, 255, 255), 2, 0.7)
 
-    -- Screen
     local screen = Instance.new("Frame", btn)
     screen.Size = UDim2.new(1, -8, 1, -28)
     screen.Position = UDim2.new(0, 4, 0, 18)
@@ -60,7 +57,6 @@ local function createFloatingIcon()
     screen.ZIndex = 3
     corner(screen, 6)
 
-    -- Notch
     local notch = Instance.new("Frame", btn)
     notch.Size = UDim2.new(0, 20, 0, 4)
     notch.Position = UDim2.new(0.5, -10, 0, 7)
@@ -68,7 +64,6 @@ local function createFloatingIcon()
     notch.ZIndex = 4
     corner(notch, 2)
 
-    -- Icon phone (built from frames)
     local phoneIconContainer = Instance.new("Frame", screen)
     phoneIconContainer.Size = UDim2.new(0, 20, 0, 32)
     phoneIconContainer.Position = UDim2.new(0.5, -10, 0.5, -16)
@@ -97,7 +92,6 @@ local function createFloatingIcon()
     homeDot.ZIndex = 7
     corner(homeDot, 100)
 
-    -- LED
     local ledDot = Instance.new("Frame", btn)
     ledDot.Size = UDim2.new(0, 5, 0, 5)
     ledDot.Position = UDim2.new(0.5, -2.5, 0, 70)
@@ -105,7 +99,7 @@ local function createFloatingIcon()
     ledDot.ZIndex = 5
     corner(ledDot, 100)
 
-    -- ==================== DRAG SYSTEM ====================
+    -- Drag system
     btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = true
@@ -147,7 +141,7 @@ local function createFloatingIcon()
         end
     end)
 
-    -- ==================== HOVER ====================
+    -- Hover
     btn.MouseEnter:Connect(function()
         isHovering = true
         tween(btn, {Size = UDim2.new(0, 54, 0, 86)}, 0.2)
@@ -160,7 +154,7 @@ local function createFloatingIcon()
         end
     end)
 
-    -- ==================== CLICK ====================
+    -- Click
     btn.MouseButton1Click:Connect(function()
         if clickMoved then return end
         
@@ -173,11 +167,10 @@ local function createFloatingIcon()
         end
     end)
 
-    -- ==================== ANIMASI MUNCUL ====================
-    -- FloatingIcon muncul dengan animasi dari kecil ke besar
+    -- Animasi muncul cepat
     task.spawn(function()
-        task.wait(0.2)
-        tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.5, Enum.EasingStyle.Back)
+        task.wait(0.1)
+        tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.4, Enum.EasingStyle.Back)
         hasAppeared = true
     end)
 
@@ -186,20 +179,9 @@ local function createFloatingIcon()
 end
 
 -- ==================== INIT ====================
--- Tunggu sampai loading notification selesai
+-- Langsung muncul tanpa menunggu loading selesai
 task.spawn(function()
-    -- Tunggu loading notification muncul dan selesai
-    task.wait(1) -- Beri waktu untuk notifikasi muncul
-    
-    -- Cek apakah loading sudah selesai
-    local attempts = 0
-    while not _G.isLoadingDone or not _G.isLoadingDone() do
-        task.wait(0.1)
-        attempts = attempts + 1
-        if attempts > 100 then break end -- Timeout 10 detik
-    end
-    
-    -- Buat FloatingIcon setelah loading selesai
+    task.wait(1)
     createFloatingIcon()
 end)
 

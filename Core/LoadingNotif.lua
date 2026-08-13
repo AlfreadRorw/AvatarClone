@@ -1,5 +1,5 @@
 -- ================================================
--- LOADING NOTIFICATION - Progress Per Aplikasi
+-- LOADING NOTIFICATION - Fast & Light
 -- ================================================
 
 local Services = _G.Services
@@ -26,10 +26,8 @@ local FinalLogo = (getcustomasset and isfile(LocalPath)) and getcustomasset(Loca
 
 -- ==================== NOTIFICATION GUI ====================
 local notifGui = nil
-local isLoadingDone = false
 local progressFill = nil
 local statusLbl = nil
-local titleLbl = nil
 
 local function createLoadingNotification()
     if notifGui then
@@ -49,9 +47,9 @@ local function createLoadingNotification()
         notifGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
 
-    -- Container utama (kanan bawah)
+    -- Container
     local container = Instance.new("Frame", notifGui)
-    container.Size = UDim2.new(0, 0, 0, 70)
+    container.Size = UDim2.new(0, 260, 0, 70)
     container.Position = UDim2.new(1, -20, 1, -20)
     container.AnchorPoint = Vector2.new(1, 1)
     container.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
@@ -60,14 +58,6 @@ local function createLoadingNotification()
     container.ClipsDescendants = true
     corner(container, 16)
     stroke(container, Color3.fromRGB(255, 255, 255), 2, 0.8)
-
-    -- Gradient background
-    local bgGradient = Instance.new("UIGradient", container)
-    bgGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 32)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 20))
-    })
-    bgGradient.Rotation = 135
 
     -- Glow line
     local glowLine = Instance.new("Frame", container)
@@ -78,7 +68,7 @@ local function createLoadingNotification()
     glowLine.ZIndex = 1002
     corner(glowLine, 1)
 
-    -- Logo container
+    -- Logo
     local logoFrame = Instance.new("Frame", container)
     logoFrame.Size = UDim2.new(0, 50, 0, 50)
     logoFrame.Position = UDim2.new(0, 10, 0.5, -25)
@@ -97,17 +87,10 @@ local function createLoadingNotification()
     logoImage.ZIndex = 1004
     corner(logoImage, 8)
 
-    -- Text area
-    local textFrame = Instance.new("Frame", container)
-    textFrame.Size = UDim2.new(1, -66, 1, 0)
-    textFrame.Position = UDim2.new(0, 62, 0, 0)
-    textFrame.BackgroundTransparency = 1
-    textFrame.ZIndex = 1003
-
     -- Title
-    titleLbl = Instance.new("TextLabel", textFrame)
-    titleLbl.Size = UDim2.new(1, -10, 0, 22)
-    titleLbl.Position = UDim2.new(0, 5, 0, 12)
+    local titleLbl = Instance.new("TextLabel", container)
+    titleLbl.Size = UDim2.new(1, -66, 0, 22)
+    titleLbl.Position = UDim2.new(0, 62, 0, 12)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Text = "PhoneIDViewer"
     titleLbl.TextColor3 = Color3.new(1, 1, 1)
@@ -116,10 +99,10 @@ local function createLoadingNotification()
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.ZIndex = 1004
 
-    -- Status text (berubah-ubah)
-    statusLbl = Instance.new("TextLabel", textFrame)
-    statusLbl.Size = UDim2.new(1, -10, 0, 16)
-    statusLbl.Position = UDim2.new(0, 5, 0, 34)
+    -- Status
+    statusLbl = Instance.new("TextLabel", container)
+    statusLbl.Size = UDim2.new(1, -66, 0, 16)
+    statusLbl.Position = UDim2.new(0, 62, 0, 34)
     statusLbl.BackgroundTransparency = 1
     statusLbl.Text = "Loading..."
     statusLbl.TextColor3 = Color3.fromRGB(150, 150, 170)
@@ -144,27 +127,23 @@ local function createLoadingNotification()
     progressFill.ZIndex = 1004
     corner(progressFill, 2)
 
-    -- ==================== ANIMASI MASUK ====================
-    tween(container, {Size = UDim2.new(0, 260, 0, 70)}, 0.4, Enum.EasingStyle.Back)
+    -- Animasi masuk
+    container.Position = UDim2.new(1, 300, 1, -20)
+    tween(container, {Position = UDim2.new(1, -20, 1, -20)}, 0.3, Enum.EasingStyle.Quart)
 
     return notifGui
 end
 
 -- ==================== UPDATE FUNCTIONS ====================
 function _G.updateLoadingProgress(step, totalSteps, stepName)
-    if not progressFill or not statusLbl then
-        return
-    end
+    if not progressFill or not statusLbl then return end
     
-    -- Update progress bar
     local progress = math.clamp(step / totalSteps, 0, 1)
-    tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.3)
+    tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.1)
     
-    -- Update status text
     if statusLbl and statusLbl.Parent then
         statusLbl.Text = string.format("[%d/%d] %s", step, totalSteps, stepName or "Loading...")
         
-        -- Warna progress
         if progress >= 0.8 then
             progressFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
         elseif progress >= 0.5 then
@@ -176,25 +155,22 @@ function _G.updateLoadingProgress(step, totalSteps, stepName)
 end
 
 function _G.finishLoading()
-    isLoadingDone = true
-    
     if statusLbl and statusLbl.Parent then
-        statusLbl.Text = "✅ Semua berhasil dimuat!"
+        statusLbl.Text = "✅ Selesai!"
         statusLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
     end
     
     if progressFill and progressFill.Parent then
         progressFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
-        tween(progressFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.3)
+        tween(progressFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.2)
     end
     
-    -- Tunggu sebentar lalu hilangkan
-    task.wait(1)
+    task.wait(0.8)
     
     if notifGui then
         local container = notifGui:FindFirstChildOfClass("Frame")
         if container then
-            tween(container, {Position = UDim2.new(1, 20, 1, -20)}, 0.3, Enum.EasingStyle.Quart)
+            tween(container, {Position = UDim2.new(1, 300, 1, -20)}, 0.3, Enum.EasingStyle.Quart)
         end
     end
     
@@ -202,22 +178,19 @@ function _G.finishLoading()
     pcall(function() notifGui:Destroy() end)
     notifGui = nil
     
-    -- Trigger callback
     if _G.OnLoadingComplete then
         _G.OnLoadingComplete()
     end
 end
 
 function _G.showLoadingNotification()
-    isLoadingDone = false
     return createLoadingNotification()
 end
 
 function _G.isLoadingDone()
-    return isLoadingDone
+    return notifGui == nil
 end
 
--- ==================== CALLBACK ====================
 _G.OnLoadingComplete = function()
     print("[LoadingNotif] Loading selesai!")
 end
