@@ -1,6 +1,5 @@
 -- ================================================
--- PHONE GUI - Main Phone Frame
--- Key Entry di Dalam Phone (Bukan Fullscreen)
+-- PHONE GUI - Main Phone Frame (Fixed)
 -- ================================================
 
 local Services = _G.Services
@@ -11,7 +10,7 @@ local Storage = _G.Storage
 local Firebase = _G.Firebase
 local LocalPlayer = _G.LocalPlayer
 
-local appSettings = Storage.appSettings
+local appSettings = Storage and Storage.appSettings or {}
 
 -- Helper aliases
 local corner = Helpers.corner
@@ -156,7 +155,7 @@ local function processNotify()
 end
 
 function _G.showDynamicNotification(text, color)
-    if appSettings.toastEnabled then
+    if appSettings.toastEnabled ~= false then
         table.insert(notifyQueue, {text = text, color = color})
         if not isNotifying then processNotify() end
     end
@@ -219,7 +218,7 @@ gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ==================== KEY ENTRY SCREEN (DI DALAM PHONE) ====================
+-- ==================== KEY ENTRY SCREEN ====================
 local keyScreen = Instance.new("Frame", sa)
 keyScreen.Size = UDim2.new(1, 0, 1, 0)
 keyScreen.Position = UDim2.new(0, 0, 0, 0)
@@ -229,8 +228,7 @@ keyScreen.Visible = false
 keyScreen.BorderSizePixel = 0
 corner(keyScreen, 30)
 
--- ==================== KEY ENTRY CONTENT ====================
--- Icon kunci
+-- Key entry content
 local lockIconFrame = Instance.new("Frame", keyScreen)
 lockIconFrame.Size = UDim2.new(0, 70, 0, 70)
 lockIconFrame.Position = UDim2.new(0.5, -35, 0, 50)
@@ -240,7 +238,6 @@ lockIconFrame.ZIndex = 81
 corner(lockIconFrame, 100)
 stroke(lockIconFrame, Color3.fromRGB(255, 255, 255), 2, 0.5)
 
--- Body kunci
 local lockBody = Instance.new("Frame", lockIconFrame)
 lockBody.Size = UDim2.new(0, 30, 0, 24)
 lockBody.Position = UDim2.new(0.5, -15, 0.5, -5)
@@ -248,7 +245,6 @@ lockBody.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 lockBody.ZIndex = 82
 corner(lockBody, 5)
 
--- Shackle
 local lockShackle = Instance.new("Frame", lockIconFrame)
 lockShackle.Size = UDim2.new(0, 18, 0, 20)
 lockShackle.Position = UDim2.new(0.5, -9, 0.2, 0)
@@ -257,7 +253,6 @@ lockShackle.ZIndex = 82
 stroke(lockShackle, Color3.fromRGB(255, 255, 255), 3, 0)
 corner(lockShackle, 100)
 
--- Keyhole
 local keyhole = Instance.new("Frame", lockBody)
 keyhole.Size = UDim2.new(0, 8, 0, 8)
 keyhole.Position = UDim2.new(0.5, -4, 0.5, -4)
@@ -265,7 +260,6 @@ keyhole.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
 keyhole.ZIndex = 83
 corner(keyhole, 100)
 
--- Title
 local keyTitle = Instance.new("TextLabel", keyScreen)
 keyTitle.Size = UDim2.new(1, 0, 0, 30)
 keyTitle.Position = UDim2.new(0, 0, 0, 140)
@@ -276,7 +270,6 @@ keyTitle.Font = Enum.Font.GothamBlack
 keyTitle.TextSize = 20
 keyTitle.ZIndex = 81
 
--- Subtitle
 local keySub = Instance.new("TextLabel", keyScreen)
 keySub.Size = UDim2.new(1, 0, 0, 20)
 keySub.Position = UDim2.new(0, 0, 0, 175)
@@ -287,7 +280,6 @@ keySub.Font = Enum.Font.Gotham
 keySub.TextSize = 11
 keySub.ZIndex = 81
 
--- Input field
 local keyInput = Instance.new("TextBox", keyScreen)
 keyInput.Size = UDim2.new(1, -40, 0, 45)
 keyInput.Position = UDim2.new(0, 20, 0, 210)
@@ -303,7 +295,6 @@ keyInput.ZIndex = 82
 corner(keyInput, 10)
 stroke(keyInput, Color3.fromRGB(255, 255, 255), 1, 0.7)
 
--- Description di bawah text box
 local keyDesc = Instance.new("TextLabel", keyScreen)
 keyDesc.Size = UDim2.new(1, -40, 0, 40)
 keyDesc.Position = UDim2.new(0, 20, 0, 258)
@@ -316,7 +307,6 @@ keyDesc.TextWrapped = true
 keyDesc.TextXAlignment = Enum.TextXAlignment.Center
 keyDesc.ZIndex = 81
 
--- Status label
 local keyStatus = Instance.new("TextLabel", keyScreen)
 keyStatus.Size = UDim2.new(1, 0, 0, 25)
 keyStatus.Position = UDim2.new(0, 0, 0, 305)
@@ -327,7 +317,6 @@ keyStatus.Font = Enum.Font.GothamBold
 keyStatus.TextSize = 11
 keyStatus.ZIndex = 81
 
--- Spinner
 local spinnerFrame = Instance.new("Frame", keyScreen)
 spinnerFrame.Size = UDim2.new(0, 30, 0, 30)
 spinnerFrame.Position = UDim2.new(0.5, -15, 0, 305)
@@ -359,7 +348,6 @@ local function animateSpinner()
     end)
 end
 
--- Submit button
 local submitBtn = Instance.new("TextButton", keyScreen)
 submitBtn.Size = UDim2.new(1, -40, 0, 45)
 submitBtn.Position = UDim2.new(0, 20, 0, 340)
@@ -373,7 +361,6 @@ submitBtn.ZIndex = 82
 corner(submitBtn, 10)
 pressFX(submitBtn)
 
--- Buy button
 local buyBtn = Instance.new("TextButton", keyScreen)
 buyBtn.Size = UDim2.new(1, -40, 0, 40)
 buyBtn.Position = UDim2.new(0, 20, 0, 395)
@@ -388,7 +375,6 @@ corner(buyBtn, 10)
 stroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.5)
 pressFX(buyBtn)
 
--- Info bawah
 local keyInfo = Instance.new("TextLabel", keyScreen)
 keyInfo.Size = UDim2.new(1, 0, 0, 20)
 keyInfo.Position = UDim2.new(0, 0, 0, 445)
@@ -399,10 +385,8 @@ keyInfo.Font = Enum.Font.Gotham
 keyInfo.TextSize = 9
 keyInfo.ZIndex = 81
 
--- Buy button click
 buyBtn.MouseButton1Click:Connect(function()
     local url = Config.BUY_KEY_URL or "https://discord.gg/"
-    -- Buka link di browser
     pcall(function()
         setclipboard(url)
     end)
@@ -429,7 +413,22 @@ local function submitKey()
     
     task.spawn(function()
         local userId = LocalPlayer.UserId
-        local isValid, message = Firebase.ValidateKey(key, userId)
+        local isValid = false
+        local message = "Error"
+        
+        -- Cek apakah Firebase tersedia
+        if Firebase and Firebase.ValidateKey then
+            local ok, result = pcall(function()
+                return Firebase.ValidateKey(key, userId)
+            end)
+            if ok then
+                isValid, message = result
+            else
+                message = "Gagal terhubung ke server"
+            end
+        else
+            message = "Firebase tidak tersedia"
+        end
         
         task.wait(0.5)
         
@@ -438,8 +437,10 @@ local function submitKey()
         submitBtn.Text = "UNLOCK"
         
         if isValid then
-            Storage.appSettings.savedKey = key
-            Storage.persistSettings()
+            if Storage and Storage.appSettings then
+                Storage.appSettings.savedKey = key
+                Storage.persistSettings()
+            end
             
             keyStatus.Text = message or "Key valid!"
             keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
@@ -451,7 +452,6 @@ local function submitKey()
             keyStatus.Text = message or "Key tidak valid"
             keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
             
-            -- Shake
             tween(keyInput, {Position = UDim2.new(0, 15, 0, 210)}, 0.05)
             task.wait(0.05)
             tween(keyInput, {Position = UDim2.new(0, 25, 0, 210)}, 0.05)
@@ -497,18 +497,29 @@ function _G.unlock()
     keyScreen.Visible = false
     keyInput.Text = ""
     keyStatus.Text = ""
-    _G.goHome()
+    if _G.goHome then
+        _G.goHome()
+    end
     _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 100))
 end
 
 function _G.checkAutoLogin()
-    local savedKey = Storage.appSettings.savedKey
+    -- Cek dengan aman
+    local savedKey = nil
+    if Storage and Storage.appSettings then
+        savedKey = Storage.appSettings.savedKey
+    end
+    
     if savedKey and savedKey ~= "" then
-        local userId = LocalPlayer.UserId
-        local isValid = Firebase.CheckSavedKey(userId, savedKey)
-        if isValid then
-            _G.PhoneState.isLocked = false
-            return true
+        if Firebase and Firebase.CheckSavedKey then
+            local userId = LocalPlayer.UserId
+            local ok, result = pcall(function()
+                return Firebase.CheckSavedKey(userId, savedKey)
+            end)
+            if ok and result then
+                _G.PhoneState.isLocked = false
+                return true
+            end
         end
     end
     return false
@@ -521,14 +532,19 @@ function _G.openPhone()
     tween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
     
     if _G.PhoneState.isLocked then
-        if not _G.checkAutoLogin() then
+        local autoLogin = _G.checkAutoLogin()
+        if not autoLogin then
             task.wait(0.5)
             _G.showKeyEntry()
         else
-            _G.goHome()
+            if _G.goHome then
+                _G.goHome()
+            end
         end
     else
-        _G.goHome()
+        if _G.goHome then
+            _G.goHome()
+        end
     end
 end
 
@@ -540,10 +556,11 @@ function _G.closePhone()
     end)
 end
 
--- Auto-login check at startup
+-- Auto-login check
 task.spawn(function()
     task.wait(1)
-    if _G.checkAutoLogin() then
+    local ok, result = pcall(_G.checkAutoLogin)
+    if ok and result then
         print("[Phone] Auto-login berhasil!")
     else
         print("[Phone] Menunggu input key...")
