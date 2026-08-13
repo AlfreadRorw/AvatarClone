@@ -1,5 +1,5 @@
 -- ================================================
--- LOADING NOTIFICATION - Muncul Sebelum FloatingIcon
+-- LOADING NOTIFICATION - Progress Per Aplikasi
 -- ================================================
 
 local Services = _G.Services
@@ -16,7 +16,6 @@ local tween = Helpers.tween
 local LogoURL = Config.LogoURL or "https://files.catbox.moe/io8o2d.png"
 local LocalPath = Config.LogoLocalPath or "PhoneIDViewer_Logo.png"
 
--- Download logo ke local jika belum ada
 pcall(function()
     if not isfile(LocalPath) then
         writefile(LocalPath, game:HttpGet(LogoURL))
@@ -28,6 +27,9 @@ local FinalLogo = (getcustomasset and isfile(LocalPath)) and getcustomasset(Loca
 -- ==================== NOTIFICATION GUI ====================
 local notifGui = nil
 local isLoadingDone = false
+local progressFill = nil
+local statusLbl = nil
+local titleLbl = nil
 
 local function createLoadingNotification()
     if notifGui then
@@ -49,7 +51,7 @@ local function createLoadingNotification()
 
     -- Container utama (kanan bawah)
     local container = Instance.new("Frame", notifGui)
-    container.Size = UDim2.new(0, 0, 0, 62)
+    container.Size = UDim2.new(0, 0, 0, 70)
     container.Position = UDim2.new(1, -20, 1, -20)
     container.AnchorPoint = Vector2.new(1, 1)
     container.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
@@ -78,8 +80,8 @@ local function createLoadingNotification()
 
     -- Logo container
     local logoFrame = Instance.new("Frame", container)
-    logoFrame.Size = UDim2.new(0, 46, 0, 46)
-    logoFrame.Position = UDim2.new(0, 8, 0.5, -23)
+    logoFrame.Size = UDim2.new(0, 50, 0, 50)
+    logoFrame.Position = UDim2.new(0, 10, 0.5, -25)
     logoFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     logoFrame.BackgroundTransparency = 0.9
     logoFrame.ZIndex = 1003
@@ -97,27 +99,27 @@ local function createLoadingNotification()
 
     -- Text area
     local textFrame = Instance.new("Frame", container)
-    textFrame.Size = UDim2.new(1, -62, 1, 0)
-    textFrame.Position = UDim2.new(0, 58, 0, 0)
+    textFrame.Size = UDim2.new(1, -66, 1, 0)
+    textFrame.Position = UDim2.new(0, 62, 0, 0)
     textFrame.BackgroundTransparency = 1
     textFrame.ZIndex = 1003
 
     -- Title
-    local titleLbl = Instance.new("TextLabel", textFrame)
-    titleLbl.Size = UDim2.new(1, -10, 0, 20)
-    titleLbl.Position = UDim2.new(0, 5, 0, 10)
+    titleLbl = Instance.new("TextLabel", textFrame)
+    titleLbl.Size = UDim2.new(1, -10, 0, 22)
+    titleLbl.Position = UDim2.new(0, 5, 0, 12)
     titleLbl.BackgroundTransparency = 1
     titleLbl.Text = "PhoneIDViewer"
     titleLbl.TextColor3 = Color3.new(1, 1, 1)
     titleLbl.Font = Enum.Font.GothamBlack
-    titleLbl.TextSize = 12
+    titleLbl.TextSize = 13
     titleLbl.TextXAlignment = Enum.TextXAlignment.Left
     titleLbl.ZIndex = 1004
 
     -- Status text (berubah-ubah)
-    local statusLbl = Instance.new("TextLabel", textFrame)
+    statusLbl = Instance.new("TextLabel", textFrame)
     statusLbl.Size = UDim2.new(1, -10, 0, 16)
-    statusLbl.Position = UDim2.new(0, 5, 0, 30)
+    statusLbl.Position = UDim2.new(0, 5, 0, 34)
     statusLbl.BackgroundTransparency = 1
     statusLbl.Text = "Loading..."
     statusLbl.TextColor3 = Color3.fromRGB(150, 150, 170)
@@ -128,14 +130,14 @@ local function createLoadingNotification()
 
     -- Progress bar
     local progressBg = Instance.new("Frame", container)
-    progressBg.Size = UDim2.new(1, -16, 0, 3)
-    progressBg.Position = UDim2.new(0, 8, 1, -6)
+    progressBg.Size = UDim2.new(1, -16, 0, 4)
+    progressBg.Position = UDim2.new(0, 8, 1, -8)
     progressBg.BackgroundColor3 = Color3.fromRGB(40, 40, 50)
     progressBg.BorderSizePixel = 0
     progressBg.ZIndex = 1003
     corner(progressBg, 2)
 
-    local progressFill = Instance.new("Frame", progressBg)
+    progressFill = Instance.new("Frame", progressBg)
     progressFill.Size = UDim2.new(0, 0, 1, 0)
     progressFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
     progressFill.BorderSizePixel = 0
@@ -143,55 +145,69 @@ local function createLoadingNotification()
     corner(progressFill, 2)
 
     -- ==================== ANIMASI MASUK ====================
-    tween(container, {Size = UDim2.new(0, 240, 0, 62)}, 0.4, Enum.EasingStyle.Back)
-
-    -- ==================== SIMULASI LOADING ====================
-    local loadingSteps = {
-        {text = "Menghubungkan ke Firebase...", duration = 1.2},
-        {text = "Memuat komponen UI...", duration = 1.0},
-        {text = "Menyiapkan aplikasi...", duration = 0.8},
-        {text = "Selesai!", duration = 0.5},
-    }
-
-    task.spawn(function()
-        local totalDuration = 0
-        for _, step in ipairs(loadingSteps) do
-            totalDuration = totalDuration + step.duration
-        end
-
-        local elapsed = 0
-        for _, step in ipairs(loadingSteps) do
-            statusLbl.Text = step.text
-            local stepStart = elapsed
-            local stepEnd = elapsed + step.duration
-            
-            -- Update progress bar selama step ini
-            while elapsed < stepEnd do
-                task.wait(0.05)
-                elapsed = elapsed + 0.05
-                local progress = math.clamp(elapsed / totalDuration, 0, 1)
-                tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.05)
-            end
-        end
-
-        isLoadingDone = true
-        
-        -- Animasi keluar
-        task.wait(0.3)
-        tween(container, {Position = UDim2.new(1, 20, 1, -20)}, 0.3, Enum.EasingStyle.Quart)
-        
-        task.wait(0.3)
-        pcall(function() notifGui:Destroy() end)
-        notifGui = nil
-        
-        -- Trigger event bahwa loading selesai
-        _G.OnLoadingComplete()
-    end)
+    tween(container, {Size = UDim2.new(0, 260, 0, 70)}, 0.4, Enum.EasingStyle.Back)
 
     return notifGui
 end
 
--- ==================== GLOBAL FUNCTIONS ====================
+-- ==================== UPDATE FUNCTIONS ====================
+function _G.updateLoadingProgress(step, totalSteps, stepName)
+    if not progressFill or not statusLbl then
+        return
+    end
+    
+    -- Update progress bar
+    local progress = math.clamp(step / totalSteps, 0, 1)
+    tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.3)
+    
+    -- Update status text
+    if statusLbl and statusLbl.Parent then
+        statusLbl.Text = string.format("[%d/%d] %s", step, totalSteps, stepName or "Loading...")
+        
+        -- Warna progress
+        if progress >= 0.8 then
+            progressFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        elseif progress >= 0.5 then
+            progressFill.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        else
+            progressFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+        end
+    end
+end
+
+function _G.finishLoading()
+    isLoadingDone = true
+    
+    if statusLbl and statusLbl.Parent then
+        statusLbl.Text = "✅ Semua berhasil dimuat!"
+        statusLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
+    end
+    
+    if progressFill and progressFill.Parent then
+        progressFill.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
+        tween(progressFill, {Size = UDim2.new(1, 0, 1, 0)}, 0.3)
+    end
+    
+    -- Tunggu sebentar lalu hilangkan
+    task.wait(1)
+    
+    if notifGui then
+        local container = notifGui:FindFirstChildOfClass("Frame")
+        if container then
+            tween(container, {Position = UDim2.new(1, 20, 1, -20)}, 0.3, Enum.EasingStyle.Quart)
+        end
+    end
+    
+    task.wait(0.3)
+    pcall(function() notifGui:Destroy() end)
+    notifGui = nil
+    
+    -- Trigger callback
+    if _G.OnLoadingComplete then
+        _G.OnLoadingComplete()
+    end
+end
+
 function _G.showLoadingNotification()
     isLoadingDone = false
     return createLoadingNotification()
@@ -201,12 +217,9 @@ function _G.isLoadingDone()
     return isLoadingDone
 end
 
--- ==================== CALLBACK SETUP ====================
--- Fungsi ini akan dipanggil setelah loading selesai
+-- ==================== CALLBACK ====================
 _G.OnLoadingComplete = function()
     print("[LoadingNotif] Loading selesai!")
-    -- FloatingIcon akan muncul setelah ini
-    -- (FloatingIcon.lua akan menunggu signal ini)
 end
 
 print("[LoadingNotif] Module ready!")
