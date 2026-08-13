@@ -33,68 +33,96 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- ==================== LOAD ORDER (PENTING!) ====================
--- 1. Config dulu
+-- ==================== LOAD CORE MODULES ====================
 local Config = Load("Config.lua")
 _G.Config = Config
 
--- 2. Theme
 local Theme = Load("Core/Theme.lua")
 _G.T = Theme
 
--- 3. Helpers
 local Helpers = Load("Core/Helpers.lua")
 _G.Helpers = Helpers
 
--- 4. Storage (SEBELUM Firebase dan Phone)
+-- ==================== LOADING NOTIFICATION ====================
+Load("Core/LoadingNotif.lua")
+
+-- ==================== LOAD MODULES WITH PROGRESS ====================
+local totalSteps = 25
+local currentStep = 0
+
+local function updateProgress(stepName)
+    currentStep = currentStep + 1
+    if _G.updateLoadingProgress then
+        _G.updateLoadingProgress(currentStep, totalSteps, stepName)
+    end
+end
+
+-- Tampilkan loading notification
+if _G.showLoadingNotification then
+    _G.showLoadingNotification()
+end
+
+-- Load Storage
+updateProgress("Storage")
 local Storage = Load("Core/Storage.lua")
 _G.Storage = Storage
 
--- 5. Firebase (SEBELUM Phone)
+-- Load Firebase
+updateProgress("Firebase")
 local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
--- 6. Phone (SETELAH Storage dan Firebase tersedia)
+-- Load Phone
+updateProgress("Phone GUI")
 local Phone = Load("Core/Phone.lua")
 _G.Phone = Phone
 
--- 7. Icons
+-- Load Icons
+updateProgress("Icons")
 local Icons = Load("Core/Icons.lua")
 _G.Icons = Icons
 
--- 8. BuildIcons (SETELAH Phone dan Icons)
+-- Load BuildIcons
+updateProgress("Build Icons")
 Load("Core/BuildIcons.lua")
 
--- 9. Applications (SETELAH BuildIcons)
+-- ==================== LOAD APPLICATIONS ====================
 local AppList = {
-    "Applications/Players.lua",
-    "Applications/Clone.lua",
-    "Applications/Body.lua",
-    "Applications/Accessory.lua",
-    "Applications/Preset.lua",
-    "Applications/Favorites.lua",
-    "Applications/Items.lua",
-    "Applications/Teleport.lua",
-    "Applications/Size.lua",
-    "Applications/Volume.lua",
-    "Applications/Friends.lua",
-    "Applications/Server.lua",
-    "Applications/Bundle.lua",
-    "Applications/AvatarItems.lua",
-    "Applications/Lookup.lua",
-    "Applications/ServerJoiner.lua",
-    "Applications/WhoOnline.lua",
-    "Applications/Messages.lua",
-    "Applications/Command.lua",
-    "Applications/Settings.lua",
+    {path = "Applications/Players.lua", name = "Players"},
+    {path = "Applications/Clone.lua", name = "Clone"},
+    {path = "Applications/Body.lua", name = "Body"},
+    {path = "Applications/Accessory.lua", name = "Accessory"},
+    {path = "Applications/Preset.lua", name = "Preset"},
+    {path = "Applications/Favorites.lua", name = "Favorites"},
+    {path = "Applications/Items.lua", name = "Items"},
+    {path = "Applications/Teleport.lua", name = "Teleport"},
+    {path = "Applications/Size.lua", name = "Size"},
+    {path = "Applications/Volume.lua", name = "Volume"},
+    {path = "Applications/Friends.lua", name = "Friends"},
+    {path = "Applications/Server.lua", name = "Server"},
+    {path = "Applications/Bundle.lua", name = "Bundle"},
+    {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
+    {path = "Applications/Lookup.lua", name = "Lookup"},
+    {path = "Applications/ServerJoiner.lua", name = "ServerJoiner"},
+    {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
+    {path = "Applications/Messages.lua", name = "Messages"},
+    {path = "Applications/Command.lua", name = "Command"},
+    {path = "Applications/Settings.lua", name = "Settings"},
 }
 
-for _, path in ipairs(AppList) do
-    Load(path)
+for _, app in ipairs(AppList) do
+    updateProgress(app.name)
+    Load(app.path)
 end
 
--- 10. FloatingIcon (TERAKHIR)
+-- Load FloatingIcon
+updateProgress("Floating Icon")
 Load("Core/FloatingIcon.lua")
+
+-- Selesai
+if _G.finishLoading then
+    _G.finishLoading()
+end
 
 print("[PhoneIDViewer] All modules loaded successfully!")
 print("[PhoneIDViewer] Phone:", _G.Phone and "OK" or "FAILED")

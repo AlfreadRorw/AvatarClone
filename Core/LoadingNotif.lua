@@ -1,5 +1,5 @@
 -- ================================================
--- LOADING NOTIFICATION - Fast & Light
+-- LOADING NOTIFICATION - Progress Per Aplikasi
 -- ================================================
 
 local Services = _G.Services
@@ -12,7 +12,7 @@ local corner = Helpers.corner
 local stroke = Helpers.stroke
 local tween = Helpers.tween
 
--- ==================== ASSETS ====================
+-- Assets
 local LogoURL = Config.LogoURL or "https://files.catbox.moe/io8o2d.png"
 local LocalPath = Config.LogoLocalPath or "PhoneIDViewer_Logo.png"
 
@@ -24,10 +24,10 @@ end)
 
 local FinalLogo = (getcustomasset and isfile(LocalPath)) and getcustomasset(LocalPath) or LogoURL
 
--- ==================== NOTIFICATION GUI ====================
 local notifGui = nil
 local progressFill = nil
 local statusLbl = nil
+local titleLbl = nil
 
 local function createLoadingNotification()
     if notifGui then
@@ -47,7 +47,6 @@ local function createLoadingNotification()
         notifGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
     end
 
-    -- Container
     local container = Instance.new("Frame", notifGui)
     container.Size = UDim2.new(0, 260, 0, 70)
     container.Position = UDim2.new(1, -20, 1, -20)
@@ -58,6 +57,14 @@ local function createLoadingNotification()
     container.ClipsDescendants = true
     corner(container, 16)
     stroke(container, Color3.fromRGB(255, 255, 255), 2, 0.8)
+
+    -- Gradient
+    local bgGradient = Instance.new("UIGradient", container)
+    bgGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(25, 25, 32)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 20))
+    })
+    bgGradient.Rotation = 135
 
     -- Glow line
     local glowLine = Instance.new("Frame", container)
@@ -88,7 +95,7 @@ local function createLoadingNotification()
     corner(logoImage, 8)
 
     -- Title
-    local titleLbl = Instance.new("TextLabel", container)
+    titleLbl = Instance.new("TextLabel", container)
     titleLbl.Size = UDim2.new(1, -66, 0, 22)
     titleLbl.Position = UDim2.new(0, 62, 0, 12)
     titleLbl.BackgroundTransparency = 1
@@ -134,12 +141,11 @@ local function createLoadingNotification()
     return notifGui
 end
 
--- ==================== UPDATE FUNCTIONS ====================
 function _G.updateLoadingProgress(step, totalSteps, stepName)
     if not progressFill or not statusLbl then return end
     
     local progress = math.clamp(step / totalSteps, 0, 1)
-    tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.1)
+    tween(progressFill, {Size = UDim2.new(progress, 0, 1, 0)}, 0.15)
     
     if statusLbl and statusLbl.Parent then
         statusLbl.Text = string.format("[%d/%d] %s", step, totalSteps, stepName or "Loading...")
@@ -177,22 +183,10 @@ function _G.finishLoading()
     task.wait(0.3)
     pcall(function() notifGui:Destroy() end)
     notifGui = nil
-    
-    if _G.OnLoadingComplete then
-        _G.OnLoadingComplete()
-    end
 end
 
 function _G.showLoadingNotification()
     return createLoadingNotification()
-end
-
-function _G.isLoadingDone()
-    return notifGui == nil
-end
-
-_G.OnLoadingComplete = function()
-    print("[LoadingNotif] Loading selesai!")
 end
 
 print("[LoadingNotif] Module ready!")
