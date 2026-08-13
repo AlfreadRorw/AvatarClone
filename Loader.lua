@@ -1,6 +1,5 @@
 -- ================================================
 -- PHONE ID VIEWER - Modular Loader
--- by AlfreadRorw
 -- ================================================
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
@@ -86,9 +85,11 @@ for _, path in ipairs(AppList) do
     Load(path)
 end
 
-Load("Core/FloatingIcon.lua")
-
--- Loading Notification (dimuat terakhir agar muncul setelah semua siap)
+-- ==================== LOADING NOTIFICATION (MUNCUL PERTAMA) ====================
 Load("Core/LoadingNotif.lua")
+_G.showLoadingNotification()
+
+-- ==================== FLOATING ICON (MUNCUL SETELAH LOADING) ====================
+Load("Core/FloatingIcon.lua")
 
 print("[PhoneIDViewer] All modules loaded!")

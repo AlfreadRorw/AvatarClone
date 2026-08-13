@@ -1,5 +1,5 @@
 -- ================================================
--- FLOATING ICON - Clean & Professional
+-- FLOATING ICON - Muncul Setelah Loading Selesai
 -- ================================================
 
 local Services = _G.Services
@@ -15,6 +15,7 @@ local iconStartPos = nil
 local clickMoved = false
 local btn, container
 local isHovering = false
+local hasAppeared = false
 
 local corner = Helpers.corner
 local stroke = Helpers.stroke
@@ -42,7 +43,7 @@ local function createFloatingIcon()
 
     -- Tombol utama
     btn = Instance.new("TextButton", container)
-    btn.Size = UDim2.new(0, 50, 0, 80)
+    btn.Size = UDim2.new(0, 0, 0, 0) -- Mulai dari 0
     btn.Position = UDim2.new(0.5, -25, 0.5, -40)
     btn.BackgroundColor3 = Color3.fromRGB(20, 20, 25)
     btn.Text = ""
@@ -104,7 +105,7 @@ local function createFloatingIcon()
     ledDot.ZIndex = 5
     corner(ledDot, 100)
 
-    -- ==================== DRAG ====================
+    -- ==================== DRAG SYSTEM ====================
     btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = true
@@ -154,7 +155,9 @@ local function createFloatingIcon()
 
     btn.MouseLeave:Connect(function()
         isHovering = false
-        tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.2)
+        if hasAppeared then
+            tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.2)
+        end
     end)
 
     -- ==================== CLICK ====================
@@ -170,22 +173,44 @@ local function createFloatingIcon()
         end
     end)
 
+    -- ==================== ANIMASI MUNCUL ====================
+    -- FloatingIcon muncul dengan animasi dari kecil ke besar
+    task.spawn(function()
+        task.wait(0.2)
+        tween(btn, {Size = UDim2.new(0, 50, 0, 80)}, 0.5, Enum.EasingStyle.Back)
+        hasAppeared = true
+    end)
+
     phoneIcon = gui
     print("[FloatingIcon] Created!")
 end
 
--- Init
+-- ==================== INIT ====================
+-- Tunggu sampai loading notification selesai
 task.spawn(function()
-    task.wait(1)
+    -- Tunggu loading notification muncul dan selesai
+    task.wait(1) -- Beri waktu untuk notifikasi muncul
+    
+    -- Cek apakah loading sudah selesai
+    local attempts = 0
+    while not _G.isLoadingDone or not _G.isLoadingDone() do
+        task.wait(0.1)
+        attempts = attempts + 1
+        if attempts > 100 then break end -- Timeout 10 detik
+    end
+    
+    -- Buat FloatingIcon setelah loading selesai
     createFloatingIcon()
 end)
 
--- Monitor
+-- ==================== MONITOR ====================
 task.spawn(function()
     while true do
         task.wait(5)
         if not phoneIcon or not phoneIcon.Parent then
-            createFloatingIcon()
+            if hasAppeared then
+                createFloatingIcon()
+            end
         end
     end
 end)
