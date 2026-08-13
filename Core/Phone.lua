@@ -1,5 +1,6 @@
 -- ================================================
--- PHONE GUI - Main Phone Frame & Lock Screen
+-- PHONE GUI - Main Phone Frame
+-- Dengan Key Entry Fullscreen & Auto-Login
 -- ================================================
 
 local Services = _G.Services
@@ -8,6 +9,7 @@ local Helpers = _G.Helpers
 local Config = _G.Config
 local Storage = _G.Storage
 local Firebase = _G.Firebase
+local LocalPlayer = _G.LocalPlayer
 
 local appSettings = Storage.appSettings
 
@@ -217,278 +219,237 @@ gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ================= LOCK SCREEN =================
-local lock = Instance.new("Frame", sa)
-lock.Size = UDim2.new(1, 0, 1, 0)
-lock.BackgroundColor3 = Color3.new(0, 0, 0)
-lock.ZIndex = 80
-lock.Visible = false
-Helpers.corner(lock, 30)
+-- ================= KEY ENTRY FULLSCREEN OVERLAY =================
+-- Overlay fullscreen hitam yang menutupi semua
+local keyOverlay = Instance.new("Frame", gui)  -- Langsung ke gui, bukan sa
+keyOverlay.Size = UDim2.new(1, 0, 1, 0)
+keyOverlay.Position = UDim2.new(0, 0, 0, 0)
+keyOverlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+keyOverlay.BackgroundTransparency = 0  -- Sepenuhnya hitam (tidak transparan)
+keyOverlay.ZIndex = 200  -- Di atas segalanya
+keyOverlay.Visible = false
+keyOverlay.BorderSizePixel = 0
 
--- Gradient untuk lock screen
-local lockGradient = Instance.new("UIGradient", lock)
-lockGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 20)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 0, 5))
+-- Gradient untuk overlay
+local overlayGradient = Instance.new("UIGradient", keyOverlay)
+overlayGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(10, 10, 15)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(5, 5, 10)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 20))
 })
-lockGradient.Rotation = 135
+overlayGradient.Rotation = 135
 
-local clockRing = Instance.new("Frame", lock)
-clockRing.Size = UDim2.new(0, 160, 0, 160)
-clockRing.Position = UDim2.new(0.5, -80, 0.2, 0)
-clockRing.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-clockRing.BackgroundTransparency = 0.9
-Helpers.corner(clockRing, 100)
-Helpers.stroke(clockRing, Color3.fromRGB(255, 255, 255), 2, 0.3)
+-- Container konten di tengah
+local keyContent = Instance.new("Frame", keyOverlay)
+keyContent.Size = UDim2.new(0, 280, 0, 400)
+keyContent.Position = UDim2.new(0.5, -140, 0.5, -200)
+keyContent.BackgroundTransparency = 1
+keyContent.ZIndex = 201
 
-local cTime = Instance.new("TextLabel", clockRing)
-cTime.Size = UDim2.new(1, 0, 0.4, 0)
-cTime.Position = UDim2.new(0, 0, 0.2, 0)
-cTime.BackgroundTransparency = 1
-cTime.Text = os.date("%H:%M")
-cTime.TextColor3 = Color3.new(1, 1, 1)
-cTime.Font = Enum.Font.GothamBlack
-cTime.TextSize = 38
-cTime.TextScaled = true
+-- Icon kunci (build dari Frame, bukan emoji)
+local lockIconContainer = Instance.new("Frame", keyContent)
+lockIconContainer.Size = UDim2.new(0, 60, 0, 60)
+lockIconContainer.Position = UDim2.new(0.5, -30, 0, 0)
+lockIconContainer.BackgroundTransparency = 1
+lockIconContainer.ZIndex = 202
 
--- Update jam di lock screen
-task.spawn(function()
-    while cTime.Parent do
-        local format = appSettings.clockFormat == "12" and "%I:%M %p" or "%H:%M"
-        cTime.Text = os.date(format)
-        task.wait(30)
-    end
-end)
+-- Body kunci (persegi panjang)
+local lockBody = Instance.new("Frame", lockIconContainer)
+lockBody.Size = UDim2.new(0, 36, 0, 28)
+lockBody.Position = UDim2.new(0.5, -18, 0.5, -8)
+lockBody.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
+lockBody.ZIndex = 203
+Helpers.corner(lockBody, 5)
 
-local hint = Instance.new("TextLabel", lock)
-hint.Size = UDim2.new(1, 0, 0, 30)
-hint.Position = UDim2.new(0, 0, 0.88, 0)
-hint.BackgroundTransparency = 1
-hint.Text = "🔒 Click to enter key"
-hint.TextColor3 = Color3.fromRGB(200, 200, 220)
-hint.Font = Enum.Font.GothamBold
-hint.TextSize = 13
+-- Shackle kunci (lingkaran)
+local lockShackle = Instance.new("Frame", lockIconContainer)
+lockShackle.Size = UDim2.new(0, 20, 0, 24)
+lockShackle.Position = UDim2.new(0.5, -10, 0.2, 0)
+lockShackle.BackgroundTransparency = 1
+lockShackle.ZIndex = 203
+Helpers.stroke(lockShackle, Color3.fromRGB(0, 200, 255), 3, 0)
+Helpers.corner(lockShackle, 100)
 
-lock.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
-        _G.showPass()
-    end
-end)
-
--- ================= KEY ENTRY SCREEN =================
-local pass = Instance.new("Frame", sa)
-pass.Size = UDim2.new(1, 0, 1, 0)
-pass.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-pass.BackgroundTransparency = 0.15
-pass.ZIndex = 90
-pass.Visible = false
-Helpers.corner(pass, 30)
-
--- Gradient background
-local passGradient = Instance.new("UIGradient", pass)
-passGradient.Color = ColorSequence.new({
-    ColorSequenceKeypoint.new(0, Color3.fromRGB(15, 15, 25)),
-    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 5, 10))
-})
-passGradient.Rotation = 45
-
--- Container untuk konten
-local contentFrame = Instance.new("Frame", pass)
-contentFrame.Size = UDim2.new(0.85, 0, 0.5, 0)
-contentFrame.Position = UDim2.new(0.075, 0, 0.25, 0)
-contentFrame.BackgroundTransparency = 1
-contentFrame.ZIndex = 91
-
--- Icon lock
-local lockIcon = Instance.new("TextLabel", contentFrame)
-lockIcon.Size = UDim2.new(0, 60, 0, 60)
-lockIcon.Position = UDim2.new(0.5, -30, 0, 0)
-lockIcon.BackgroundTransparency = 1
-lockIcon.Text = "🔒"
-lockIcon.TextSize = 40
-lockIcon.ZIndex = 92
+-- Keyhole (lingkaran kecil)
+local keyhole = Instance.new("Frame", lockBody)
+keyhole.Size = UDim2.new(0, 8, 0, 8)
+keyhole.Position = UDim2.new(0.5, -4, 0.5, -4)
+keyhole.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+keyhole.ZIndex = 204
+Helpers.corner(keyhole, 100)
 
 -- Judul
-local pTitle = Instance.new("TextLabel", contentFrame)
-pTitle.Size = UDim2.new(1, 0, 0, 30)
-pTitle.Position = UDim2.new(0, 0, 0, 70)
-pTitle.BackgroundTransparency = 1
-pTitle.Text = "ENTER ACCESS KEY"
-pTitle.TextColor3 = Color3.new(1, 1, 1)
-pTitle.Font = Enum.Font.GothamBlack
-pTitle.TextSize = 18
-pTitle.ZIndex = 92
+local keyTitle = Instance.new("TextLabel", keyContent)
+keyTitle.Size = UDim2.new(1, 0, 0, 30)
+keyTitle.Position = UDim2.new(0, 0, 0, 80)
+keyTitle.BackgroundTransparency = 1
+keyTitle.Text = "ENTER ACCESS KEY"
+keyTitle.TextColor3 = Color3.new(1, 1, 1)
+keyTitle.Font = Enum.Font.GothamBlack
+keyTitle.TextSize = 20
+keyTitle.ZIndex = 202
 
 -- Subtitle
-local pSubtitle = Instance.new("TextLabel", contentFrame)
-pSubtitle.Size = UDim2.new(1, 0, 0, 20)
-pSubtitle.Position = UDim2.new(0, 0, 0, 105)
-pSubtitle.BackgroundTransparency = 1
-pSubtitle.Text = "Masukkan key untuk membuka"
-pSubtitle.TextColor3 = Color3.fromRGB(150, 150, 170)
-pSubtitle.Font = Enum.Font.Gotham
-pSubtitle.TextSize = 12
-pSubtitle.ZIndex = 92
+local keySubtitle = Instance.new("TextLabel", keyContent)
+keySubtitle.Size = UDim2.new(1, 0, 0, 20)
+keySubtitle.Position = UDim2.new(0, 0, 0, 115)
+keySubtitle.BackgroundTransparency = 1
+keySubtitle.Text = "Key hanya bisa digunakan 1x per player"
+keySubtitle.TextColor3 = Color3.fromRGB(150, 150, 170)
+keySubtitle.Font = Enum.Font.Gotham
+keySubtitle.TextSize = 11
+keySubtitle.ZIndex = 202
 
 -- Input field
-local keyInput = Instance.new("TextBox", contentFrame)
+local keyInput = Instance.new("TextBox", keyContent)
 keyInput.Size = UDim2.new(1, 0, 0, 50)
-keyInput.Position = UDim2.new(0, 0, 0, 140)
-keyInput.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-keyInput.BackgroundTransparency = 0.9
+keyInput.Position = UDim2.new(0, 0, 0, 150)
+keyInput.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
 keyInput.TextColor3 = Color3.new(1, 1, 1)
 keyInput.PlaceholderText = "KEY-XXXXXXXX"
-keyInput.PlaceholderColor3 = Color3.fromRGB(120, 120, 140)
+keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
 keyInput.Font = Enum.Font.GothamBold
-keyInput.TextSize = 22
+keyInput.TextSize = 20
 keyInput.TextXAlignment = Enum.TextXAlignment.Center
 keyInput.ClearTextOnFocus = false
-keyInput.ZIndex = 93
+keyInput.ZIndex = 203
 Helpers.corner(keyInput, 12)
 Helpers.stroke(keyInput, Color3.fromRGB(0, 200, 255), 2, 0.5)
 
 -- Status label
-local statusLbl = Instance.new("TextLabel", contentFrame)
-statusLbl.Size = UDim2.new(1, 0, 0, 30)
-statusLbl.Position = UDim2.new(0, 0, 0, 200)
-statusLbl.BackgroundTransparency = 1
-statusLbl.Text = ""
-statusLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-statusLbl.Font = Enum.Font.GothamBold
-statusLbl.TextSize = 12
-statusLbl.ZIndex = 92
+local keyStatus = Instance.new("TextLabel", keyContent)
+keyStatus.Size = UDim2.new(1, 0, 0, 30)
+keyStatus.Position = UDim2.new(0, 0, 0, 210)
+keyStatus.BackgroundTransparency = 1
+keyStatus.Text = ""
+keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
+keyStatus.Font = Enum.Font.GothamBold
+keyStatus.TextSize = 12
+keyStatus.ZIndex = 202
 
--- Loading spinner
-local spinner = Instance.new("Frame", contentFrame)
-spinner.Size = UDim2.new(0, 30, 0, 30)
-spinner.Position = UDim2.new(0.5, -15, 0, 200)
-spinner.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-spinner.BackgroundTransparency = 1
-spinner.Visible = false
-spinner.ZIndex = 93
+-- Loading spinner (build dari Frame)
+local spinnerContainer = Instance.new("Frame", keyContent)
+spinnerContainer.Size = UDim2.new(0, 30, 0, 30)
+spinnerContainer.Position = UDim2.new(0.5, -15, 0, 210)
+spinnerContainer.BackgroundTransparency = 1
+spinnerContainer.Visible = false
+spinnerContainer.ZIndex = 203
 
-local spinnerDot = Instance.new("Frame", spinner)
-spinnerDot.Size = UDim2.new(0, 20, 0, 20)
-spinnerDot.Position = UDim2.new(0.5, -10, 0.5, -10)
-spinnerDot.BackgroundColor3 = Color3.fromRGB(0, 200, 255)
-spinnerDot.ZIndex = 94
+local spinnerRing = Instance.new("Frame", spinnerContainer)
+spinnerRing.Size = UDim2.new(0, 24, 0, 24)
+spinnerRing.Position = UDim2.new(0.5, -12, 0.5, -12)
+spinnerRing.BackgroundTransparency = 1
+spinnerRing.ZIndex = 204
+Helpers.stroke(spinnerRing, Color3.fromRGB(0, 200, 255), 3, 0)
+Helpers.corner(spinnerRing, 100)
+
+local spinnerDot = Instance.new("Frame", spinnerRing)
+spinnerDot.Size = UDim2.new(0, 6, 0, 6)
+spinnerDot.Position = UDim2.new(0.5, -3, 0, -2)
+spinnerDot.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+spinnerDot.ZIndex = 205
 Helpers.corner(spinnerDot, 100)
 
 -- Animasikan spinner
 local function animateSpinner()
     task.spawn(function()
-        while spinner.Visible do
-            spinner.Rotation = (spinner.Rotation + 20) % 360
+        while spinnerContainer.Visible do
+            spinnerRing.Rotation = (spinnerRing.Rotation + 20) % 360
             task.wait(0.05)
         end
     end)
 end
 
 -- Tombol Unlock
-local submitBtn = Instance.new("TextButton", contentFrame)
-submitBtn.Size = UDim2.new(1, 0, 0, 50)
-submitBtn.Position = UDim2.new(0, 0, 0, 240)
-submitBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
-submitBtn.Text = "UNLOCK"
-submitBtn.TextColor3 = Color3.new(1, 1, 1)
-submitBtn.Font = Enum.Font.GothamBlack
-submitBtn.TextSize = 16
-submitBtn.AutoButtonColor = false
-submitBtn.ZIndex = 93
-Helpers.corner(submitBtn, 12)
-Helpers.pressFX(submitBtn)
+local keySubmitBtn = Instance.new("TextButton", keyContent)
+keySubmitBtn.Size = UDim2.new(1, 0, 0, 50)
+keySubmitBtn.Position = UDim2.new(0, 0, 0, 250)
+keySubmitBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
+keySubmitBtn.Text = "UNLOCK"
+keySubmitBtn.TextColor3 = Color3.new(1, 1, 1)
+keySubmitBtn.Font = Enum.Font.GothamBlack
+keySubmitBtn.TextSize = 16
+keySubmitBtn.AutoButtonColor = false
+keySubmitBtn.ZIndex = 203
+Helpers.corner(keySubmitBtn, 12)
+Helpers.pressFX(keySubmitBtn)
 
 -- Gradient untuk tombol
-local btnGradient = Instance.new("UIGradient", submitBtn)
-btnGradient.Color = ColorSequence.new({
+local submitGradient = Instance.new("UIGradient", keySubmitBtn)
+submitGradient.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(0, Color3.fromRGB(0, 200, 100)),
     ColorSequenceKeypoint.new(1, Color3.fromRGB(0, 150, 80))
 })
-btnGradient.Rotation = 90
+submitGradient.Rotation = 90
 
--- Tombol back
-local backBtn = Instance.new("TextButton", contentFrame)
-backBtn.Size = UDim2.new(0.5, 0, 0, 35)
-backBtn.Position = UDim2.new(0.25, 0, 0, 300)
-backBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
-backBtn.Text = "Back"
-backBtn.TextColor3 = Color3.new(1, 1, 1)
-backBtn.Font = Enum.Font.GothamBold
-backBtn.TextSize = 13
-backBtn.AutoButtonColor = false
-backBtn.ZIndex = 93
-Helpers.corner(backBtn, 8)
-Helpers.pressFX(backBtn)
+-- Info tambahan
+local keyInfo = Instance.new("TextLabel", keyContent)
+keyInfo.Size = UDim2.new(1, 0, 0, 20)
+keyInfo.Position = UDim2.new(0, 0, 0, 315)
+keyInfo.BackgroundTransparency = 1
+keyInfo.Text = "Dapatkan key dari developer"
+keyInfo.TextColor3 = Color3.fromRGB(100, 100, 120)
+keyInfo.Font = Enum.Font.Gotham
+keyInfo.TextSize = 10
+keyInfo.ZIndex = 202
 
--- Fungsi submit key
+-- ================= FUNGSI KEY =================
 local function submitKey()
     local key = keyInput.Text:upper():gsub("%s", "")
     
     if key == "" then
-        statusLbl.Text = "⚠️ Masukkan key terlebih dahulu"
-        statusLbl.TextColor3 = Color3.fromRGB(255, 200, 50)
+        keyStatus.Text = "Masukkan key terlebih dahulu"
+        keyStatus.TextColor3 = Color3.fromRGB(255, 200, 50)
         return
     end
     
     -- Tampilkan loading
-    spinner.Visible = true
+    spinnerContainer.Visible = true
     animateSpinner()
-    statusLbl.Text = ""
+    keyStatus.Text = ""
     keyInput.TextEditable = false
-    submitBtn.Text = "MEMERIKSA..."
-    submitBtn.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+    keySubmitBtn.Text = "MEMERIKSA..."
     
-    -- Validasi ke Firebase (asynchronous)
+    -- Validasi ke Firebase
     task.spawn(function()
-        local isValid, message = Firebase.ValidateKey(key)
+        local userId = LocalPlayer.UserId
+        local isValid, message = Firebase.ValidateKey(key, userId)
         
-        task.wait(0.5) -- Delay untuk efek loading
+        task.wait(0.5)
         
-        spinner.Visible = false
+        spinnerContainer.Visible = false
         keyInput.TextEditable = true
-        submitBtn.Text = "UNLOCK"
-        submitBtn.BackgroundColor3 = Color3.fromRGB(0, 180, 100)
+        keySubmitBtn.Text = "UNLOCK"
         
         if isValid then
-            -- Sukses
-            statusLbl.Text = "✅ " .. (message or "Key valid!")
-            statusLbl.TextColor3 = Color3.fromRGB(0, 255, 100)
+            -- Simpan key ke storage
+            Storage.appSettings.savedKey = key
+            Storage.persistSettings()
             
-            -- Animasi sukses
-            Helpers.tween(submitBtn, {BackgroundColor3 = Color3.fromRGB(0, 255, 100)}, 0.3)
+            keyStatus.Text = message or "Key valid!"
+            keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
             
             task.wait(0.5)
             _G.unlock()
-            statusLbl.Text = ""
+            keyStatus.Text = ""
         else
-            -- Gagal
-            statusLbl.Text = "❌ " .. (message or "Key tidak valid")
-            statusLbl.TextColor3 = Color3.fromRGB(255, 80, 80)
+            keyStatus.Text = message or "Key tidak valid"
+            keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
             
             -- Shake effect
-            Helpers.tween(keyInput, {Position = UDim2.new(0, -5, 0, 140)}, 0.05)
+            Helpers.tween(keyInput, {Position = UDim2.new(0, -5, 0, 150)}, 0.05)
             task.wait(0.05)
-            Helpers.tween(keyInput, {Position = UDim2.new(0, 5, 0, 140)}, 0.05)
+            Helpers.tween(keyInput, {Position = UDim2.new(0, 5, 0, 150)}, 0.05)
             task.wait(0.05)
-            Helpers.tween(keyInput, {Position = UDim2.new(0, 0, 0, 140)}, 0.05)
+            Helpers.tween(keyInput, {Position = UDim2.new(0, 0, 0, 150)}, 0.05)
             
-            -- Clear input
             keyInput.Text = ""
         end
     end)
 end
 
-submitBtn.MouseButton1Click:Connect(submitKey)
+keySubmitBtn.MouseButton1Click:Connect(submitKey)
 
--- Back button
-backBtn.MouseButton1Click:Connect(function()
-    pass.Visible = false
-    lock.Visible = true
-    keyInput.Text = ""
-    statusLbl.Text = ""
-end)
-
--- Enter key
 keyInput.FocusLost:Connect(function(enterPressed)
     if enterPressed then
         submitKey()
@@ -504,29 +465,38 @@ _G.PhoneState = {
 }
 
 -- ================= PHONE FUNCTIONS =================
-function _G.showPass()
-    lock.Visible = false
-    pass.Visible = true
+function _G.showKeyEntry()
+    keyOverlay.Visible = true
     keyInput.Text = ""
-    statusLbl.Text = ""
-    -- Focus ke input
+    keyStatus.Text = ""
     task.wait(0.1)
     keyInput:CaptureFocus()
 end
 
-function _G.hidePass()
-    pass.Visible = false
-    lock.Visible = true
+function _G.hideKeyEntry()
+    keyOverlay.Visible = false
 end
 
 function _G.unlock()
     _G.PhoneState.isLocked = false
-    lock.Visible = false
-    pass.Visible = false
+    keyOverlay.Visible = false
     keyInput.Text = ""
-    statusLbl.Text = ""
+    keyStatus.Text = ""
     _G.goHome()
-    Helpers.showDynamicNotification("Phone Unlocked! 🔓", Color3.fromRGB(0, 255, 100))
+    Helpers.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 100))
+end
+
+function _G.checkAutoLogin()
+    local savedKey = Storage.appSettings.savedKey
+    if savedKey and savedKey ~= "" then
+        local userId = LocalPlayer.UserId
+        local isValid, message = Firebase.CheckSavedKey(userId, savedKey)
+        if isValid then
+            _G.PhoneState.isLocked = false
+            return true
+        end
+    end
+    return false
 end
 
 function _G.openPhone()
@@ -534,13 +504,14 @@ function _G.openPhone()
     phone.Visible = true
     phone.Size = UDim2.new(0, 0, 0, 0)
     Helpers.tween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
+    
     if _G.PhoneState.isLocked then
-        lock.Visible = true
-        pass.Visible = false
-        -- Langsung tampilkan key entry setelah delay singkat
-        task.wait(0.5)
-        if lock.Visible and _G.PhoneState.isLocked then
-            _G.showPass()
+        -- Coba auto-login
+        if not _G.checkAutoLogin() then
+            task.wait(0.5)
+            _G.showKeyEntry()
+        else
+            _G.goHome()
         end
     else
         _G.goHome()
@@ -550,8 +521,23 @@ end
 function _G.closePhone()
     if not phone.Visible then return end
     Helpers.tween(phone, {Size = UDim2.new(0, 0, 0, 0)}, 0.22)
-    task.delay(0.22, function() phone.Visible = false end)
+    task.delay(0.22, function() 
+        phone.Visible = false 
+        if _G.PhoneState.isLocked then
+            keyOverlay.Visible = false
+        end
+    end)
 end
+
+-- ================= CHECK AUTO-LOGIN SAAT STARTUP =================
+task.spawn(function()
+    task.wait(1)
+    if _G.checkAutoLogin() then
+        print("[Phone] Auto-login berhasil!")
+    else
+        print("[Phone] Menunggu input key...")
+    end
+end)
 
 -- ================= EXPORT =================
 return {
@@ -564,8 +550,6 @@ return {
     dil = dil,
     diStroke = diStroke,
     dib = dib,
-    lock = lock,
-    pass = pass,
     home = home,
     homeWall = homeWall,
     sh = sh,
@@ -574,6 +558,7 @@ return {
     dockGrid = dockGrid,
     appGrid = appGrid,
     gridLayout = gridLayout,
+    keyOverlay = keyOverlay,
     isPortrait = isPortrait,
     getGridIconSize = getGridIconSize,
     PHONE_SIZE = PHONE_SIZE,

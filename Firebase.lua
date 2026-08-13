@@ -1,9 +1,11 @@
--- Firebase.lua - Fixed Version
+-- ================================================
+-- FIREBASE - With Key Binding System
+-- ================================================
+
 local HttpService = game:GetService("HttpService")
 
 local Firebase = {}
 
--- Konfigurasi Firebase
 local config = {
     apiKey = "AIzaSyCGYiMvdt8v4DP96dUny8xFDRD6w3T1c80",
     authDomain = "phone-id-viewer.firebaseapp.com",
@@ -16,17 +18,14 @@ local config = {
 
 local KEYS_PATH = "keys"
 
--- Fungsi untuk mendapatkan URL dengan timestamp (anti-cache)
 local function getUrl(path)
     local baseUrl = config.databaseURL
-    -- Pastikan URL berakhir dengan /
     if not baseUrl:match("/$") then
         baseUrl = baseUrl .. "/"
     end
-    return baseUrl .. path .. ".json?t=" .. tostring(os.time()) .. "&auth=" .. config.apiKey
+    return baseUrl .. path .. ".json?t=" .. tostring(os.time())
 end
 
--- GET Data
 function Firebase.GetData(path)
     local url = getUrl(path)
     local success, result = pcall(function()
@@ -46,21 +45,11 @@ function Firebase.GetData(path)
         end)
         if ok then
             return data
-        else
-            warn("[Firebase] JSON Decode Error:", data)
-            return nil
         end
-    else
-        local errorMsg = "Unknown error"
-        if result then
-            errorMsg = result.StatusMessage or result.StatusCode or "Unknown"
-        end
-        warn("[Firebase] GET Failed:", errorMsg, "| URL:", url)
-        return nil
     end
+    return nil
 end
 
--- SET Data (PUT)
 function Firebase.SetData(path, data)
     local url = getUrl(path)
     local jsonData = HttpService:JSONEncode(data)
@@ -77,15 +66,9 @@ function Firebase.SetData(path, data)
         })
     end)
     
-    if success and result and result.Success then
-        return true
-    else
-        warn("[Firebase] SET Failed:", result and result.StatusMessage or "Unknown")
-        return false
-    end
+    return success and result and result.Success
 end
 
--- DELETE Data
 function Firebase.DeleteData(path)
     local url = getUrl(path)
     local success, result = pcall(function()
@@ -100,13 +83,14 @@ function Firebase.DeleteData(path)
     return success and result and result.Success
 end
 
--- Validasi Key
-function Firebase.ValidateKey(key)
+-- ==================== VALIDASI KEY ====================
+-- Sekarang key terikat ke UserId player
+-- Key hanya bisa dipakai 1 kali (dihapus setelah dipakai)
+function Firebase.ValidateKey(key, userId)
     if not key or key == "" then 
         return false, "Key kosong"
     end
     
-    -- Normalisasi key (uppercase, hapus spasi)
     key = key:upper():gsub("%s", "")
     
     local data = Firebase.GetData(KEYS_PATH .. "/" .. key)
@@ -115,7 +99,6 @@ function Firebase.ValidateKey(key)
         return false, "Gagal terhubung ke server"
     end
     
-    -- Cek struktur data
     if type(data) ~= "table" then
         return false, "Key tidak ditemukan"
     end
@@ -126,19 +109,66 @@ function Firebase.ValidateKey(key)
     end
     
     local now = os.time()
-    if expires > now then
-        local remaining = expires - now
+    if expires <= now then
+        Firebase.DeleteData(KEYS_PATH .. "/" .. key)
+        return false, "Key sudah kedaluwarsa"
+    end
+    
+    -- Cek apakah key sudah terikat ke player lain
+    if data.usedBy and data.usedBy ~= tostring(userId) then
+        return false, "Key sudah digunakan player lain"
+    end
+    
+    -- Jika key belum terikat, ikat ke player ini
+    if not data.usedBy then
+        data.usedBy = tostring(userId)
+        data.usedAt = now
+        Firebase.SetData(KEYS_PATH .. "/" .. key, data)
+    end
+    
+    local remaining = expires - now
+    local hours = math.floor(remaining / 3600)
+    local minutes = math.floor((remaining % 3600) / 60)
+    
+    return true, string.format("Berlaku %d jam %d menit", hours, minutes)
+end
+
+-- ==================== CEK KEY TERSIMPAN ====================
+-- Cek apakah player sudah punya key yang masih valid
+function Firebase.CheckSavedKey(userId, savedKey)
+    if not savedKey or savedKey == "" then
+        return false, "Tidak ada key tersimpan"
+    end
+    
+    local data = Firebase.GetData(KEYS_PATH .. "/" .. savedKey)
+    
+    if not data or type(data) ~= "table" then
+        return false, "Key tidak ditemukan"
+    end
+    
+    -- Pastikan key terikat ke player ini
+    if data.usedBy ~= tostring(userId) then
+        return false, "Key tidak terikat ke player ini"
+    end
+    
+    local expires = tonumber(data.expires)
+    if not expires then
+        return false, "Key tidak valid"
+    end
+    
+    if expires > os.time() then
+        local remaining = expires - os.time()
         local hours = math.floor(remaining / 3600)
         local minutes = math.floor((remaining % 3600) / 60)
         return true, string.format("Berlaku %d jam %d menit", hours, minutes)
     else
-        -- Key expired, hapus
-        Firebase.DeleteData(KEYS_PATH .. "/" .. key)
+        -- Hapus key expired
+        Firebase.DeleteData(KEYS_PATH .. "/" .. savedKey)
         return false, "Key sudah kedaluwarsa"
     end
 end
 
--- Generate Key (untuk website)
+-- ==================== GENERATE KEY (untuk website) ====================
 function Firebase.GenerateKey(durationHours)
     local chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     local key = ""
@@ -151,15 +181,15 @@ function Firebase.GenerateKey(durationHours)
     local data = {
         expires = expires,
         created = os.time(),
-        duration = durationHours or 24
+        duration = durationHours or 24,
+        usedBy = false,  -- Belum dipakai
+        usedAt = false
     }
     
-    local success = Firebase.SetData(KEYS_PATH .. "/" .. key, data)
-    if success then
+    if Firebase.SetData(KEYS_PATH .. "/" .. key, data) then
         return key, expires
-    else
-        return nil, nil
     end
+    return nil, nil
 end
 
 return Firebase

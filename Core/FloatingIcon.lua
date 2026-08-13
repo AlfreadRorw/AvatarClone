@@ -1,5 +1,5 @@
 -- ================================================
--- FLOATING ICON - Upgraded Version
+-- FLOATING ICON - Fully Built (No Emoji)
 -- ================================================
 
 local Services = _G.Services
@@ -13,8 +13,6 @@ local dragStart = nil
 local iconStartPos = nil
 local clickMoved = false
 local btn, container
-
--- Variabel untuk animasi
 local isHovering = false
 
 local function createFloatingIcon()
@@ -30,24 +28,23 @@ local function createFloatingIcon()
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
     if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
-    -- Container utama
+    -- Container
     container = Instance.new("Frame", gui)
     container.Size = UDim2.new(0, 65, 0, 95)
     container.Position = UDim2.new(0, 15, 0.5, -47)
     container.BackgroundTransparency = 1
     container.ZIndex = 10
 
-    -- Shadow (bayangan)
+    -- Shadow
     local shadow = Instance.new("Frame", container)
     shadow.Size = UDim2.new(0, 56, 0, 88)
     shadow.Position = UDim2.new(0.5, -25, 0.5, -40)
     shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    shadow.BackgroundTransparency = 0.7
+    shadow.BackgroundTransparency = 0.75
     shadow.ZIndex = 1
-    local shadowCorner = Instance.new("UICorner", shadow)
-    shadowCorner.CornerRadius = UDim.new(0, 14)
+    Helpers.corner(shadow, 14)
 
-    -- Tombol utama (phone body)
+    -- Phone Body
     btn = Instance.new("TextButton", container)
     btn.Size = UDim2.new(0, 52, 0, 84)
     btn.Position = UDim2.new(0.5, -26, 0.5, -42)
@@ -57,34 +54,31 @@ local function createFloatingIcon()
     btn.ZIndex = 2
 
     -- Gradient untuk body
-    local btnGradient = Instance.new("UIGradient", btn)
-    btnGradient.Color = ColorSequence.new({
+    local bodyGradient = Instance.new("UIGradient", btn)
+    bodyGradient.Color = ColorSequence.new({
         ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 40)),
         ColorSequenceKeypoint.new(0.5, Color3.fromRGB(20, 20, 30)),
         ColorSequenceKeypoint.new(1, Color3.fromRGB(10, 10, 15))
     })
-    btnGradient.Rotation = 45
+    bodyGradient.Rotation = 45
 
-    -- Corner untuk body
-    local btnCorner = Instance.new("UICorner", btn)
-    btnCorner.CornerRadius = UDim.new(0, 14)
+    -- Corner
+    Helpers.corner(btn, 14)
 
-    -- Stroke dengan glow effect
+    -- Stroke dengan glow
     local btnStroke = Instance.new("UIStroke", btn)
     btnStroke.Color = Color3.fromRGB(0, 200, 255)
     btnStroke.Thickness = 2
     btnStroke.Transparency = 0.6
     btnStroke.ZIndex = 3
 
-    -- Screen (layar dalam)
+    -- Screen (layar)
     local screen = Instance.new("Frame", btn)
     screen.Size = UDim2.new(1, -8, 1, -30)
     screen.Position = UDim2.new(0, 4, 0, 20)
     screen.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     screen.ZIndex = 4
-    
-    local screenCorner = Instance.new("UICorner", screen)
-    screenCorner.CornerRadius = UDim.new(0, 6)
+    Helpers.corner(screen, 6)
 
     -- Gradient untuk screen
     local screenGradient = Instance.new("UIGradient", screen)
@@ -100,27 +94,47 @@ local function createFloatingIcon()
     island.Position = UDim2.new(0.5, -11, 0, 8)
     island.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
     island.ZIndex = 5
-    local islandCorner = Instance.new("UICorner", island)
-    islandCorner.CornerRadius = UDim.new(0, 3)
+    Helpers.corner(island, 3)
 
-    -- Ikon telepon
-    local phoneIconSymbol = Instance.new("TextLabel", screen)
-    phoneIconSymbol.Size = UDim2.new(1, 0, 1, 0)
-    phoneIconSymbol.BackgroundTransparency = 1
-    phoneIconSymbol.Text = "📱"
-    phoneIconSymbol.TextColor3 = Color3.new(1, 1, 1)
-    phoneIconSymbol.Font = Enum.Font.GothamBold
-    phoneIconSymbol.TextSize = 24
-    phoneIconSymbol.ZIndex = 6
+    -- Icon telepon (build dari Frame)
+    local phoneIconContainer = Instance.new("Frame", screen)
+    phoneIconContainer.Size = UDim2.new(0, 20, 0, 34)
+    phoneIconContainer.Position = UDim2.new(0.5, -10, 0.5, -17)
+    phoneIconContainer.BackgroundTransparency = 1
+    phoneIconContainer.ZIndex = 6
+    phoneIconContainer.Rotation = 45
 
-    -- Indicator LED (titik hijau)
+    -- Body telepon
+    local phoneBody = Instance.new("Frame", phoneIconContainer)
+    phoneBody.Size = UDim2.new(0, 10, 0, 18)
+    phoneBody.Position = UDim2.new(0.5, -5, 0.5, -9)
+    phoneBody.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    phoneBody.ZIndex = 7
+    Helpers.corner(phoneBody, 3)
+
+    -- Speaker (titik di atas)
+    local speaker = Instance.new("Frame", phoneBody)
+    speaker.Size = UDim2.new(0, 4, 0, 2)
+    speaker.Position = UDim2.new(0.5, -2, 0, 2)
+    speaker.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    speaker.ZIndex = 8
+    Helpers.corner(speaker, 1)
+
+    -- Home button (titik di bawah)
+    local homeBtn = Instance.new("Frame", phoneBody)
+    homeBtn.Size = UDim2.new(0, 3, 0, 3)
+    homeBtn.Position = UDim2.new(0.5, -1.5, 1, -5)
+    homeBtn.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    homeBtn.ZIndex = 8
+    Helpers.corner(homeBtn, 100)
+
+    -- LED indicator
     local ledDot = Instance.new("Frame", btn)
     ledDot.Size = UDim2.new(0, 6, 0, 6)
     ledDot.Position = UDim2.new(0.5, -3, 0, 73)
     ledDot.BackgroundColor3 = Color3.fromRGB(0, 255, 100)
     ledDot.ZIndex = 7
-    local ledCorner = Instance.new("UICorner", ledDot)
-    ledCorner.CornerRadius = UDim.new(0, 3)
+    Helpers.corner(ledDot, 3)
 
     -- ==================== DRAG SYSTEM ====================
     btn.InputBegan:Connect(function(input)
@@ -130,7 +144,6 @@ local function createFloatingIcon()
             dragStart = input.Position
             iconStartPos = container.AbsolutePosition
             
-            -- Shrink effect saat drag dimulai
             TweenService:Create(btn, TweenInfo.new(0.15), {
                 Size = UDim2.new(0, 48, 0, 78)
             }):Play()
@@ -141,7 +154,6 @@ local function createFloatingIcon()
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = false
             
-            -- Kembalikan ukuran
             local targetSize = isHovering and UDim2.new(0, 55, 0, 88) or UDim2.new(0, 52, 0, 84)
             TweenService:Create(btn, TweenInfo.new(0.2, Enum.EasingStyle.Back), {
                 Size = targetSize
@@ -178,19 +190,16 @@ local function createFloatingIcon()
     -- ==================== HOVER EFFECTS ====================
     btn.MouseEnter:Connect(function()
         isHovering = true
-        -- Glow lebih terang
         TweenService:Create(btnStroke, TweenInfo.new(0.3), {
             Transparency = 0.3,
             Thickness = 3,
             Color = Color3.fromRGB(0, 255, 255)
         }):Play()
         
-        -- Sedikit membesar
         TweenService:Create(btn, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
             Size = UDim2.new(0, 55, 0, 88)
         }):Play()
         
-        -- LED berkedip
         TweenService:Create(ledDot, TweenInfo.new(0.3), {
             BackgroundColor3 = Color3.fromRGB(0, 255, 200)
         }):Play()
@@ -198,21 +207,18 @@ local function createFloatingIcon()
 
     btn.MouseLeave:Connect(function()
         isHovering = false
-        -- Kembalikan glow
         TweenService:Create(btnStroke, TweenInfo.new(0.3), {
             Transparency = 0.6,
             Thickness = 2,
             Color = Color3.fromRGB(0, 200, 255)
         }):Play()
         
-        -- Kembalikan ukuran
         if not isDragging then
             TweenService:Create(btn, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
                 Size = UDim2.new(0, 52, 0, 84)
             }):Play()
         end
         
-        -- LED kembali
         TweenService:Create(ledDot, TweenInfo.new(0.3), {
             BackgroundColor3 = Color3.fromRGB(0, 255, 100)
         }):Play()
@@ -225,24 +231,12 @@ local function createFloatingIcon()
         local phoneFrame = _G.Phone and _G.Phone.phone
         
         if phoneFrame and phoneFrame.Visible then
-            -- Tutup phone
-            if _G.closePhone then 
-                _G.closePhone() 
-            end
+            if _G.closePhone then _G.closePhone() end
         else
-            -- Buka phone
-            if _G.openPhone then 
-                _G.openPhone() 
-            end
-            
-            -- Langsung tampilkan key entry jika masih locked
-            task.wait(0.6)
-            if _G.PhoneState and _G.PhoneState.isLocked and _G.showPass then
-                _G.showPass()
-            end
+            if _G.openPhone then _G.openPhone() end
         end
         
-        -- Animasi bounce saat diklik
+        -- Bounce animation
         TweenService:Create(btn, TweenInfo.new(0.1), {
             Size = UDim2.new(0, 50, 0, 82)
         }):Play()
@@ -253,7 +247,7 @@ local function createFloatingIcon()
     end)
 
     phoneIcon = gui
-    print("[FloatingIcon] Created! Click to toggle, drag to move.")
+    print("[FloatingIcon] Created!")
 end
 
 -- ==================== INIT ====================
@@ -269,29 +263,6 @@ task.spawn(function()
         if not phoneIcon or not phoneIcon.Parent then
             print("[FloatingIcon] Recreating...")
             createFloatingIcon()
-        end
-    end
-end)
-
--- ==================== AUTO-LOCK MONITOR ====================
-task.spawn(function()
-    while true do
-        task.wait(1)
-        local appSettings = _G.Storage and _G.Storage.appSettings
-        if appSettings and appSettings.autoLockSeconds and appSettings.autoLockSeconds > 0 then
-            if _G.PhoneState and not _G.PhoneState.isLocked then
-                -- Check if phone is open
-                local phoneFrame = _G.Phone and _G.Phone.phone
-                if phoneFrame and phoneFrame.Visible then
-                    -- Reset timer if phone is open
-                    _G.lastActivity = os.time()
-                elseif _G.lastActivity and (os.time() - _G.lastActivity) > appSettings.autoLockSeconds then
-                    -- Auto lock
-                    _G.PhoneState.isLocked = true
-                    _G.lastActivity = nil
-                    print("[FloatingIcon] Phone auto-locked")
-                end
-            end
         end
     end
 end)
