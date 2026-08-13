@@ -1,5 +1,5 @@
 -- ================================================
--- FIREBASE - Complete with Map Names
+-- FIREBASE - Complete with Map Names, Chat, Notification
 -- ================================================
 
 local HttpService = game:GetService("HttpService")
@@ -21,6 +21,7 @@ local ONLINE_PATH = "online"
 local CHAT_PATH = "chat"
 local NOTIF_PATH = "notifications"
 
+-- ==================== HELPER FUNCTIONS ====================
 local function getUrl(path)
     local baseUrl = config.databaseURL
     if not baseUrl:match("/$") then
@@ -51,6 +52,7 @@ local function safeRequest(url, method, body)
     return result
 end
 
+-- ==================== BASE DATA FUNCTIONS ====================
 function Firebase.GetData(path)
     local result = safeRequest(getUrl(path), "GET")
     if not result then return nil end
@@ -63,6 +65,11 @@ end
 
 function Firebase.SetData(path, data)
     local result = safeRequest(getUrl(path), "PUT", data)
+    return result ~= nil
+end
+
+function Firebase.PushData(path, data)
+    local result = safeRequest(getUrl(path), "POST", data)
     return result ~= nil
 end
 
@@ -154,7 +161,22 @@ function Firebase.GetKeyTimeRemaining(userId, savedKey)
     return expires - os.time()
 end
 
--- ==================== NOTIFICATION ====================
+function Firebase.GetKeyInfo(savedKey)
+    if not savedKey or savedKey == "" then
+        return nil
+    end
+    return Firebase.GetData(KEYS_PATH .. "/" .. savedKey)
+end
+
+function Firebase.GetAllKeys()
+    return Firebase.GetData(KEYS_PATH)
+end
+
+function Firebase.DeleteKey(key)
+    return Firebase.DeleteData(KEYS_PATH .. "/" .. key)
+end
+
+-- ==================== NOTIFICATION SYSTEM ====================
 function Firebase.SendNotification(targetUserId, title, message, fromName)
     local notifData = {
         title = title,
@@ -168,13 +190,13 @@ function Firebase.SendNotification(targetUserId, title, message, fromName)
         local onlinePlayers = Firebase.GetData(ONLINE_PATH)
         if onlinePlayers then
             for userId, _ in pairs(onlinePlayers) do
-                Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. os.time(), notifData)
+                Firebase.PushData(NOTIF_PATH .. "/" .. userId, notifData)
             end
             return true
         end
         return false
     else
-        return Firebase.SetData(NOTIF_PATH .. "/" .. targetUserId .. "/" .. os.time(), notifData)
+        return Firebase.PushData(NOTIF_PATH .. "/" .. targetUserId, notifData)
     end
 end
 
@@ -186,7 +208,11 @@ function Firebase.DeleteNotification(userId, notifId)
     return Firebase.DeleteData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId)
 end
 
--- ==================== ONLINE ====================
+function Firebase.MarkNotificationRead(userId, notifId)
+    return Firebase.SetData(NOTIF_PATH .. "/" .. userId .. "/" .. notifId .. "/read", true)
+end
+
+-- ==================== ONLINE SYSTEM ====================
 function Firebase.SetOnline(userId, playerData)
     return Firebase.SetData(ONLINE_PATH .. "/" .. userId, playerData)
 end
@@ -197,6 +223,51 @@ end
 
 function Firebase.GetOnlinePlayers()
     return Firebase.GetData(ONLINE_PATH)
+end
+
+-- ==================== CHAT SYSTEM ====================
+function Firebase.SendChat(fromUserId, fromName, message, target, targetName, mapName)
+    local chatData = {
+        from = fromUserId and "player" or "admin",
+        fromName = fromName or "Unknown",
+        fromUserId = fromUserId or nil,
+        message = message,
+        target = target or "all",
+        targetName = targetName or "All Players",
+        mapName = mapName or "Unknown",
+        timestamp = os.time(),
+        replyTo = nil,
+        replyToName = nil,
+    }
+    
+    local chatId = os.time() .. "_" .. math.random(1000, 9999)
+    return Firebase.SetData(CHAT_PATH .. "/" .. chatId, chatData)
+end
+
+function Firebase.SendChatWithReply(fromUserId, fromName, message, target, targetName, mapName, replyToId, replyToName)
+    local chatData = {
+        from = fromUserId and "player" or "admin",
+        fromName = fromName or "Unknown",
+        fromUserId = fromUserId or nil,
+        message = message,
+        target = target or "all",
+        targetName = targetName or "All Players",
+        mapName = mapName or "Unknown",
+        timestamp = os.time(),
+        replyTo = replyToId or nil,
+        replyToName = replyToName or nil,
+    }
+    
+    local chatId = os.time() .. "_" .. math.random(1000, 9999)
+    return Firebase.SetData(CHAT_PATH .. "/" .. chatId, chatData)
+end
+
+function Firebase.GetChats()
+    return Firebase.GetData(CHAT_PATH)
+end
+
+function Firebase.DeleteChat(chatId)
+    return Firebase.DeleteData(CHAT_PATH .. "/" .. chatId)
 end
 
 return Firebase

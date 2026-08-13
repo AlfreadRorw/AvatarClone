@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE GUI - With Notification System
+-- PHONE GUI - Complete with Notification System
 -- ================================================
 
 local Services = _G.Services
@@ -112,7 +112,7 @@ sb.BackgroundTransparency = 1
 sb.ZIndex = 100
 
 local clockLbl = Instance.new("TextLabel", sb)
-clockLbl.Size = UDim2.new(0, 80, 1, 0)
+clockLbl.Size = UDim2.new(0, 80, 0, 30)
 clockLbl.Position = UDim2.new(0, 14, 0, 0)
 clockLbl.BackgroundTransparency = 1
 clockLbl.Text = os.date("%H:%M")
@@ -120,6 +120,7 @@ clockLbl.TextColor3 = T.Text or Color3.fromRGB(30, 30, 30)
 clockLbl.Font = Enum.Font.GothamBold
 clockLbl.TextSize = 13
 clockLbl.TextXAlignment = Enum.TextXAlignment.Left
+clockLbl.ZIndex = 101
 
 task.spawn(function()
     while clockLbl.Parent do
@@ -238,75 +239,196 @@ gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ==================== KEY SCREEN ====================
+-- ==================== KEY SCREEN (MODERN REDESIGN) ====================
 local keyScreen = Instance.new("Frame", sa)
 keyScreen.Size = UDim2.new(1, 0, 1, 0)
 keyScreen.Position = UDim2.new(0, 0, 0, 0)
-keyScreen.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+keyScreen.BackgroundColor3 = Color3.fromRGB(12, 12, 18)
 keyScreen.ZIndex = 80
 keyScreen.Visible = false
 keyScreen.BorderSizePixel = 0
+keyScreen.ClipsDescendants = true
 corner(keyScreen, 30)
 
-local keyTitle = Instance.new("TextLabel", keyScreen)
-keyTitle.Size = UDim2.new(1, 0, 0, 30)
-keyTitle.Position = UDim2.new(0, 0, 0, 100)
+-- Gradient background
+local keyBgGradient = Instance.new("UIGradient", keyScreen)
+keyBgGradient.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, Color3.fromRGB(20, 20, 30)),
+    ColorSequenceKeypoint.new(0.5, Color3.fromRGB(10, 10, 16)),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 20, 35))
+})
+keyBgGradient.Rotation = 135
+
+-- Decorative glow orb (top)
+local glowOrb = Instance.new("Frame", keyScreen)
+glowOrb.Size = UDim2.new(0, 200, 0, 200)
+glowOrb.Position = UDim2.new(0.5, -100, 0, -80)
+glowOrb.BackgroundColor3 = Color3.fromRGB(0, 150, 255)
+glowOrb.BackgroundTransparency = 0.85
+glowOrb.ZIndex = 81
+corner(glowOrb, 100)
+
+local glowOrb2 = Instance.new("Frame", keyScreen)
+glowOrb2.Size = UDim2.new(0, 150, 0, 150)
+glowOrb2.Position = UDim2.new(1, -60, 1, -60)
+glowOrb2.BackgroundColor3 = Color3.fromRGB(139, 92, 246)
+glowOrb2.BackgroundTransparency = 0.85
+glowOrb2.ZIndex = 81
+corner(glowOrb2, 100)
+
+-- ==================== MAIN CONTENT ====================
+local keyContent = Instance.new("Frame", keyScreen)
+keyContent.Size = UDim2.new(1, -40, 1, -40)
+keyContent.Position = UDim2.new(0, 20, 0, 20)
+keyContent.BackgroundTransparency = 1
+keyContent.ZIndex = 82
+
+local keyLayout = Instance.new("UIListLayout", keyContent)
+keyLayout.Padding = UDim.new(0, 12)
+keyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+keyLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+keyLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+
+-- Logo
+local logoFrame = Instance.new("Frame", keyContent)
+logoFrame.Size = UDim2.new(0, 80, 0, 80)
+logoFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+logoFrame.BackgroundTransparency = 0.9
+logoFrame.LayoutOrder = 0
+logoFrame.ZIndex = 83
+corner(logoFrame, 20)
+stroke(logoFrame, Color3.fromRGB(255, 255, 255), 2, 0.8)
+
+local logoImage = Instance.new("ImageLabel", logoFrame)
+logoImage.Size = UDim2.new(1, -10, 1, -10)
+logoImage.Position = UDim2.new(0, 5, 0, 5)
+logoImage.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+logoImage.Image = Config.LogoURL or "https://files.catbox.moe/io8o2d.png"
+logoImage.ScaleType = Enum.ScaleType.Fit
+logoImage.ZIndex = 84
+corner(logoImage, 18)
+
+-- Title
+local keyTitle = Instance.new("TextLabel", keyContent)
+keyTitle.Size = UDim2.new(1, 0, 0, 34)
 keyTitle.BackgroundTransparency = 1
-keyTitle.Text = "ACCESS KEY"
+keyTitle.Text = "PHONE ID VIEWER"
 keyTitle.TextColor3 = Color3.new(1, 1, 1)
 keyTitle.Font = Enum.Font.GothamBlack
-keyTitle.TextSize = 20
-keyTitle.ZIndex = 81
+keyTitle.TextSize = 22
+keyTitle.LayoutOrder = 1
+keyTitle.ZIndex = 83
 
-local keyInput = Instance.new("TextBox", keyScreen)
-keyInput.Size = UDim2.new(1, -40, 0, 45)
-keyInput.Position = UDim2.new(0, 20, 0, 150)
-keyInput.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-keyInput.TextColor3 = Color3.new(1, 1, 1)
+-- Description
+local keyDesc = Instance.new("TextLabel", keyContent)
+keyDesc.Size = UDim2.new(1, -20, 0, 30)
+keyDesc.BackgroundTransparency = 1
+keyDesc.Text = "Masukkan access key untuk membuka semua fitur premium."
+keyDesc.TextColor3 = Color3.fromRGB(150, 150, 170)
+keyDesc.Font = Enum.Font.Gotham
+keyDesc.TextSize = 11
+keyDesc.TextWrapped = true
+keyDesc.LayoutOrder = 2
+keyDesc.ZIndex = 83
+
+-- Input container
+local inputContainer = Instance.new("Frame", keyContent)
+inputContainer.Size = UDim2.new(1, 0, 0, 50)
+inputContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 38)
+inputContainer.LayoutOrder = 3
+inputContainer.ZIndex = 84
+corner(inputContainer, 14)
+stroke(inputContainer, Color3.fromRGB(255, 255, 255), 1, 0.8)
+
+-- Key icon
+local keyIcon = Instance.new("TextLabel", inputContainer)
+keyIcon.Size = UDim2.new(0, 30, 0, 30)
+keyIcon.Position = UDim2.new(0, 10, 0.5, -15)
+keyIcon.BackgroundTransparency = 1
+keyIcon.Text = "🔑"
+keyIcon.Font = Enum.Font.GothamBold
+keyIcon.TextSize = 16
+keyIcon.ZIndex = 85
+
+-- TextBox
+local keyInput = Instance.new("TextBox", inputContainer)
+keyInput.Size = UDim2.new(1, -46, 1, 0)
+keyInput.Position = UDim2.new(0, 42, 0, 0)
+keyInput.BackgroundTransparency = 1
+keyInput.Text = ""
 keyInput.PlaceholderText = "KEY-XXXXXXXX"
-keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
+keyInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 130)
+keyInput.TextColor3 = Color3.new(1, 1, 1)
 keyInput.Font = Enum.Font.GothamBold
-keyInput.TextSize = 18
-keyInput.TextXAlignment = Enum.TextXAlignment.Center
+keyInput.TextSize = 15
+keyInput.TextXAlignment = Enum.TextXAlignment.Left
 keyInput.ClearTextOnFocus = false
-keyInput.ZIndex = 82
-corner(keyInput, 10)
-stroke(keyInput, Color3.fromRGB(255, 255, 255), 1, 0.7)
+keyInput.ZIndex = 85
 
-local keyStatus = Instance.new("TextLabel", keyScreen)
-keyStatus.Size = UDim2.new(1, 0, 0, 25)
-keyStatus.Position = UDim2.new(0, 0, 0, 210)
+-- Status label
+local keyStatus = Instance.new("TextLabel", keyContent)
+keyStatus.Size = UDim2.new(1, 0, 0, 22)
 keyStatus.BackgroundTransparency = 1
 keyStatus.Text = ""
 keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
 keyStatus.Font = Enum.Font.GothamBold
 keyStatus.TextSize = 11
-keyStatus.ZIndex = 81
+keyStatus.LayoutOrder = 4
+keyStatus.ZIndex = 83
 
-local submitBtn = Instance.new("TextButton", keyScreen)
-submitBtn.Size = UDim2.new(1, -40, 0, 45)
-submitBtn.Position = UDim2.new(0, 20, 0, 250)
+-- Unlock button
+local submitBtn = Instance.new("TextButton", keyContent)
+submitBtn.Size = UDim2.new(1, 0, 0, 48)
 submitBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
 submitBtn.Text = "UNLOCK"
 submitBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
 submitBtn.Font = Enum.Font.GothamBlack
-submitBtn.TextSize = 15
+submitBtn.TextSize = 16
 submitBtn.AutoButtonColor = false
-submitBtn.ZIndex = 82
-corner(submitBtn, 10)
+submitBtn.LayoutOrder = 5
+submitBtn.ZIndex = 84
+corner(submitBtn, 14)
 pressFX(submitBtn)
 
+-- Buy button
+local buyBtn = Instance.new("TextButton", keyContent)
+buyBtn.Size = UDim2.new(1, 0, 0, 40)
+buyBtn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+buyBtn.BackgroundTransparency = 0.9
+buyBtn.Text = "💳 BUY KEY"
+buyBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+buyBtn.Font = Enum.Font.GothamBold
+buyBtn.TextSize = 13
+buyBtn.AutoButtonColor = false
+buyBtn.LayoutOrder = 6
+buyBtn.ZIndex = 84
+corner(buyBtn, 10)
+stroke(buyBtn, Color3.fromRGB(255, 255, 255), 1, 0.6)
+pressFX(buyBtn)
+
+-- Version info
+local buildInfo = Instance.new("TextLabel", keyContent)
+buildInfo.Size = UDim2.new(1, 0, 0, 16)
+buildInfo.BackgroundTransparency = 1
+buildInfo.Text = "Build v2.1.0 | © 2025 " .. (Config.DEVELOPER_USERNAME or "AlfreadR0rw")
+buildInfo.TextColor3 = Color3.fromRGB(80, 80, 100)
+buildInfo.Font = Enum.Font.Gotham
+buildInfo.TextSize = 8
+buildInfo.LayoutOrder = 7
+buildInfo.ZIndex = 83
+
+-- ==================== FUNCTIONS ====================
 local function submitKey()
     local key = keyInput.Text:upper():gsub("%s", "")
     
     if key == "" then
-        keyStatus.Text = "Masukkan key"
+        keyStatus.Text = "⚠️ Masukkan key terlebih dahulu"
         keyStatus.TextColor3 = Color3.fromRGB(255, 200, 50)
         return
     end
     
     if Firebase and Firebase.ValidateKey then
-        keyStatus.Text = "Checking..."
+        keyStatus.Text = "⏳ Checking key..."
         keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
         
         task.spawn(function()
@@ -317,16 +439,25 @@ local function submitKey()
             if ok and result then
                 local isValid, message = result
                 if isValid then
-                    keyStatus.Text = message or "Key valid!"
+                    keyStatus.Text = "✅ " .. (message or "Key valid!")
                     keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
-                    task.wait(0.5)
+                    
+                    -- Simpan key ke storage
+                    if Storage and Storage.appSettings then
+                        Storage.appSettings.savedKey = key
+                        if Storage.persistSettings then
+                            Storage.persistSettings()
+                        end
+                    end
+                    
+                    task.wait(0.8)
                     _G.unlock()
                 else
-                    keyStatus.Text = message or "Key tidak valid"
+                    keyStatus.Text = "❌ " .. (message or "Key tidak valid")
                     keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
                 end
             else
-                keyStatus.Text = "Gagal terhubung ke server"
+                keyStatus.Text = "❌ Gagal terhubung ke server"
                 keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
         end)
@@ -339,9 +470,15 @@ end
 submitBtn.MouseButton1Click:Connect(submitKey)
 
 keyInput.FocusLost:Connect(function(enterPressed)
-    if enterPressed then
-        submitKey()
+    if enterPressed then submitKey() end
+end)
+
+buyBtn.MouseButton1Click:Connect(function()
+    local url = Config.BUY_KEY_URL or "https://discord.gg/yourdiscord"
+    if Helpers and Helpers.copyToClipboard then
+        Helpers.copyToClipboard(url)
     end
+    _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(255, 180, 50))
 end)
 
 -- ==================== STATE ====================
@@ -353,16 +490,26 @@ _G.PhoneState = {
 }
 
 -- ==================== PHONE FUNCTIONS ====================
+local keyScreenAnim = false
+
 function _G.showKeyEntry()
     keyScreen.Visible = true
     keyInput.Text = ""
     keyStatus.Text = ""
+    if not keyScreenAnim then
+        keyContent.Position = UDim2.new(0, 20, -0.1, 0)
+        keyContent.BackgroundTransparency = 0.2
+        tween(keyContent, {Position = UDim2.new(0, 20, 0, 20)}, 0.3, Enum.EasingStyle.Quart)
+        tween(keyContent, {BackgroundTransparency = 1}, 0.3)
+        keyScreenAnim = true
+    end
     task.wait(0.1)
     keyInput:CaptureFocus()
 end
 
 function _G.hideKeyEntry()
     keyScreen.Visible = false
+    keyScreenAnim = false
 end
 
 function _G.unlock()
@@ -370,9 +517,7 @@ function _G.unlock()
     keyScreen.Visible = false
     keyInput.Text = ""
     keyStatus.Text = ""
-    if _G.goHome then
-        _G.goHome()
-    end
+    if _G.goHome then _G.goHome() end
     _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 100))
 end
 
@@ -401,7 +546,6 @@ function _G.closePhone()
 end
 
 -- ==================== ONLINE TRACKING ====================
--- Set player online saat script dimuat
 task.spawn(function()
     if Firebase and Firebase.SetOnline then
         local playerData = {
@@ -414,7 +558,6 @@ task.spawn(function()
         }
         Firebase.SetOnline(LocalPlayer.UserId, playerData)
         
-        -- Update setiap 60 detik
         while true do
             task.wait(60)
             playerData.lastUpdate = os.time()
@@ -425,7 +568,6 @@ task.spawn(function()
     end
 end)
 
--- Remove from online when leaving
 game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
     if Firebase and Firebase.RemoveOnline then
         Firebase.RemoveOnline(LocalPlayer.UserId)
