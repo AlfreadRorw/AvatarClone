@@ -51,10 +51,20 @@ local Firebase = Load("Firebase.lua")
 _G.Firebase = Firebase
 
 local Phone = Load("Core/Phone.lua")
+_G.Phone = Phone
 
 local Icons = Load("Core/Icons.lua")
+_G.Icons = Icons
 
--- Applications
+-- PENTING: BuildIcons.lua HARUS di-load sebelum semua Applications/*.lua.
+-- Setiap file di Applications/ membaca _G.appContent, _G.buildAppIcon, dll
+-- pada saat file itu sendiri di-load (baris atas file, bukan di dalam fungsi),
+-- dan nilai itu di-assign ke variabel LOKAL. Kalau BuildIcons.lua belum jalan,
+-- _G.appContent masih nil saat dibaca, dan variabel lokal appContent di tiap
+-- app akan tetap nil selamanya walau _G.appContent diisi belakangan.
+Load("Core/BuildIcons.lua")
+
+-- Applications (load SETELAH BuildIcons.lua)
 local AppList = {
     "Applications/Players.lua",
     "Applications/Clone.lua",
@@ -82,7 +92,6 @@ for _, path in ipairs(AppList) do
     Load(path)
 end
 
-Load("Core/BuildIcons.lua")
 Load("Core/FloatingIcon.lua")
 
 print("[PhoneIDViewer] All modules loaded!")

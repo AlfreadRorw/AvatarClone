@@ -61,13 +61,20 @@ local function createFloatingIcon()
     local islandCorner = Instance.new("UICorner", island)
     islandCorner.CornerRadius = UDim.new(0, 2)
     
-    -- ==================== DRAG SYSTEM (SIMPEL) ====================
+    -- ==================== DRAG SYSTEM (FIXED) ====================
+    -- Posisi awal container pakai scale (UDim2.new(0, 15, 0.5, -42)), tapi kalau
+    -- kita cuma baca komponen .Offset dan abaikan .Scale, hasil hitungnya salah
+    -- begitu drag dimulai (icon "melompat"). Fix: konversi ke posisi pixel absolut
+    -- dulu pakai AbsolutePosition, baru drag dihitung dari situ.
     btn.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             isDragging = true
             clickMoved = false
             dragStart = input.Position
-            iconStartPos = container.Position
+            -- AbsolutePosition = posisi pixel nyata di layar saat ini, sudah
+            -- memperhitungkan scale + offset sekaligus. Ini yang benar dipakai
+            -- sebagai titik awal, bukan container.Position mentah.
+            iconStartPos = container.AbsolutePosition
         end
     end)
     
@@ -88,8 +95,8 @@ local function createFloatingIcon()
             end
             
             if clickMoved then
-                local newX = iconStartPos.X.Offset + delta.X
-                local newY = iconStartPos.Y.Offset + delta.Y
+                local newX = iconStartPos.X + delta.X
+                local newY = iconStartPos.Y + delta.Y
                 
                 local cam = Services.Workspace.CurrentCamera
                 if cam then
@@ -98,64 +105,27 @@ local function createFloatingIcon()
                     newY = math.clamp(newY, 5, vp.Y - 90)
                 end
                 
+                -- Selalu tulis ulang dengan scale 0 secara konsisten, supaya drag
+                -- berikutnya (yang juga baca AbsolutePosition) tetap akurat.
                 container.Position = UDim2.new(0, newX, 0, newY)
             end
         end
     end)
     
     -- ==================== KLIK (BUKA/TUTUP) ====================
+    -- Pakai referensi langsung ke _G.Phone.phone (di-export dari Core/Phone.lua)
+    -- alih-alih menebak child mana yang "phone" lewat GetChildren(). Jauh lebih
+    -- aman karena _G.openPhone()/_G.closePhone() sudah tahu persis cara animasi
+    -- buka/tutup yang benar (termasuk hormati status lock screen).
     btn.MouseButton1Click:Connect(function()
-        if clickMoved then return end -- Abaikan kalau lagi drag
-        
-        print("[FloatingIcon] Clicked!")
-        
-        -- Cari phone di CoreGui
-        local phoneFound = false
-        
-        pcall(function()
-            local parent = game:GetService("CoreGui")
-            local phoneGui = parent:FindFirstChild("PhoneGUI")
-            
-            if phoneGui then
-                -- Cari semua Frame yang mungkin phone
-                for _, child in ipairs(phoneGui:GetChildren()) do
-                    if child:IsA("Frame") and child.Name ~= "PhoneGUI" then
-                        if child.Visible then
-                            -- Tutup phone
-                            child.Visible = false
-                            phoneFound = true
-                            print("[FloatingIcon] Phone closed!")
-                            break
-                        else
-                            -- Buka phone
-                            child.Visible = true
-                            child.Size = UDim2.new(0, 0, 0, 0)
-                            
-                            local tween = game:GetService("TweenService"):Create(child, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
-                                Size = UDim2.new(0, 320, 0, 560)
-                            })
-                            tween:Play()
-                            
-                            phoneFound = true
-                            print("[FloatingIcon] Phone opened!")
-                            break
-                        end
-                    end
-                end
-            end
-        end)
-        
-        -- Fallback pakai _G
-        if not phoneFound then
-            if _G.openPhone then
-                _G.openPhone()
-                print("[FloatingIcon] Opened via _G.openPhone")
-            elseif _G.closePhone then
-                _G.closePhone()
-                print("[FloatingIcon] Closed via _G.closePhone")
-            else
-                print("[FloatingIcon] Phone functions not found!")
-            end
+        if clickMoved then return end -- Abaikan kalau ini akhir dari drag, bukan tap
+
+        local phoneFrame = _G.Phone and _G.Phone.phone
+
+        if phoneFrame and phoneFrame.Visible then
+            if _G.closePhone then _G.closePhone() end
+        else
+            if _G.openPhone then _G.openPhone() end
         end
     end)
     
