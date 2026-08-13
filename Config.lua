@@ -9,7 +9,7 @@ return {
     DEVELOPER_USER_ID = 10164114772,
     KEY_TIMER_INTERVAL = 1, -- detik
 
-    BUY_KEY_URL = "https://discord.gg/yourdiscord",
+    BUY_KEY_URL = "https://wa.me/60136951175?text=beli",
 
     LogoURL = "https://files.catbox.moe/io8o2d.png",
     LogoLocalPath = "PhoneIDViewer_Logo.png",
