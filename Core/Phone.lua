@@ -1,18 +1,16 @@
 -- ================================================
--- PHONE GUI - Simplified & Safe
+-- PHONE GUI - With Notification System
 -- ================================================
 
 local Services = _G.Services
-local T = _G.T or {}
-local Helpers = _G.Helpers or {}
-local Config = _G.Config or {}
+local T = _G.T
+local Helpers = _G.Helpers
+local Config = _G.Config
 local LocalPlayer = _G.LocalPlayer
 
--- Storage dan Firebase diambil dengan aman (bisa nil)
 local Storage = _G.Storage
 local Firebase = _G.Firebase
 
--- Helper aliases dengan fallback
 local corner = Helpers.corner or function(o, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 10)
@@ -34,7 +32,6 @@ local tween = Helpers.tween or function(o, p, tm, st)
 end
 
 local pressFX = Helpers.pressFX or function(b)
-    -- Simple press effect
     local orig = b.Size
     b.MouseButton1Down:Connect(function()
         tween(b, {Size = UDim2.new(orig.X.Scale * 0.95, orig.X.Offset * 0.95, orig.Y.Scale * 0.95, orig.Y.Offset * 0.95)}, 0.1)
@@ -241,7 +238,7 @@ gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
 
--- ==================== KEY SCREEN (SEDERHANA) ====================
+-- ==================== KEY SCREEN ====================
 local keyScreen = Instance.new("Frame", sa)
 keyScreen.Size = UDim2.new(1, 0, 1, 0)
 keyScreen.Position = UDim2.new(0, 0, 0, 0)
@@ -299,7 +296,6 @@ submitBtn.ZIndex = 82
 corner(submitBtn, 10)
 pressFX(submitBtn)
 
--- ==================== FUNGSI KEY ====================
 local function submitKey()
     local key = keyInput.Text:upper():gsub("%s", "")
     
@@ -309,15 +305,13 @@ local function submitKey()
         return
     end
     
-    -- Cek Firebase dengan aman
     if Firebase and Firebase.ValidateKey then
         keyStatus.Text = "Checking..."
         keyStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
         
         task.spawn(function()
-            local userId = LocalPlayer.UserId
             local ok, result = pcall(function()
-                return Firebase.ValidateKey(key, userId)
+                return Firebase.ValidateKey(key, LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name)
             end)
             
             if ok and result then
@@ -337,9 +331,6 @@ local function submitKey()
             end
         end)
     else
-        -- Firebase tidak tersedia, langsung unlock (untuk testing)
-        keyStatus.Text = "Firebase tidak tersedia"
-        keyStatus.TextColor3 = Color3.fromRGB(255, 200, 50)
         task.wait(0.5)
         _G.unlock()
     end
@@ -408,6 +399,38 @@ function _G.closePhone()
         phone.Visible = false
     end)
 end
+
+-- ==================== ONLINE TRACKING ====================
+-- Set player online saat script dimuat
+task.spawn(function()
+    if Firebase and Firebase.SetOnline then
+        local playerData = {
+            name = LocalPlayer.Name,
+            displayName = LocalPlayer.DisplayName,
+            userId = LocalPlayer.UserId,
+            mapName = game.PlaceId,
+            jobId = game.JobId,
+            lastUpdate = os.time(),
+        }
+        Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        
+        -- Update setiap 60 detik
+        while true do
+            task.wait(60)
+            playerData.lastUpdate = os.time()
+            playerData.mapName = game.PlaceId
+            playerData.jobId = game.JobId
+            Firebase.SetOnline(LocalPlayer.UserId, playerData)
+        end
+    end
+end)
+
+-- Remove from online when leaving
+game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
+    if Firebase and Firebase.RemoveOnline then
+        Firebase.RemoveOnline(LocalPlayer.UserId)
+    end
+end)
 
 -- ==================== EXPORT ====================
 return {

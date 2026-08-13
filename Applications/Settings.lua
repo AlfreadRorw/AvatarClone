@@ -1,5 +1,5 @@
 -- ================================================
--- SETTINGS APP - With Social Media & Countdown
+-- SETTINGS APP - Glass Morphism & Fixed Social Icons
 -- ================================================
 
 local Services = _G.Services
@@ -22,23 +22,49 @@ local stroke = Helpers.stroke
 local tween = Helpers.tween
 local pressFX = Helpers.pressFX
 
--- Colors
+-- Colors (Glass Morphism Style)
 local colors = {
-    card = Color3.fromRGB(25, 25, 32),
-    card2 = Color3.fromRGB(30, 30, 38),
-    accent = Color3.fromRGB(255, 255, 255),
-    accent2 = Color3.fromRGB(0, 200, 255),
-    gold = Color3.fromRGB(255, 200, 50),
-    green = Color3.fromRGB(0, 255, 100),
-    red = Color3.fromRGB(255, 80, 80),
-    text = Color3.fromRGB(255, 255, 255),
-    text2 = Color3.fromRGB(150, 150, 170),
-    text3 = Color3.fromRGB(100, 100, 120),
-    border = Color3.fromRGB(50, 50, 60),
-    discord = Color3.fromRGB(88, 101, 242),
-    whatsapp = Color3.fromRGB(37, 211, 102),
-    telegram = Color3.fromRGB(0, 136, 204),
+    glass = Color3.fromRGB(255, 255, 255),
+    glassBorder = Color3.fromRGB(255, 255, 255),
+    accent = Color3.fromRGB(0, 150, 255),
+    gold = Color3.fromRGB(255, 180, 50),
+    green = Color3.fromRGB(0, 230, 118),
+    red = Color3.fromRGB(255, 82, 82),
+    text = Color3.fromRGB(30, 30, 35),
+    text2 = Color3.fromRGB(100, 100, 110),
+    text3 = Color3.fromRGB(140, 140, 150),
 }
+
+-- Glass card builder
+local function createGlassCard(parent, order)
+    local card = Instance.new("Frame", parent)
+    card.Size = UDim2.new(1, 0, 0, 0)
+    card.AutomaticSize = Enum.AutomaticSize.Y
+    card.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    card.BackgroundTransparency = 0.15 -- Glass effect (semi-transparent)
+    card.LayoutOrder = order
+    card.BorderSizePixel = 0
+    corner(card, 16)
+    stroke(card, Color3.fromRGB(255, 255, 255), 1.5, 0.3)
+    
+    -- Glass gradient
+    local glassGradient = Instance.new("UIGradient", card)
+    glassGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(240, 240, 245))
+    })
+    glassGradient.Rotation = 135
+    glassGradient.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 0.1),
+        NumberSequenceKeypoint.new(1, 0.25)
+    })
+    
+    local cardLayout = Instance.new("UIListLayout", card)
+    cardLayout.Padding = UDim.new(0, 8)
+    cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    
+    return card
+end
 
 -- Section builder
 local function createSection(title, order)
@@ -60,7 +86,7 @@ local function createSection(title, order)
     local accentLine = Instance.new("Frame", titleFrame)
     accentLine.Size = UDim2.new(0, 3, 0, 18)
     accentLine.Position = UDim2.new(0, 0, 0.5, -9)
-    accentLine.BackgroundColor3 = colors.accent2
+    accentLine.BackgroundColor3 = colors.accent
     accentLine.BorderSizePixel = 0
     accentLine.ZIndex = 2
     corner(accentLine, 2)
@@ -79,28 +105,11 @@ local function createSection(title, order)
     return section
 end
 
-local function createCard(parent, order)
-    local card = Instance.new("Frame", parent)
-    card.Size = UDim2.new(1, 0, 0, 0)
-    card.AutomaticSize = Enum.AutomaticSize.Y
-    card.BackgroundColor3 = colors.card
-    card.LayoutOrder = order
-    card.BorderSizePixel = 0
-    corner(card, 14)
-    stroke(card, colors.border, 1, 0.5)
-    
-    local cardLayout = Instance.new("UIListLayout", card)
-    cardLayout.Padding = UDim.new(0, 6)
-    cardLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    
-    return card
-end
-
 -- ==================== OPEN SETTINGS ====================
 function _G.openSettingsApp()
-    -- Developer Profile
+    -- ==================== DEVELOPER ====================
     local devSection = createSection("DEVELOPER", 1)
-    local devCard = createCard(devSection, 1)
+    local devCard = createGlassCard(devSection, 1)
     
     local devHeader = Instance.new("Frame", devCard)
     devHeader.Size = UDim2.new(1, 0, 0, 70)
@@ -111,7 +120,8 @@ function _G.openSettingsApp()
     local avatarFrame = Instance.new("Frame", devHeader)
     avatarFrame.Size = UDim2.new(0, 50, 0, 50)
     avatarFrame.Position = UDim2.new(0, 10, 0.5, -25)
-    avatarFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+    avatarFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    avatarFrame.BackgroundTransparency = 0.5
     avatarFrame.ZIndex = 2
     corner(avatarFrame, 100)
     stroke(avatarFrame, colors.gold, 2, 0)
@@ -140,7 +150,7 @@ function _G.openSettingsApp()
     devRole.Position = UDim2.new(0, 70, 0, 38)
     devRole.BackgroundColor3 = colors.gold
     devRole.Text = "OWNER"
-    devRole.TextColor3 = Color3.fromRGB(0, 0, 0)
+    devRole.TextColor3 = Color3.fromRGB(255, 255, 255)
     devRole.Font = Enum.Font.GothamBlack
     devRole.TextSize = 8
     devRole.ZIndex = 2
@@ -148,28 +158,30 @@ function _G.openSettingsApp()
     
     -- ==================== SOCIAL MEDIA ====================
     local socialSection = createSection("SOCIAL MEDIA", 2)
-    local socialCard = createCard(socialSection, 1)
+    local socialCard = createGlassCard(socialSection, 1)
     
-    -- Helper untuk social button
-    local function createSocialButton(parent, order, name, iconURL, link, color)
+    -- Social button dengan icon asli
+    local function createSocialButton(parent, order, name, iconURL, link)
         local btn = Instance.new("TextButton", parent)
         btn.Size = UDim2.new(1, 0, 0, 50)
-        btn.BackgroundColor3 = colors.card2
+        btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        btn.BackgroundTransparency = 0.3
         btn.LayoutOrder = order
         btn.AutoButtonColor = false
         btn.BorderSizePixel = 0
-        corner(btn, 10)
-        stroke(btn, color, 2, 0.5)
+        corner(btn, 12)
+        stroke(btn, Color3.fromRGB(255, 255, 255), 1, 0.3)
         pressFX(btn)
         
-        -- Icon
+        -- Icon container (putih)
         local iconFrame = Instance.new("Frame", btn)
         iconFrame.Size = UDim2.new(0, 36, 0, 36)
         iconFrame.Position = UDim2.new(0, 7, 0.5, -18)
-        iconFrame.BackgroundColor3 = color
+        iconFrame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
         iconFrame.ZIndex = 2
-        corner(iconFrame, 100)
+        corner(iconFrame, 10)
         
+        -- Icon image (gunakan URL asli)
         local iconImage = Instance.new("ImageLabel", iconFrame)
         iconImage.Size = UDim2.new(1, -8, 1, -8)
         iconImage.Position = UDim2.new(0, 4, 0, 4)
@@ -195,7 +207,7 @@ function _G.openSettingsApp()
         subLbl.Size = UDim2.new(1, -60, 0, 16)
         subLbl.Position = UDim2.new(0, 50, 0, 28)
         subLbl.BackgroundTransparency = 1
-        subLbl.Text = "Klik untuk membuka"
+        subLbl.Text = "Klik untuk copy link"
         subLbl.TextColor3 = colors.text3
         subLbl.Font = Enum.Font.Gotham
         subLbl.TextSize = 8
@@ -204,19 +216,19 @@ function _G.openSettingsApp()
         
         btn.MouseButton1Click:Connect(function()
             Helpers.copyToClipboard(link)
-            _G.showDynamicNotification(name .. " link copied!", color)
+            _G.showDynamicNotification(name .. " link copied!", colors.accent)
         end)
         
         return btn
     end
     
-    createSocialButton(socialCard, 0, "Discord", Config.DiscordIconURL or "", Config.DiscordURL or "", colors.discord)
-    createSocialButton(socialCard, 1, "WhatsApp", Config.WhatsAppIconURL or "", Config.WhatsAppURL or "", colors.whatsapp)
-    createSocialButton(socialCard, 2, "Telegram", Config.TelegramIconURL or "", Config.TelegramURL or "", colors.telegram)
+    createSocialButton(socialCard, 0, "Discord", Config.DiscordIconURL or "", Config.DiscordURL or "")
+    createSocialButton(socialCard, 1, "WhatsApp", Config.WhatsAppIconURL or "", Config.WhatsAppURL or "")
+    createSocialButton(socialCard, 2, "Telegram", Config.TelegramIconURL or "", Config.TelegramURL or "")
     
     -- ==================== KEY COUNTDOWN ====================
     local timerSection = createSection("KEY STATUS", 3)
-    local timerCard = createCard(timerSection, 1)
+    local timerCard = createGlassCard(timerSection, 1)
     
     local timerDisplay = Instance.new("TextLabel", timerCard)
     timerDisplay.Size = UDim2.new(1, 0, 0, 40)
@@ -226,18 +238,6 @@ function _G.openSettingsApp()
     timerDisplay.Font = Enum.Font.GothamBlack
     timerDisplay.TextSize = 24
     timerDisplay.LayoutOrder = 0
-    
-    local statusBadge = Instance.new("TextLabel", timerCard)
-    statusBadge.Size = UDim2.new(0, 80, 0, 16)
-    statusBadge.Position = UDim2.new(0.5, -40, 0, 42)
-    statusBadge.BackgroundColor3 = colors.green
-    statusBadge.BackgroundTransparency = 0.8
-    statusBadge.Text = "ACTIVE"
-    statusBadge.TextColor3 = colors.green
-    statusBadge.Font = Enum.Font.GothamBlack
-    statusBadge.TextSize = 8
-    statusBadge.LayoutOrder = 1
-    corner(statusBadge, 8)
     
     -- Update timer
     task.spawn(function()
@@ -253,8 +253,7 @@ function _G.openSettingsApp()
                 end)
                 
                 if ok and keyData and keyData.expires then
-                    local now = os.time()
-                    local remaining = keyData.expires - now
+                    local remaining = keyData.expires - os.time()
                     
                     if remaining > 0 then
                         local hours = math.floor(remaining / 3600)
@@ -265,34 +264,22 @@ function _G.openSettingsApp()
                         
                         if remaining > 3600 then
                             timerDisplay.TextColor3 = colors.green
-                            statusBadge.Text = "ACTIVE"
-                            statusBadge.TextColor3 = colors.green
                         elseif remaining > 600 then
                             timerDisplay.TextColor3 = colors.gold
-                            statusBadge.Text = "WARNING"
-                            statusBadge.TextColor3 = colors.gold
                         else
                             timerDisplay.TextColor3 = colors.red
-                            statusBadge.Text = "CRITICAL"
-                            statusBadge.TextColor3 = colors.red
                         end
                     else
                         timerDisplay.Text = "EXPIRED"
                         timerDisplay.TextColor3 = colors.red
-                        statusBadge.Text = "EXPIRED"
-                        statusBadge.TextColor3 = colors.red
                     end
                 else
                     timerDisplay.Text = "NO KEY"
-                    timerDisplay.TextColor3 = colors.text3
-                    statusBadge.Text = "INACTIVE"
-                    statusBadge.TextColor3 = colors.text3
+                    timerDisplay.TextColor3 = colors.text2
                 end
             else
                 timerDisplay.Text = "NO KEY"
-                timerDisplay.TextColor3 = colors.text3
-                statusBadge.Text = "INACTIVE"
-                statusBadge.TextColor3 = colors.text3
+                timerDisplay.TextColor3 = colors.text2
             end
             
             task.wait(1)
@@ -301,17 +288,18 @@ function _G.openSettingsApp()
     
     -- ==================== QUICK ACTIONS ====================
     local actionSection = createSection("AKSI CEPAT", 4)
-    local actionCard = createCard(actionSection, 1)
+    local actionCard = createGlassCard(actionSection, 1)
     
     local function createActionButton(parent, order, title, onClick)
         local btn = Instance.new("TextButton", parent)
         btn.Size = UDim2.new(1, 0, 0, 40)
-        btn.BackgroundColor3 = colors.card2
+        btn.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        btn.BackgroundTransparency = 0.3
         btn.LayoutOrder = order
         btn.AutoButtonColor = false
         btn.BorderSizePixel = 0
         corner(btn, 10)
-        stroke(btn, colors.border, 1, 0.3)
+        stroke(btn, Color3.fromRGB(255, 255, 255), 1, 0.3)
         pressFX(btn)
         
         local titleLbl = Instance.new("TextLabel", btn)

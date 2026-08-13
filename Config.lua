@@ -6,9 +6,9 @@ return {
     REMOTE_PATH = "Remotes.Command.CommandEvent",
     ALLOWED_PLACE_IDS = {133943904733338, 7041939546},
     DEVELOPER_USERNAME = "AlfreadR0rw",
-    DEVELOPER_USER_ID = 123456789, -- Ganti dengan User ID Roblox kamu
+    DEVELOPER_USER_ID = 123456789,
     
-    -- Link untuk membeli key
+    -- Links
     BUY_KEY_URL = "https://discord.gg/yourdiscord",
     
     -- Logo untuk notifikasi loading
@@ -17,11 +17,11 @@ return {
     
     -- Social Media Links
     DiscordURL = "https://discord.gg/yourdiscord",
-    WhatsAppURL = "https://wa.me/60136951175",
+    WhatsAppURL = "https://wa.me/6281234567890",
     TelegramURL = "https://t.me/yourusername",
     
-    -- Social Media Icons (URL gambar 1:1)
-    DiscordIconURL = "https://files.catbox.moe/lgxgw4.jpg",
-    WhatsAppIconURL = "https://files.catbox.moe/ef6pfn.jpg",
-    TelegramIconURL = "https://files.catbox.moe/ugzz6k.jpg",
+    -- Social Media Icons (URL gambar 1:1 - PNG transparan)
+    DiscordIconURL = "https://cdn-icons-png.flaticon.com/512/5968/5968756.png",
+    WhatsAppIconURL = "https://cdn-icons-png.flaticon.com/512/733/733585.png",
+    TelegramIconURL = "https://cdn-icons-png.flaticon.com/512/5968/5968804.png",
 }
