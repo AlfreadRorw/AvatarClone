@@ -1,14 +1,13 @@
--- Core/FloatingIcon.lua (FIXED)
-local T = _G.T
-local Helpers = _G.Helpers
+-- Core/FloatingIcon.lua (FIXED V2)
 local Services = _G.Services
 local LocalPlayer = _G.LocalPlayer
+local UserInputService = Services.UserInputService
 
 local phoneIcon = nil
-local mouseDown = false
-local mouseMoved = false
+local isDragging = false
 local dragStart = nil
 local iconStartPos = nil
+local clickMoved = false
 
 local function createFloatingIcon()
     if phoneIcon then pcall(function() phoneIcon:Destroy() end) end
@@ -23,131 +22,151 @@ local function createFloatingIcon()
     pcall(function() gui.Parent = game:GetService("CoreGui") end)
     if not gui.Parent then gui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
     
-    -- Tombol BESAR yang pasti keliatan
-    local btn = Instance.new("TextButton", gui)
-    btn.Size = UDim2.new(0, 55, 0, 85)
-    btn.Position = UDim2.new(0, 15, 0.5, -42)
+    -- Container
+    local container = Instance.new("Frame", gui)
+    container.Size = UDim2.new(0, 55, 0, 85)
+    container.Position = UDim2.new(0, 15, 0.5, -42)
+    container.BackgroundTransparency = 1
+    
+    -- Tombol HP
+    local btn = Instance.new("TextButton", container)
+    btn.Size = UDim2.new(0, 50, 0, 80)
+    btn.Position = UDim2.new(0.5, -25, 0.5, -40)
     btn.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
     btn.Text = ""
     btn.AutoButtonColor = false
-    Helpers.corner(btn, 12)
-    Helpers.stroke(btn, Color3.fromRGB(60, 60, 65), 2, 0)
     
-    -- Body HP di dalam tombol
-    local phoneBody = Instance.new("Frame", btn)
-    phoneBody.Size = UDim2.new(0, 45, 0, 75)
-    phoneBody.Position = UDim2.new(0.5, -22, 0.5, -37)
-    phoneBody.BackgroundColor3 = Color3.fromRGB(15, 15, 18)
-    Helpers.corner(phoneBody, 10)
-    Helpers.stroke(phoneBody, Color3.fromRGB(45, 45, 50), 1.5, 0)
+    local phoneBodyCorner = Instance.new("UICorner", btn)
+    phoneBodyCorner.CornerRadius = UDim.new(0, 10)
     
-    -- Screen
-    local screen = Instance.new("Frame", phoneBody)
-    screen.Size = UDim2.new(1, -6, 1, -28)
-    screen.Position = UDim2.new(0, 3, 0, 18)
+    local phoneBodyStroke = Instance.new("UIStroke", btn)
+    phoneBodyStroke.Color = Color3.fromRGB(60, 60, 65)
+    phoneBodyStroke.Thickness = 2
+    
+    -- Screen di dalam tombol
+    local screen = Instance.new("Frame", btn)
+    screen.Size = UDim2.new(1, -4, 1, -26)
+    screen.Position = UDim2.new(0, 2, 0, 16)
     screen.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    Helpers.corner(screen, 6)
+    
+    local screenCorner = Instance.new("UICorner", screen)
+    screenCorner.CornerRadius = UDim.new(0, 5)
     
     -- Dynamic Island
-    local island = Instance.new("Frame", phoneBody)
-    island.Size = UDim2.new(0, 20, 0, 4)
-    island.Position = UDim2.new(0.5, -10, 0, 6)
+    local island = Instance.new("Frame", btn)
+    island.Size = UDim2.new(0, 18, 0, 3)
+    island.Position = UDim2.new(0.5, -9, 0, 5)
     island.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-    Helpers.corner(island, 2)
     
-    -- Home bar
-    local homeBar = Instance.new("Frame", phoneBody)
-    homeBar.Size = UDim2.new(0, 18, 0, 2)
-    homeBar.Position = UDim2.new(0.5, -9, 1, -4)
-    homeBar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    homeBar.BackgroundTransparency = 0.5
-    Helpers.corner(homeBar, 1)
+    local islandCorner = Instance.new("UICorner", island)
+    islandCorner.CornerRadius = UDim.new(0, 2)
     
-    -- Klik handler
-    btn.MouseButton1Click:Connect(function()
-        if mouseMoved then return end
+    -- ==================== DRAG SYSTEM (SIMPEL) ====================
+    btn.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = true
+            clickMoved = false
+            dragStart = input.Position
+            iconStartPos = container.Position
+        end
+    end)
+    
+    btn.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            isDragging = false
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if not isDragging then return end
         
-        local phoneFrame = _G.Phone and _G.Phone.phone or nil
-        
-        if phoneFrame then
-            if phoneFrame.Visible then
-                if _G.closePhone then _G.closePhone() end
-            else
-                if _G.openPhone then _G.openPhone() end
-            end
-        else
-            -- Fallback: cari phone langsung
-            local foundPhone = nil
-            pcall(function()
-                local parent = game:GetService("CoreGui")
-                local phoneGui = parent:FindFirstChild("PhoneGUI")
-                if phoneGui then
-                    foundPhone = phoneGui:FindFirstChild("Phone") or phoneGui:FindFirstChildOfClass("Frame")
-                end
-            end)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            local delta = input.Position - dragStart
             
-            if foundPhone then
-                if foundPhone.Visible then
-                    foundPhone.Visible = false
-                else
-                    foundPhone.Visible = true
-                    foundPhone.Size = UDim2.new(0, 0, 0, 0)
-                    Helpers.tween(foundPhone, {Size = UDim2.new(0, 320, 0, 560)}, 0.3)
+            if math.abs(delta.X) > 5 or math.abs(delta.Y) > 5 then
+                clickMoved = true
+            end
+            
+            if clickMoved then
+                local newX = iconStartPos.X.Offset + delta.X
+                local newY = iconStartPos.Y.Offset + delta.Y
+                
+                local cam = Services.Workspace.CurrentCamera
+                if cam then
+                    local vp = cam.ViewportSize
+                    newX = math.clamp(newX, 5, vp.X - 60)
+                    newY = math.clamp(newY, 5, vp.Y - 90)
                 end
-            else
-                print("[FloatingIcon] Phone not found!")
+                
+                container.Position = UDim2.new(0, newX, 0, newY)
             end
         end
     end)
     
-    -- Drag
-    btn.MouseButton1Down:Connect(function()
-        mouseDown = true
-        mouseMoved = false
-        dragStart = Services.UserInputService:GetMouseLocation()
-        iconStartPos = btn.Position
-    end)
-    
-    btn.MouseButton1Up:Connect(function()
-        mouseDown = false
-    end)
-    
-    Services.UserInputService.InputChanged:Connect(function(input)
-        if not mouseDown then return end
-        if input.UserInputType == Enum.UserInputType.MouseMovement then
-            local mousePos = Services.UserInputService:GetMouseLocation()
-            if not dragStart then return end
-            local delta = mousePos - dragStart
-            if math.abs(delta.X) > 3 or math.abs(delta.Y) > 3 then mouseMoved = true end
-            if mouseMoved then
-                local newX = iconStartPos.X.Offset + delta.X
-                local newY = iconStartPos.Y.Offset + delta.Y
-                local cam = Services.Workspace.CurrentCamera
-                if cam then
-                    local screenSize = cam.ViewportSize
-                    newX = math.clamp(newX, 0, screenSize.X - 55)
-                    newY = math.clamp(newY, 0, screenSize.Y - 85)
+    -- ==================== KLIK (BUKA/TUTUP) ====================
+    btn.MouseButton1Click:Connect(function()
+        if clickMoved then return end -- Abaikan kalau lagi drag
+        
+        print("[FloatingIcon] Clicked!")
+        
+        -- Cari phone di CoreGui
+        local phoneFound = false
+        
+        pcall(function()
+            local parent = game:GetService("CoreGui")
+            local phoneGui = parent:FindFirstChild("PhoneGUI")
+            
+            if phoneGui then
+                -- Cari semua Frame yang mungkin phone
+                for _, child in ipairs(phoneGui:GetChildren()) do
+                    if child:IsA("Frame") and child.Name ~= "PhoneGUI" then
+                        if child.Visible then
+                            -- Tutup phone
+                            child.Visible = false
+                            phoneFound = true
+                            print("[FloatingIcon] Phone closed!")
+                            break
+                        else
+                            -- Buka phone
+                            child.Visible = true
+                            child.Size = UDim2.new(0, 0, 0, 0)
+                            
+                            local tween = game:GetService("TweenService"):Create(child, TweenInfo.new(0.3, Enum.EasingStyle.Back), {
+                                Size = UDim2.new(0, 320, 0, 560)
+                            })
+                            tween:Play()
+                            
+                            phoneFound = true
+                            print("[FloatingIcon] Phone opened!")
+                            break
+                        end
+                    end
                 end
-                btn.Position = UDim2.new(0, newX, 0, newY)
+            end
+        end)
+        
+        -- Fallback pakai _G
+        if not phoneFound then
+            if _G.openPhone then
+                _G.openPhone()
+                print("[FloatingIcon] Opened via _G.openPhone")
+            elseif _G.closePhone then
+                _G.closePhone()
+                print("[FloatingIcon] Closed via _G.closePhone")
+            else
+                print("[FloatingIcon] Phone functions not found!")
             end
         end
     end)
     
     phoneIcon = gui
-    print("[FloatingIcon] Created successfully!")
+    print("[FloatingIcon] Created! Click to toggle, drag to move.")
 end
 
--- Init dengan retry
+-- Init
 task.spawn(function()
     task.wait(1)
     createFloatingIcon()
-    
-    -- Cek kalau belum muncul
-    task.wait(2)
-    if not phoneIcon or not phoneIcon.Parent then
-        print("[FloatingIcon] Retry create...")
-        createFloatingIcon()
-    end
 end)
 
 -- Monitor
@@ -155,18 +174,10 @@ task.spawn(function()
     while true do
         task.wait(5)
         if not phoneIcon or not phoneIcon.Parent then
-            print("[FloatingIcon] Icon missing! Recreating...")
+            print("[FloatingIcon] Recreating...")
             createFloatingIcon()
         end
     end
 end)
 
--- Respawn handler
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    if not phoneIcon or not phoneIcon.Parent then
-        createFloatingIcon()
-    end
-end)
-
-print("[FloatingIcon] Module loaded!")
+print("[FloatingIcon] Module ready!")
