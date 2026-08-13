@@ -54,6 +54,7 @@ _G.Firebase = Firebase
 -- requireValidKey() akan cek Firebase apakah user sudah punya key aktif.
 -- Kalau belum, muncul UI minta key.
 -- Semua build UI dilakukan di dalam callback supaya tidak jalan sebelum key valid.
+Load("KeyGateUI.lua")
 Load("KeySystem.lua")
 
 requireValidKey(function(granted)
