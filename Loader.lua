@@ -43,6 +43,10 @@ _G.T = Theme
 local Helpers = Load("Core/Helpers.lua")
 _G.Helpers = Helpers
 
+-- Setelah Helpers, sebelum Storage
+local Assets = Load("Core/Assets.lua")
+_G.Assets = Assets
+
 -- ==================== LOADING NOTIFICATION ====================
 Load("Core/LoadingNotif.lua")
 

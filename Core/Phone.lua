@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE GUI - With Notification System
+-- PHONE GUI - Complete with Auto-Login & Online Tracking
 -- ================================================
 
 local Services = _G.Services
@@ -7,6 +7,7 @@ local T = _G.T
 local Helpers = _G.Helpers
 local Config = _G.Config
 local LocalPlayer = _G.LocalPlayer
+local MarketplaceService = Services.MarketplaceService
 
 local Storage = _G.Storage
 local Firebase = _G.Firebase
@@ -78,7 +79,6 @@ phone.BackgroundTransparency = 0
 
 stroke(phone, T.Accent or Color3.fromRGB(30, 30, 30), 2, 0.15)
 
--- ==================== ORIENTASI ====================
 local PHONE_SIZE_PORTRAIT = UDim2.new(0, 320, 0, 560)
 local PHONE_SIZE = PHONE_SIZE_PORTRAIT
 
@@ -149,7 +149,7 @@ dil.TextSize = 14
 dil.TextXAlignment = Enum.TextXAlignment.Center
 dil.ZIndex = 111
 
--- ==================== DYNAMIC BAR SYSTEM ====================
+-- ==================== DYNAMIC BAR ====================
 local iid = 0
 local notifyQueue = {}
 local isNotifying = false
@@ -296,6 +296,16 @@ submitBtn.ZIndex = 82
 corner(submitBtn, 10)
 pressFX(submitBtn)
 
+local function getMapName()
+    local success, result = pcall(function()
+        return MarketplaceService:GetProductInfo(game.PlaceId)
+    end)
+    if success and result and result.Name then
+        return result.Name
+    end
+    return "Unknown Map"
+end
+
 local function submitKey()
     local key = keyInput.Text:upper():gsub("%s", "")
     
@@ -311,22 +321,30 @@ local function submitKey()
         
         task.spawn(function()
             local ok, result = pcall(function()
-                return Firebase.ValidateKey(key, LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name)
+                return Firebase.ValidateKey(key, LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name, getMapName(), game.JobId)
             end)
             
             if ok and result then
                 local isValid, message = result
                 if isValid then
+                    if Storage and Storage.appSettings then
+                        Storage.appSettings.savedKey = key
+                        Storage.persistSettings()
+                        print("[Phone] Key saved to storage:", key)
+                    end
+                    
                     keyStatus.Text = message or "Key valid!"
                     keyStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
+                    
                     task.wait(0.5)
                     _G.unlock()
                 else
                     keyStatus.Text = message or "Key tidak valid"
                     keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+                    keyInput.Text = ""
                 end
             else
-                keyStatus.Text = "Gagal terhubung ke server"
+                keyStatus.Text = "Gagal terhubung"
                 keyStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
             end
         end)
@@ -337,11 +355,8 @@ local function submitKey()
 end
 
 submitBtn.MouseButton1Click:Connect(submitKey)
-
 keyInput.FocusLost:Connect(function(enterPressed)
-    if enterPressed then
-        submitKey()
-    end
+    if enterPressed then submitKey() end
 end)
 
 -- ==================== STATE ====================
@@ -352,7 +367,7 @@ _G.PhoneState = {
     toolEquipped = true,
 }
 
--- ==================== PHONE FUNCTIONS ====================
+-- ==================== FUNCTIONS ====================
 function _G.showKeyEntry()
     keyScreen.Visible = true
     keyInput.Text = ""
@@ -370,10 +385,26 @@ function _G.unlock()
     keyScreen.Visible = false
     keyInput.Text = ""
     keyStatus.Text = ""
-    if _G.goHome then
-        _G.goHome()
-    end
+    if _G.goHome then _G.goHome() end
     _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0, 255, 100))
+end
+
+function _G.checkAutoLogin()
+    local savedKey = nil
+    if Storage and Storage.appSettings then
+        savedKey = Storage.appSettings.savedKey
+    end
+    
+    if savedKey and savedKey ~= "" and Firebase and Firebase.CheckSavedKey then
+        local ok, result = pcall(function()
+            return Firebase.CheckSavedKey(LocalPlayer.UserId, savedKey)
+        end)
+        if ok and result then
+            _G.PhoneState.isLocked = false
+            return true
+        end
+    end
+    return false
 end
 
 function _G.openPhone()
@@ -383,52 +414,53 @@ function _G.openPhone()
     tween(phone, {Size = PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
     
     if _G.PhoneState.isLocked then
-        task.wait(0.5)
-        _G.showKeyEntry()
-    else
-        if _G.goHome then
-            _G.goHome()
+        if not _G.checkAutoLogin() then
+            task.wait(0.5)
+            _G.showKeyEntry()
+        else
+            if _G.goHome then _G.goHome() end
         end
+    else
+        if _G.goHome then _G.goHome() end
     end
 end
 
 function _G.closePhone()
     if not phone.Visible then return end
     tween(phone, {Size = UDim2.new(0, 0, 0, 0)}, 0.22)
-    task.delay(0.22, function()
-        phone.Visible = false
-    end)
+    task.delay(0.22, function() phone.Visible = false end)
 end
 
 -- ==================== ONLINE TRACKING ====================
--- Set player online saat script dimuat
 task.spawn(function()
     if Firebase and Firebase.SetOnline then
         local playerData = {
             name = LocalPlayer.Name,
             displayName = LocalPlayer.DisplayName,
             userId = LocalPlayer.UserId,
-            mapName = game.PlaceId,
+            mapName = getMapName(),
             jobId = game.JobId,
             lastUpdate = os.time(),
         }
         Firebase.SetOnline(LocalPlayer.UserId, playerData)
         
-        -- Update setiap 60 detik
         while true do
             task.wait(60)
+            playerData.mapName = getMapName()
             playerData.lastUpdate = os.time()
-            playerData.mapName = game.PlaceId
-            playerData.jobId = game.JobId
             Firebase.SetOnline(LocalPlayer.UserId, playerData)
         end
     end
 end)
 
--- Remove from online when leaving
-game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
-    if Firebase and Firebase.RemoveOnline then
-        Firebase.RemoveOnline(LocalPlayer.UserId)
+-- Auto-login at startup
+task.spawn(function()
+    task.wait(2)
+    local ok, result = pcall(_G.checkAutoLogin)
+    if ok and result then
+        print("[Phone] Auto-login success!")
+    else
+        print("[Phone] Waiting for key...")
     end
 end)
 
