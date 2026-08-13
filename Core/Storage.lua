@@ -1,3 +1,7 @@
+-- ================================================
+-- STORAGE - Fixed with savedKey persistence
+-- ================================================
+
 local HttpService = game:GetService("HttpService")
 
 local Storage = {
@@ -38,6 +42,7 @@ local function saveJSON(file, data)
     end)
 end
 
+-- Load semua data
 Storage.presets = loadJSON(FILES.PRESET)
 Storage.favItems = loadJSON(FILES.FAV_ITEMS)
 Storage.favEmotes = loadJSON(FILES.FAV_EMOTES)
@@ -45,12 +50,14 @@ Storage.favBundles = loadJSON(FILES.FAV_BUNDLES)
 Storage.teleportLocations = loadJSON(FILES.TELEPORT)
 Storage.appSettings = loadJSON(FILES.SETTINGS)
 
+-- Load fav players
 local favPlayerIds = loadJSON(FILES.FAV)
 Storage.favSet = {}
 for _, id in ipairs(favPlayerIds) do
     Storage.favSet[tostring(id)] = true
 end
 
+-- Default settings
 local defaults = {
     wallpaperUrl = "",
     themeIndex = 1,
@@ -63,8 +70,8 @@ local defaults = {
     clockFormat = "24",
     passcode = "2006",
     phoneOpacity = 1,
-    bgColor = Color3.fromRGB(255, 255, 255),
-    bgGradient = true,
+    savedKey = nil,
+    lastChatTimestamp = 0,
 }
 
 for k, v in pairs(defaults) do
@@ -73,6 +80,10 @@ for k, v in pairs(defaults) do
     end
 end
 
+-- Save settings awal
+saveJSON(FILES.SETTINGS, Storage.appSettings)
+
+-- ==================== PERSIST FUNCTIONS ====================
 function Storage.persistFav()
     local ids = {}
     for k in pairs(Storage.favSet) do
@@ -103,6 +114,31 @@ end
 
 function Storage.persistSettings()
     saveJSON(FILES.SETTINGS, Storage.appSettings)
+end
+
+-- ==================== SAVED KEY FUNCTIONS ====================
+function Storage.saveKey(key)
+    Storage.appSettings.savedKey = key
+    Storage.persistSettings()
+end
+
+function Storage.getSavedKey()
+    return Storage.appSettings.savedKey
+end
+
+function Storage.clearSavedKey()
+    Storage.appSettings.savedKey = nil
+    Storage.persistSettings()
+end
+
+-- ==================== CHAT TIMESTAMP ====================
+function Storage.saveLastChatTimestamp(timestamp)
+    Storage.appSettings.lastChatTimestamp = timestamp
+    Storage.persistSettings()
+end
+
+function Storage.getLastChatTimestamp()
+    return Storage.appSettings.lastChatTimestamp or 0
 end
 
 return Storage

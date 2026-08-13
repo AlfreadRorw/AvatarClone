@@ -325,25 +325,4 @@ iconBuilders.Message = function(p, c)
     Helpers.corner(handle, 2)
 end
 
-iconBuilders.NotifWeb = function(p, c)
-    -- Bell icon built from frames
-    local bellBody = Instance.new("Frame", p)
-    bellBody.Size = UDim2.new(0, 24, 0, 20)
-    bellBody.Position = UDim2.new(0.5, -12, 0.4, 0)
-    bellBody.BackgroundColor3 = c
-    Helpers.corner(bellBody, 10)
-    
-    local bellTop = Instance.new("Frame", p)
-    bellTop.Size = UDim2.new(0, 10, 0, 6)
-    bellTop.Position = UDim2.new(0.5, -5, 0.3, 0)
-    bellTop.BackgroundColor3 = c
-    Helpers.corner(bellTop, 3)
-    
-    local clapper = Instance.new("Frame", p)
-    clapper.Size = UDim2.new(0, 8, 0, 8)
-    clapper.Position = UDim2.new(0.5, -4, 0.6, 0)
-    clapper.BackgroundColor3 = c
-    Helpers.corner(clapper, 100)
-end
-
 return iconBuilders
