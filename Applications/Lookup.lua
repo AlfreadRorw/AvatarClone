@@ -1,5 +1,5 @@
 -- ================================================
--- PLAYER LOOKUP APP - Fixed Search API
+-- PLAYER LOOKUP APP - Fixed dengan Robust HTTP
 -- ================================================
 
 local Services = _G.Services
@@ -40,10 +40,12 @@ local playerLookupData = {}
 local LookupLifecycle = {
     active = false,
     tasks = {},
+    isSearching = false,
 }
 
 local function cleanupLookup()
     LookupLifecycle.active = false
+    LookupLifecycle.isSearching = false
     for _, task in ipairs(LookupLifecycle.tasks) do
         pcall(function() task.cancel() end)
     end
@@ -52,15 +54,232 @@ end
 
 table.insert(_G.AvatarCloneCleanupTasks or {}, cleanupLookup)
 
--- ==================== HTTP HELPER ====================
-local function httpGet(url)
-    local ok, result = pcall(function()
-        return HttpService:GetAsync(url)
-    end)
-    if ok and result and result ~= "" and result ~= "null" then
-        return result
+-- ==================== ROBUST HTTP REQUEST ====================
+local function httpRequest(options)
+    local url = options.Url or options.url
+    local method = options.Method or options.method or "GET"
+    local headers = options.Headers or options.headers or {}
+    local body = options.Body or options.body
+    
+    print("[Lookup] HTTP Request:", method, url)
+    
+    -- Method 1: syn.request
+    if syn and syn.request then
+        local ok, result = pcall(function()
+            return syn.request({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body,
+            })
+        end)
+        
+        if ok and result then
+            print("[Lookup] syn.request Status:", result.StatusCode)
+            return {
+                success = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300,
+                statusCode = result.StatusCode,
+                body = result.Body or "",
+                error = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300 and nil or ("HTTP " .. tostring(result.StatusCode)),
+            }
+        end
     end
-    return nil
+    
+    -- Method 2: http_request
+    if http_request then
+        local ok, result = pcall(function()
+            return http_request({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body,
+            })
+        end)
+        
+        if ok and result then
+            print("[Lookup] http_request Status:", result.StatusCode)
+            return {
+                success = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300,
+                statusCode = result.StatusCode,
+                body = result.Body or "",
+                error = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300 and nil or ("HTTP " .. tostring(result.StatusCode)),
+            }
+        end
+    end
+    
+    -- Method 3: request (Fluxus style)
+    if request then
+        local ok, result = pcall(function()
+            return request({
+                Url = url,
+                Method = method,
+                Headers = headers,
+                Body = body,
+            })
+        end)
+        
+        if ok and result then
+            print("[Lookup] request Status:", result.StatusCode)
+            return {
+                success = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300,
+                statusCode = result.StatusCode,
+                body = result.Body or "",
+                error = result.StatusCode and result.StatusCode >= 200 and result.StatusCode < 300 and nil or ("HTTP " .. tostring(result.StatusCode)),
+            }
+        end
+    end
+    
+    -- Method 4: HttpService:RequestAsync
+    local ok, result = pcall(function()
+        return HttpService:RequestAsync({
+            Url = url,
+            Method = method,
+            Headers = headers,
+            Body = body,
+        })
+    end)
+    
+    if ok and result then
+        print("[Lookup] HttpService:RequestAsync Status:", result.StatusCode)
+        return {
+            success = result.Success,
+            statusCode = result.StatusCode,
+            body = result.Body or "",
+            error = result.Success and nil or ("HTTP " .. tostring(result.StatusCode)),
+        }
+    end
+    
+    -- Method 5: HttpService:GetAsync (GET only)
+    if method == "GET" then
+        local ok2, result2 = pcall(function()
+            return HttpService:GetAsync(url)
+        end)
+        
+        if ok2 and result2 and result2 ~= "" and result2 ~= "null" then
+            print("[Lookup] HttpService:GetAsync success")
+            return {
+                success = true,
+                statusCode = 200,
+                body = result2,
+                error = nil,
+            }
+        end
+    end
+    
+    print("[Lookup] All HTTP methods failed")
+    return {
+        success = false,
+        statusCode = nil,
+        body = "",
+        error = "All HTTP methods failed",
+    }
+end
+
+-- ==================== NORMALIZE USERNAME ====================
+local function normalizeUsername(username)
+    if not username then return "" end
+    -- Trim leading/trailing whitespace
+    return username:gsub("^%s+", ""):gsub("%s+$", "")
+end
+
+-- ==================== SEARCH USER BY USERNAME ====================
+local function searchUserByUsername(username)
+    local normalized = normalizeUsername(username)
+    
+    print("[Lookup] ========== SEARCHING ==========")
+    print("[Lookup] Searching username:", normalized)
+    
+    if normalized == "" then
+        return {success = false, errorType = "empty", error = "Username kosong"}
+    end
+    
+    -- POST API untuk search
+    local postBody = HttpService:JSONEncode({
+        usernames = {normalized},
+        excludeBannedUsers = false,
+    })
+    
+    local result = httpRequest({
+        Url = "https://users.roblox.com/v1/usernames/users",
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+            ["Accept"] = "application/json",
+        },
+        Body = postBody,
+    })
+    
+    if not result.success then
+        print("[Lookup] HTTP ERROR:", result.error, "Status:", result.statusCode)
+        return {
+            success = false,
+            errorType = "http_error",
+            error = result.error or "HTTP request failed",
+            statusCode = result.statusCode,
+        }
+    end
+    
+    print("[Lookup] HTTP status:", result.statusCode)
+    print("[Lookup] Response received")
+    
+    -- Decode JSON
+    local decodeOk, data = pcall(function()
+        return HttpService:JSONDecode(result.body)
+    end)
+    
+    if not decodeOk then
+        print("[Lookup] JSON DECODE ERROR:", data)
+        return {
+            success = false,
+            errorType = "json_error",
+            error = "JSON decode error: " .. tostring(data),
+        }
+    end
+    
+    if not data or not data.data or type(data.data) ~= "table" then
+        print("[Lookup] Invalid response structure")
+        return {
+            success = false,
+            errorType = "invalid_response",
+            error = "Invalid API response structure",
+        }
+    end
+    
+    print("[Lookup] Results:", #data.data)
+    
+    if #data.data == 0 then
+        print("[Lookup] No results - user not found")
+        return {
+            success = false,
+            errorType = "not_found",
+            error = "Player not found",
+        }
+    end
+    
+    -- Cari exact match
+    for _, user in ipairs(data.data) do
+        local userName = user.name or ""
+        local displayName = user.displayName or user.name or ""
+        
+        if string.lower(userName) == string.lower(normalized) 
+           or string.lower(displayName) == string.lower(normalized) then
+            print("[Lookup] Exact match:", userName, "| UserId:", user.id)
+            return {
+                success = true,
+                userId = user.id,
+                displayName = displayName,
+                username = userName,
+            }
+        end
+    end
+    
+    -- Tidak ada exact match
+    print("[Lookup] No exact match found")
+    return {
+        success = false,
+        errorType = "not_found",
+        error = "Player not found",
+    }
 end
 
 -- ==================== HELPERS ====================
@@ -79,13 +298,17 @@ local function fireHat(ids)
 end
 
 local function cloneFromUserId(userId, cb)
-    local raw = httpGet("https://avatar.roblox.com/v1/users/" .. userId .. "/avatar")
-    if not raw then
+    local result = httpRequest({
+        Url = "https://avatar.roblox.com/v1/users/" .. userId .. "/avatar",
+        Method = "GET",
+    })
+    
+    if not result.success or not result.body then
         if cb then cb(false) end
         return
     end
     
-    local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+    local ok, data = pcall(function() return HttpService:JSONDecode(result.body) end)
     if not ok or not data or not data.assets then
         if cb then cb(false) end
         return
@@ -93,8 +316,11 @@ local function cloneFromUserId(userId, cb)
     
     local ids = {}
     for _, asset in ipairs(data.assets) do
-        if asset and asset.id and type(asset.id) == "number" then
-            table.insert(ids, tostring(asset.id))
+        if asset and asset.id then
+            local id = tonumber(asset.id)
+            if id and id > 0 then
+                table.insert(ids, tostring(id))
+            end
         end
     end
     
@@ -104,139 +330,6 @@ local function cloneFromUserId(userId, cb)
     else
         if cb then cb(false) end
     end
-end
-
--- ==================== SEARCH USER - FIXED ====================
-local function searchUserByUsername(username)
-    print("[Lookup] Searching for:", username)
-    
-    -- Method 1: users.roblox.com search API (POST)
-    local function tryPostSearch()
-        print("[Lookup] Trying POST search API...")
-        
-        local ok, response = pcall(function()
-            return HttpService:RequestAsync({
-                Url = "https://users.roblox.com/v1/usernames/users",
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["Accept"] = "application/json"
-                },
-                Body = HttpService:JSONEncode({
-                    usernames = {username},
-                    excludeBannedUsers = true
-                })
-            })
-        end)
-        
-        if not ok or not response or not response.Success then
-            print("[Lookup] POST search failed")
-            return nil
-        end
-        
-        local decodeOk, data = pcall(function()
-            return HttpService:JSONDecode(response.Body)
-        end)
-        
-        if not decodeOk or not data or not data.data or #data.data == 0 then
-            print("[Lookup] POST search: no results")
-            return nil
-        end
-        
-        local user = data.data[1]
-        print("[Lookup] POST search found:", user.name, user.id)
-        
-        return {
-            userId = user.id,
-            displayName = user.displayName or user.name,
-            username = user.name,
-        }
-    end
-    
-    -- Method 2: users.roblox.com search API (GET)
-    local function tryGetSearch()
-        print("[Lookup] Trying GET search API...")
-        
-        local encodedName = HttpService:UrlEncode(username)
-        local raw = httpGet("https://users.roblox.com/v1/users/search?keyword=" .. encodedName .. "&limit=10")
-        
-        if not raw then
-            print("[Lookup] GET search failed")
-            return nil
-        end
-        
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(raw)
-        end)
-        
-        if not ok or not data or not data.data or #data.data == 0 then
-            print("[Lookup] GET search: no results")
-            return nil
-        end
-        
-        -- Cari yang paling cocok
-        for _, user in ipairs(data.data) do
-            if user.name:lower() == username:lower() then
-                print("[Lookup] GET search exact match:", user.name, user.id)
-                return {
-                    userId = user.id,
-                    displayName = user.displayName or user.name,
-                    username = user.name,
-                }
-            end
-        end
-        
-        -- Fallback ke hasil pertama
-        local user = data.data[1]
-        print("[Lookup] GET search first result:", user.name, user.id)
-        return {
-            userId = user.id,
-            displayName = user.displayName or user.name,
-            username = user.name,
-        }
-    end
-    
-    -- Method 3: Old API (fallback)
-    local function tryOldAPI()
-        print("[Lookup] Trying old API...")
-        
-        local encodedName = HttpService:UrlEncode(username)
-        local raw = httpGet("https://api.roblox.com/users/get-by-username?username=" .. encodedName)
-        
-        if not raw then
-            print("[Lookup] Old API failed")
-            return nil
-        end
-        
-        local ok, data = pcall(function()
-            return HttpService:JSONDecode(raw)
-        end)
-        
-        if not ok or not data or not data.Id or data.Id == 0 then
-            print("[Lookup] Old API: no result")
-            return nil
-        end
-        
-        print("[Lookup] Old API found:", data.Username, data.Id)
-        return {
-            userId = data.Id,
-            displayName = data.Username or username,
-            username = data.Username or username,
-        }
-    end
-    
-    -- Try all methods
-    local methods = {tryPostSearch, tryGetSearch, tryOldAPI}
-    
-    for _, method in ipairs(methods) do
-        local result = method()
-        if result and result.userId then
-            return result
-        end
-    end
-    
-    print("[Lookup] All search methods failed")
-    return nil
 end
 
 -- ==================== OPEN LOOKUP APP ====================
@@ -369,7 +462,12 @@ function _G.openPlayerLookupApp()
     
     -- ==================== SEARCH FUNCTION ====================
     local function searchPlayer(username)
-        playerLookupData = {username = username, selectedTab = "Profile"}
+        if LookupLifecycle.isSearching then
+            print("[Lookup] Search already in progress")
+            return
+        end
+        
+        playerLookupData = {username = normalizeUsername(username), selectedTab = "Profile"}
         
         for _, child in ipairs(contentFrame:GetChildren()) do
             if not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") then
@@ -377,10 +475,16 @@ function _G.openPlayerLookupApp()
             end
         end
         
-        if username == "" or not username:match("%S") then
+        local normalized = normalizeUsername(username)
+        
+        if normalized == "" then
             _G.showDynamicNotification("Enter a username!", colors.red)
             return
         end
+        
+        LookupLifecycle.isSearching = true
+        searchBtn.Text = "..."
+        searchBtn.BackgroundColor3 = colors.gold
         
         local loadingCard = Instance.new("Frame", contentFrame)
         loadingCard.Size = UDim2.new(1, 0, 0, 40)
@@ -396,11 +500,24 @@ function _G.openPlayerLookupApp()
         loadingText.TextSize = 10
         
         task.spawn(function()
-            local result = searchUserByUsername(username)
+            local result = searchUserByUsername(normalized)
             
+            LookupLifecycle.isSearching = false
+            searchBtn.Text = "Search"
+            searchBtn.BackgroundColor3 = colors.blue
             loadingCard:Destroy()
             
-            if not result or not result.userId then
+            if result.success then
+                playerLookupData.userId = result.userId
+                playerLookupData.displayName = result.displayName
+                playerLookupData.username = result.username
+                
+                _G.showDynamicNotification("Found: " .. result.displayName, colors.green)
+                if _G.refreshCurr then
+                    _G.refreshCurr()
+                end
+                
+            elseif result.errorType == "not_found" then
                 local notFoundCard = Instance.new("Frame", contentFrame)
                 notFoundCard.Size = UDim2.new(1, 0, 0, 100)
                 notFoundCard.BackgroundColor3 = colors.card
@@ -410,22 +527,60 @@ function _G.openPlayerLookupApp()
                 local notFoundText = Instance.new("TextLabel", notFoundCard)
                 notFoundText.Size = UDim2.new(1, 0, 1, 0)
                 notFoundText.BackgroundTransparency = 1
-                notFoundText.Text = "Player not found!\n\n@" .. username .. "\n\nTips:\n• Check spelling\n• Make sure username is correct\n• Try again in a few seconds"
+                notFoundText.Text = "Player not found!\n\n@" .. normalized
                 notFoundText.TextColor3 = colors.text3
                 notFoundText.Font = Enum.Font.GothamBold
-                notFoundText.TextSize = 12
+                notFoundText.TextSize = 13
                 notFoundText.TextWrapped = true
                 notFoundText.TextXAlignment = Enum.TextXAlignment.Center
-                return
-            end
-            
-            playerLookupData.userId = result.userId
-            playerLookupData.displayName = result.displayName
-            playerLookupData.username = result.username
-            
-            _G.showDynamicNotification("Found: " .. result.displayName, colors.green)
-            if _G.refreshCurr then
-                _G.refreshCurr()
+                
+            else
+                -- HTTP/API Error
+                local errorCard = Instance.new("Frame", contentFrame)
+                errorCard.Size = UDim2.new(1, 0, 0, 140)
+                errorCard.BackgroundColor3 = colors.card
+                corner(errorCard, 14)
+                stroke(errorCard, colors.red, 2, 0.3)
+                
+                local errorTitle = Instance.new("TextLabel", errorCard)
+                errorTitle.Size = UDim2.new(1, -20, 0, 22)
+                errorTitle.Position = UDim2.new(0, 10, 0, 15)
+                errorTitle.BackgroundTransparency = 1
+                errorTitle.Text = "Unable to contact Roblox API"
+                errorTitle.TextColor3 = colors.red
+                errorTitle.Font = Enum.Font.GothamBlack
+                errorTitle.TextSize = 13
+                errorTitle.TextXAlignment = Enum.TextXAlignment.Center
+                
+                local errorMsg = Instance.new("TextLabel", errorCard)
+                errorMsg.Size = UDim2.new(1, -20, 0, 20)
+                errorMsg.Position = UDim2.new(0, 10, 0, 40)
+                errorMsg.BackgroundTransparency = 1
+                errorMsg.Text = result.error or "Unknown error"
+                if result.statusCode then
+                    errorMsg.Text = errorMsg.Text .. "\nHTTP Status: " .. tostring(result.statusCode)
+                end
+                errorMsg.TextColor3 = colors.text2
+                errorMsg.Font = Enum.Font.Gotham
+                errorMsg.TextSize = 10
+                errorMsg.TextXAlignment = Enum.TextXAlignment.Center
+                errorMsg.TextWrapped = true
+                
+                local retryBtn = Instance.new("TextButton", errorCard)
+                retryBtn.Size = UDim2.new(0, 100, 0, 32)
+                retryBtn.Position = UDim2.new(0.5, -50, 0, 90)
+                retryBtn.BackgroundColor3 = colors.accent
+                retryBtn.Text = "Retry"
+                retryBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
+                retryBtn.Font = Enum.Font.GothamBlack
+                retryBtn.TextSize = 11
+                retryBtn.AutoButtonColor = false
+                corner(retryBtn, 8)
+                pressFX(retryBtn)
+                
+                retryBtn.MouseButton1Click:Connect(function()
+                    searchPlayer(normalized)
+                end)
             end
         end)
     end
@@ -535,99 +690,6 @@ function _G.openPlayerLookupApp()
                 task.wait(1.5)
                 cloneBtn.Text = "Clone"
             end)
-        end)
-    end
-    
-    -- ==================== RENDER ITEMS TAB ====================
-    if lookupSelectedTab == "Items" and playerLookupData.userId then
-        local userId = playerLookupData.userId
-        
-        local loadingText = Instance.new("TextLabel", contentFrame)
-        loadingText.Size = UDim2.new(1, 0, 0, 24)
-        loadingText.BackgroundTransparency = 1
-        loadingText.Text = "Loading items..."
-        loadingText.TextColor3 = colors.text2
-        loadingText.Font = Enum.Font.Gotham
-        loadingText.TextSize = 10
-        
-        task.spawn(function()
-            local allItems = {}
-            
-            local avatarRaw = httpGet("https://avatar.roblox.com/v1/users/" .. userId .. "/avatar")
-            if avatarRaw then
-                local ok, data = pcall(function() return HttpService:JSONDecode(avatarRaw) end)
-                if ok and data and data.assets then
-                    for _, asset in ipairs(data.assets) do
-                        if asset and asset.id then
-                            table.insert(allItems, {
-                                id = tostring(asset.id),
-                                name = asset.name or "Item " .. asset.id,
-                            })
-                        end
-                    end
-                end
-            end
-            
-            loadingText:Destroy()
-            
-            if #allItems == 0 then
-                local emptyText = Instance.new("TextLabel", contentFrame)
-                emptyText.Size = UDim2.new(1, 0, 0, 40)
-                emptyText.BackgroundTransparency = 1
-                emptyText.Text = "No items found"
-                emptyText.TextColor3 = colors.text3
-                emptyText.Font = Enum.Font.GothamBold
-                emptyText.TextSize = 12
-                emptyText.TextXAlignment = Enum.TextXAlignment.Center
-            else
-                local listLayout = Instance.new("UIListLayout", contentFrame)
-                listLayout.Padding = UDim.new(0, 6)
-                listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-                
-                for i, item in ipairs(allItems) do
-                    local card = Instance.new("Frame", contentFrame)
-                    card.Size = UDim2.new(1, 0, 0, 52)
-                    card.BackgroundColor3 = colors.card
-                    card.LayoutOrder = i
-                    corner(card, 10)
-                    stroke(card, colors.border, 1, 0.3)
-                    
-                    local img = Instance.new("ImageLabel", card)
-                    img.Size = UDim2.new(0, 40, 0, 40)
-                    img.Position = UDim2.new(0, 6, 0.5, -20)
-                    img.BackgroundColor3 = colors.card2
-                    img.Image = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. item.id .. "&width=100&height=100&format=png"
-                    img.ScaleType = Enum.ScaleType.Fit
-                    corner(img, 8)
-                    
-                    local nameLbl = Instance.new("TextLabel", card)
-                    nameLbl.Size = UDim2.new(1, -120, 0, 20)
-                    nameLbl.Position = UDim2.new(0, 52, 0, 6)
-                    nameLbl.BackgroundTransparency = 1
-                    nameLbl.Text = item.name
-                    nameLbl.TextColor3 = colors.text
-                    nameLbl.Font = Enum.Font.GothamBold
-                    nameLbl.TextSize = 11
-                    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-                    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-                    
-                    local wearBtn = Instance.new("TextButton", card)
-                    wearBtn.Size = UDim2.new(0, 50, 0, 22)
-                    wearBtn.Position = UDim2.new(1, -58, 0.5, -11)
-                    wearBtn.BackgroundColor3 = colors.accent
-                    wearBtn.Text = "Wear"
-                    wearBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-                    wearBtn.Font = Enum.Font.GothamBold
-                    wearBtn.TextSize = 8
-                    wearBtn.AutoButtonColor = false
-                    corner(wearBtn, 6)
-                    pressFX(wearBtn)
-                    wearBtn.MouseButton1Click:Connect(function()
-                        fireHat({item.id})
-                        _G.showDynamicNotification("Wearing " .. item.id, colors.green)
-                    end)
-                end
-            end
         end)
     end
     
