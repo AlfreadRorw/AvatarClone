@@ -1,5 +1,5 @@
 -- ================================================
--- CLONE APP - Clean Dark Theme dengan Tab System
+-- CLONE APP - Fixed dengan Synapse Request
 -- ================================================
 
 local Services = _G.Services
@@ -18,9 +18,8 @@ local stroke = Helpers.stroke
 local tween = Helpers.tween
 local pressFX = Helpers.pressFX
 
--- ==================== CLEAN DARK THEME (Hitam Putih) ====================
+-- ==================== CLEAN DARK THEME ====================
 local colors = {
-    bg = Color3.fromRGB(15, 15, 20),
     card = Color3.fromRGB(22, 22, 28),
     card2 = Color3.fromRGB(28, 28, 35),
     accent = Color3.fromRGB(255, 255, 255),
@@ -30,22 +29,16 @@ local colors = {
     border = Color3.fromRGB(40, 40, 48),
     tabActive = Color3.fromRGB(255, 255, 255),
     tabInactive = Color3.fromRGB(28, 28, 35),
-    green = Color3.fromRGB(255, 255, 255),
-    red = Color3.fromRGB(255, 255, 255),
-    gold = Color3.fromRGB(255, 255, 255),
 }
 
 -- ==================== LIFECYCLE ====================
 local CloneLifecycle = {
     active = false,
     tasks = {},
-    isFetching = false,
-    currentTab = "ALL",
 }
 
 local function cleanupClone()
     CloneLifecycle.active = false
-    CloneLifecycle.isFetching = false
     for _, task in ipairs(CloneLifecycle.tasks) do
         pcall(function() task.cancel() end)
     end
@@ -54,14 +47,75 @@ end
 
 table.insert(_G.AvatarCloneCleanupTasks or {}, cleanupClone)
 
--- ==================== ROBUST HTTP REQUEST ====================
+-- ==================== HTTP REQUEST - FIXED ====================
 local function httpGet(url)
+    print("[Clone] Fetching:", url)
+    
+    -- Method 1: syn.request (Synapse X)
+    if syn and syn.request then
+        local ok, result = pcall(function()
+            return syn.request({
+                Url = url,
+                Method = "GET",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["Accept"] = "application/json",
+                }
+            })
+        end)
+        
+        if ok and result and result.StatusCode == 200 and result.Body then
+            print("[Clone] syn.request success, body length:", #result.Body)
+            return result.Body
+        elseif ok and result then
+            print("[Clone] syn.request status:", result.StatusCode)
+        end
+    end
+    
+    -- Method 2: http_request (Krnl)
+    if http_request then
+        local ok, result = pcall(function()
+            return http_request({
+                Url = url,
+                Method = "GET",
+            })
+        end)
+        
+        if ok and result and result.StatusCode == 200 and result.Body then
+            print("[Clone] http_request success, body length:", #result.Body)
+            return result.Body
+        end
+    end
+    
+    -- Method 3: request (Fluxus)
+    if request then
+        local ok, result = pcall(function()
+            return request({
+                Url = url,
+                Method = "GET",
+            })
+        end)
+        
+        if ok and result then
+            local body = result.Body or result
+            if body and body ~= "" and body ~= "null" then
+                print("[Clone] request success")
+                return body
+            end
+        end
+    end
+    
+    -- Method 4: game:HttpGet (fallback)
     local ok, result = pcall(function()
-        return HttpService:GetAsync(url)
+        return game:HttpGet(url)
     end)
+    
     if ok and result and result ~= "" and result ~= "null" then
+        print("[Clone] game:HttpGet success")
         return result
     end
+    
+    print("[Clone] All HTTP methods failed")
     return nil
 end
 
@@ -86,10 +140,26 @@ local function getItems(player)
     if not player then return items end
     
     local raw = httpGet("https://avatar.roblox.com/v1/users/" .. player.UserId .. "/avatar")
-    if not raw then return items end
+    if not raw then 
+        print("[Clone] Failed to get avatar data")
+        return items 
+    end
     
-    local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
-    if not ok or not data or not data.assets then return items end
+    local ok, data = pcall(function() 
+        return HttpService:JSONDecode(raw) 
+    end)
+    
+    if not ok then
+        print("[Clone] JSON decode failed:", data)
+        return items
+    end
+    
+    if not data or not data.assets then
+        print("[Clone] No assets field")
+        return items
+    end
+    
+    print("[Clone] Found", #data.assets, "assets")
     
     for _, asset in ipairs(data.assets) do
         if asset and asset.id then
@@ -98,7 +168,6 @@ local function getItems(player)
                 local assetType = "ACC"
                 local assetName = asset.name or "Item " .. assetId
                 
-                -- Klasifikasi sederhana
                 local typeName = ""
                 if type(asset.assetType) == "table" then
                     typeName = string.lower(asset.assetType.name or "")
@@ -106,7 +175,8 @@ local function getItems(player)
                     typeName = string.lower(tostring(asset.assetType))
                 end
                 
-                if typeName:find("body") or typeName:find("torso") or typeName:find("leg") or typeName:find("head") or typeName:find("arm") then
+                if typeName:find("body") or typeName:find("torso") or typeName:find("leg") 
+                   or typeName:find("head") or typeName:find("arm") then
                     assetType = "BODY"
                 end
                 
@@ -119,6 +189,7 @@ local function getItems(player)
         end
     end
     
+    print("[Clone] Total items:", #items)
     return items
 end
 
@@ -171,23 +242,23 @@ end
 -- ==================== BUILD ITEM ROW ====================
 local function buildItemRow(parent, item, order)
     local row = Instance.new("Frame", parent)
-    row.Size = UDim2.new(1, 0, 0, 50)
+    row.Size = UDim2.new(1, 0, 0, 48)
     row.BackgroundColor3 = colors.card2
     row.LayoutOrder = order
     corner(row, 10)
     stroke(row, colors.border, 1, 0.3)
     
     local thumb = Instance.new("ImageLabel", row)
-    thumb.Size = UDim2.new(0, 38, 0, 38)
-    thumb.Position = UDim2.new(0, 6, 0.5, -19)
+    thumb.Size = UDim2.new(0, 36, 0, 36)
+    thumb.Position = UDim2.new(0, 6, 0.5, -18)
     thumb.BackgroundColor3 = colors.card
     thumb.Image = "https://www.roblox.com/asset-thumbnail/image?assetId=" .. item.Value .. "&width=100&height=100&format=png"
     thumb.ScaleType = Enum.ScaleType.Fit
     corner(thumb, 8)
     
     local nameLbl = Instance.new("TextLabel", row)
-    nameLbl.Size = UDim2.new(1, -140, 0, 18)
-    nameLbl.Position = UDim2.new(0, 50, 0, 6)
+    nameLbl.Size = UDim2.new(1, -130, 0, 18)
+    nameLbl.Position = UDim2.new(0, 48, 0, 5)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = item.Label
     nameLbl.TextColor3 = colors.text
@@ -197,8 +268,8 @@ local function buildItemRow(parent, item, order)
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
     
     local idLbl = Instance.new("TextLabel", row)
-    idLbl.Size = UDim2.new(1, -140, 0, 14)
-    idLbl.Position = UDim2.new(0, 50, 0, 24)
+    idLbl.Size = UDim2.new(1, -130, 0, 14)
+    idLbl.Position = UDim2.new(0, 48, 0, 24)
     idLbl.BackgroundTransparency = 1
     idLbl.Text = item.Value
     idLbl.TextColor3 = colors.text3
@@ -207,8 +278,8 @@ local function buildItemRow(parent, item, order)
     idLbl.TextXAlignment = Enum.TextXAlignment.Left
     
     local copyBtn = Instance.new("TextButton", row)
-    copyBtn.Size = UDim2.new(0, 55, 0, 26)
-    copyBtn.Position = UDim2.new(1, -61, 0.5, -13)
+    copyBtn.Size = UDim2.new(0, 50, 0, 24)
+    copyBtn.Position = UDim2.new(1, -56, 0.5, -12)
     copyBtn.BackgroundColor3 = colors.card
     copyBtn.Text = "Copy"
     copyBtn.TextColor3 = colors.text
@@ -221,7 +292,6 @@ local function buildItemRow(parent, item, order)
     
     copyBtn.MouseButton1Click:Connect(function()
         Helpers.copyToClipboard(item.Value)
-        _G.showDynamicNotification("Copied: " .. item.Value, colors.text)
     end)
 end
 
@@ -229,7 +299,6 @@ end
 function _G.openCloneApp()
     cleanupClone()
     CloneLifecycle.active = true
-    CloneLifecycle.currentTab = "ALL"
     
     local selectedPlayer = _G.PhoneState and _G.PhoneState.selectedPlayer
     
@@ -246,14 +315,13 @@ function _G.openCloneApp()
         return
     end
     
-    -- Fetch items
     local allItems = getItems(selectedPlayer)
     
     if #allItems == 0 then
         local empty = Instance.new("TextLabel", appContent)
         empty.Size = UDim2.new(1, 0, 0, 80)
         empty.BackgroundTransparency = 1
-        empty.Text = "No items found for " .. selectedPlayer.DisplayName
+        empty.Text = "No items found for " .. selectedPlayer.DisplayName .. "\n\nCheck console for API errors"
         empty.TextColor3 = colors.text3
         empty.Font = Enum.Font.Gotham
         empty.TextSize = 11
@@ -262,61 +330,56 @@ function _G.openCloneApp()
         return
     end
     
-    -- ==================== PLAYER HEADER ====================
+    -- Player header
     local playerFrame = Instance.new("Frame", appContent)
-    playerFrame.Size = UDim2.new(1, 0, 0, 55)
+    playerFrame.Size = UDim2.new(1, 0, 0, 50)
     playerFrame.BackgroundColor3 = colors.card
     playerFrame.LayoutOrder = 0
     corner(playerFrame, 10)
     stroke(playerFrame, colors.border, 1, 0.3)
     
     local avatar = Instance.new("ImageLabel", playerFrame)
-    avatar.Size = UDim2.new(0, 40, 0, 40)
-    avatar.Position = UDim2.new(0, 8, 0.5, -20)
+    avatar.Size = UDim2.new(0, 38, 0, 38)
+    avatar.Position = UDim2.new(0, 6, 0.5, -19)
     avatar.BackgroundColor3 = colors.card2
     avatar.Image = "https://www.roblox.com/headshot-thumbnail/image?userId=" .. selectedPlayer.UserId .. "&width=100&height=100&format=png"
     corner(avatar, 100)
     
     local nameLbl = Instance.new("TextLabel", playerFrame)
-    nameLbl.Size = UDim2.new(1, -60, 0, 24)
-    nameLbl.Position = UDim2.new(0, 54, 0, 8)
+    nameLbl.Size = UDim2.new(1, -55, 0, 22)
+    nameLbl.Position = UDim2.new(0, 50, 0, 6)
     nameLbl.BackgroundTransparency = 1
     nameLbl.Text = selectedPlayer.DisplayName
     nameLbl.TextColor3 = colors.text
     nameLbl.Font = Enum.Font.GothamBlack
-    nameLbl.TextSize = 13
+    nameLbl.TextSize = 12
     nameLbl.TextXAlignment = Enum.TextXAlignment.Left
     
-    local itemCountLbl = Instance.new("TextLabel", playerFrame)
-    itemCountLbl.Size = UDim2.new(1, -60, 0, 16)
-    itemCountLbl.Position = UDim2.new(0, 54, 0, 30)
-    itemCountLbl.BackgroundTransparency = 1
-    itemCountLbl.Text = #allItems .. " items"
-    itemCountLbl.TextColor3 = colors.text2
-    itemCountLbl.Font = Enum.Font.Gotham
-    itemCountLbl.TextSize = 10
-    itemCountLbl.TextXAlignment = Enum.TextXAlignment.Left
+    local countLbl = Instance.new("TextLabel", playerFrame)
+    countLbl.Size = UDim2.new(1, -55, 0, 14)
+    countLbl.Position = UDim2.new(0, 50, 0, 28)
+    countLbl.BackgroundTransparency = 1
+    countLbl.Text = #allItems .. " items"
+    countLbl.TextColor3 = colors.text2
+    countLbl.Font = Enum.Font.Gotham
+    countLbl.TextSize = 9
+    countLbl.TextXAlignment = Enum.TextXAlignment.Left
     
-    -- ==================== TAB SYSTEM ====================
+    -- Tab system
     local tabFrame = Instance.new("Frame", appContent)
-    tabFrame.Size = UDim2.new(1, 0, 0, 38)
+    tabFrame.Size = UDim2.new(1, 0, 0, 36)
     tabFrame.BackgroundColor3 = colors.card
     tabFrame.LayoutOrder = 1
     corner(tabFrame, 10)
     stroke(tabFrame, colors.border, 1, 0.3)
     
     local tabLayout = Instance.new("UIGridLayout", tabFrame)
-    tabLayout.CellSize = UDim2.new(1/3, -4, 0, 32)
+    tabLayout.CellSize = UDim2.new(1/3, -4, 0, 30)
     tabLayout.CellPadding = UDim2.new(0, 4, 0, 0)
-    tabLayout.FillDirection = Enum.FillDirection.Horizontal
     
-    local tabs = {
-        {name = "All", filter = "ALL"},
-        {name = "Body", filter = "BODY"},
-        {name = "Accs", filter = "ACC"},
-    }
-    
+    local tabs = {{"All", "ALL"}, {"Body", "BODY"}, {"Accs", "ACC"}}
     local tabButtons = {}
+    
     local listHolder = Instance.new("Frame", appContent)
     listHolder.Size = UDim2.new(1, 0, 0, 0)
     listHolder.AutomaticSize = Enum.AutomaticSize.Y
@@ -327,75 +390,64 @@ function _G.openCloneApp()
     listLayout.Padding = UDim.new(0, 6)
     listLayout.SortOrder = Enum.SortOrder.LayoutOrder
     
-    local function renderFilteredItems(filterType)
-        -- Clear list
+    local function renderItems(filterType)
         for _, c in ipairs(listHolder:GetChildren()) do
             if not c:IsA("UIListLayout") then c:Destroy() end
         end
         
-        local filteredItems = {}
+        local filtered = {}
         for _, item in ipairs(allItems) do
-            if filterType == "ALL" then
-                table.insert(filteredItems, item)
-            elseif filterType == "BODY" and item.Type == "BODY" then
-                table.insert(filteredItems, item)
-            elseif filterType == "ACC" and item.Type == "ACC" then
-                table.insert(filteredItems, item)
+            if filterType == "ALL" or item.Type == filterType then
+                table.insert(filtered, item)
             end
         end
         
-        if #filteredItems == 0 then
+        if #filtered == 0 then
             local empty = Instance.new("TextLabel", listHolder)
-            empty.Size = UDim2.new(1, 0, 0, 40)
+            empty.Size = UDim2.new(1, 0, 0, 30)
             empty.BackgroundTransparency = 1
-            empty.Text = "No items in this tab."
+            empty.Text = "No items in this tab"
             empty.TextColor3 = colors.text3
             empty.Font = Enum.Font.Gotham
-            empty.TextSize = 11
-            empty.LayoutOrder = 0
+            empty.TextSize = 10
             return
         end
         
-        for i, item in ipairs(filteredItems) do
+        for i, item in ipairs(filtered) do
             buildItemRow(listHolder, item, i)
         end
     end
     
-    -- Build tab buttons
-    for _, tab in ipairs(tabs) do
+    for i, tabData in ipairs(tabs) do
         local tabBtn = Instance.new("TextButton", tabFrame)
-        tabBtn.Size = UDim2.new(1, 0, 0, 32)
-        tabBtn.BackgroundColor3 = tab.filter == "ALL" and colors.tabActive or colors.tabInactive
-        tabBtn.Text = tab.name
-        tabBtn.TextColor3 = tab.filter == "ALL" and Color3.fromRGB(0, 0, 0) or colors.text2
+        tabBtn.Size = UDim2.new(1, 0, 0, 30)
+        tabBtn.BackgroundColor3 = i == 1 and colors.tabActive or colors.tabInactive
+        tabBtn.Text = tabData[1]
+        tabBtn.TextColor3 = i == 1 and Color3.fromRGB(0, 0, 0) or colors.text2
         tabBtn.Font = Enum.Font.GothamBlack
-        tabBtn.TextSize = 10
+        tabBtn.TextSize = 9
         tabBtn.AutoButtonColor = false
         corner(tabBtn, 8)
         pressFX(tabBtn)
         
         tabBtn.MouseButton1Click:Connect(function()
-            CloneLifecycle.currentTab = tab.filter
-            
             for _, btn in ipairs(tabButtons) do
                 btn.BackgroundColor3 = colors.tabInactive
                 btn.TextColor3 = colors.text2
             end
-            
             tabBtn.BackgroundColor3 = colors.tabActive
             tabBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-            
-            renderFilteredItems(tab.filter)
+            renderItems(tabData[2])
         end)
         
         table.insert(tabButtons, tabBtn)
     end
     
-    -- ==================== CLONE BUTTON ====================
+    -- Clone button
     local cloneBtn = Instance.new("TextButton", appContent)
-    cloneBtn.Size = UDim2.new(1, 0, 0, 42)
+    cloneBtn.Size = UDim2.new(1, 0, 0, 40)
     cloneBtn.BackgroundColor3 = colors.accent
-    cloneBtn.Text = "Clone Current Tab"
+    cloneBtn.Text = "Clone All"
     cloneBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
     cloneBtn.Font = Enum.Font.GothamBlack
     cloneBtn.TextSize = 12
@@ -405,48 +457,20 @@ function _G.openCloneApp()
     pressFX(cloneBtn)
     
     cloneBtn.MouseButton1Click:Connect(function()
-        local isCloning = _G.PhoneState and _G.PhoneState.isCloning
-        if isCloning then return end
-        
-        local filteredItems = {}
-        for _, item in ipairs(allItems) do
-            if CloneLifecycle.currentTab == "ALL" then
-                table.insert(filteredItems, item)
-            elseif CloneLifecycle.currentTab == "BODY" and item.Type == "BODY" then
-                table.insert(filteredItems, item)
-            elseif CloneLifecycle.currentTab == "ACC" and item.Type == "ACC" then
-                table.insert(filteredItems, item)
-            end
-        end
-        
-        if #filteredItems == 0 then
-            _G.showDynamicNotification("No items to clone", colors.text)
-            return
-        end
-        
-        if _G.PhoneState then
-            _G.PhoneState.isCloning = true
-        end
-        
         cloneBtn.Text = "Cloning..."
-        
-        cloneItems(filteredItems, function(done, batchNum, totalBatches)
+        cloneItems(allItems, function(done, batch, total)
             if done then
-                if _G.PhoneState then
-                    _G.PhoneState.isCloning = false
-                end
-                cloneBtn.Text = "Clone Complete"
-                _G.showDynamicNotification("Clone complete!", colors.text)
+                cloneBtn.Text = "Done!"
                 task.wait(1.5)
-                cloneBtn.Text = "Clone Current Tab"
+                cloneBtn.Text = "Clone All"
             else
-                cloneBtn.Text = string.format("Cloning %d/%d", batchNum, totalBatches)
+                cloneBtn.Text = string.format("Clone %d/%d", batch, total)
             end
         end)
     end)
     
     -- Initial render
-    renderFilteredItems("ALL")
+    renderItems("ALL")
 end
 
 print("[Clone] App loaded!")
