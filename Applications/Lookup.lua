@@ -1,5 +1,5 @@
 -- ================================================
--- PLAYER LOOKUP APP - Dark Theme with Tabs
+-- PLAYER LOOKUP APP - Fixed Search API
 -- ================================================
 
 local Services = _G.Services
@@ -22,9 +22,7 @@ local pressFX = Helpers.pressFX
 local colors = {
     card = Color3.fromRGB(25, 25, 32),
     card2 = Color3.fromRGB(30, 30, 38),
-    cardHover = Color3.fromRGB(35, 35, 45),
     accent = Color3.fromRGB(255, 255, 255),
-    accent2 = Color3.fromRGB(0, 200, 255),
     blue = Color3.fromRGB(80, 150, 255),
     gold = Color3.fromRGB(255, 180, 50),
     green = Color3.fromRGB(0, 230, 118),
@@ -108,6 +106,139 @@ local function cloneFromUserId(userId, cb)
     end
 end
 
+-- ==================== SEARCH USER - FIXED ====================
+local function searchUserByUsername(username)
+    print("[Lookup] Searching for:", username)
+    
+    -- Method 1: users.roblox.com search API (POST)
+    local function tryPostSearch()
+        print("[Lookup] Trying POST search API...")
+        
+        local ok, response = pcall(function()
+            return HttpService:RequestAsync({
+                Url = "https://users.roblox.com/v1/usernames/users",
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json",
+                    ["Accept"] = "application/json"
+                },
+                Body = HttpService:JSONEncode({
+                    usernames = {username},
+                    excludeBannedUsers = true
+                })
+            })
+        end)
+        
+        if not ok or not response or not response.Success then
+            print("[Lookup] POST search failed")
+            return nil
+        end
+        
+        local decodeOk, data = pcall(function()
+            return HttpService:JSONDecode(response.Body)
+        end)
+        
+        if not decodeOk or not data or not data.data or #data.data == 0 then
+            print("[Lookup] POST search: no results")
+            return nil
+        end
+        
+        local user = data.data[1]
+        print("[Lookup] POST search found:", user.name, user.id)
+        
+        return {
+            userId = user.id,
+            displayName = user.displayName or user.name,
+            username = user.name,
+        }
+    end
+    
+    -- Method 2: users.roblox.com search API (GET)
+    local function tryGetSearch()
+        print("[Lookup] Trying GET search API...")
+        
+        local encodedName = HttpService:UrlEncode(username)
+        local raw = httpGet("https://users.roblox.com/v1/users/search?keyword=" .. encodedName .. "&limit=10")
+        
+        if not raw then
+            print("[Lookup] GET search failed")
+            return nil
+        end
+        
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(raw)
+        end)
+        
+        if not ok or not data or not data.data or #data.data == 0 then
+            print("[Lookup] GET search: no results")
+            return nil
+        end
+        
+        -- Cari yang paling cocok
+        for _, user in ipairs(data.data) do
+            if user.name:lower() == username:lower() then
+                print("[Lookup] GET search exact match:", user.name, user.id)
+                return {
+                    userId = user.id,
+                    displayName = user.displayName or user.name,
+                    username = user.name,
+                }
+            end
+        end
+        
+        -- Fallback ke hasil pertama
+        local user = data.data[1]
+        print("[Lookup] GET search first result:", user.name, user.id)
+        return {
+            userId = user.id,
+            displayName = user.displayName or user.name,
+            username = user.name,
+        }
+    end
+    
+    -- Method 3: Old API (fallback)
+    local function tryOldAPI()
+        print("[Lookup] Trying old API...")
+        
+        local encodedName = HttpService:UrlEncode(username)
+        local raw = httpGet("https://api.roblox.com/users/get-by-username?username=" .. encodedName)
+        
+        if not raw then
+            print("[Lookup] Old API failed")
+            return nil
+        end
+        
+        local ok, data = pcall(function()
+            return HttpService:JSONDecode(raw)
+        end)
+        
+        if not ok or not data or not data.Id or data.Id == 0 then
+            print("[Lookup] Old API: no result")
+            return nil
+        end
+        
+        print("[Lookup] Old API found:", data.Username, data.Id)
+        return {
+            userId = data.Id,
+            displayName = data.Username or username,
+            username = data.Username or username,
+        }
+    end
+    
+    -- Try all methods
+    local methods = {tryPostSearch, tryGetSearch, tryOldAPI}
+    
+    for _, method in ipairs(methods) do
+        local result = method()
+        if result and result.userId then
+            return result
+        end
+    end
+    
+    print("[Lookup] All search methods failed")
+    return nil
+end
+
 -- ==================== OPEN LOOKUP APP ====================
 function _G.openPlayerLookupApp()
     cleanupLookup()
@@ -187,13 +318,7 @@ function _G.openPlayerLookupApp()
     corner(tabFrame, 18)
     stroke(tabFrame, colors.border, 1, 0.3)
     
-    local tabPadding = Instance.new("UIPadding", tabFrame)
-    tabPadding.PaddingLeft = UDim.new(0, 3)
-    tabPadding.PaddingRight = UDim.new(0, 3)
-    tabPadding.PaddingTop = UDim.new(0, 3)
-    tabPadding.PaddingBottom = UDim.new(0, 3)
-    
-    local lookupSelectedTab = playerLookupData.selectedTab or "Items"
+    local lookupSelectedTab = playerLookupData.selectedTab or "Profile"
     local tabs = {"Profile", "Items", "Outfits"}
     local tabBtns = {}
     
@@ -244,7 +369,7 @@ function _G.openPlayerLookupApp()
     
     -- ==================== SEARCH FUNCTION ====================
     local function searchPlayer(username)
-        playerLookupData = {username = username, selectedTab = "Items"}
+        playerLookupData = {username = username, selectedTab = "Profile"}
         
         for _, child in ipairs(contentFrame:GetChildren()) do
             if not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") then
@@ -271,45 +396,13 @@ function _G.openPlayerLookupApp()
         loadingText.TextSize = 10
         
         task.spawn(function()
-            local userId = nil
-            local displayName = username
-            
-            -- Method 1: Search API
-            local searchRaw = httpGet("https://users.roblox.com/v1/users/search?keyword=" .. HttpService:UrlEncode(username) .. "&limit=10")
-            if searchRaw then
-                local ok, data = pcall(function() return HttpService:JSONDecode(searchRaw) end)
-                if ok and data and data.data and #data.data > 0 then
-                    for _, user in ipairs(data.data) do
-                        if user.name:lower() == username:lower() or (user.displayName and user.displayName:lower() == username:lower()) then
-                            userId = user.id
-                            displayName = user.displayName or user.name
-                            break
-                        end
-                    end
-                    if not userId then
-                        userId = data.data[1].id
-                        displayName = data.data[1].displayName or data.data[1].name
-                    end
-                end
-            end
-            
-            -- Method 2: Direct API
-            if not userId then
-                local userRaw = httpGet("https://api.roblox.com/users/get-by-username?username=" .. HttpService:UrlEncode(username))
-                if userRaw then
-                    local ok, data = pcall(function() return HttpService:JSONDecode(userRaw) end)
-                    if ok and data and data.Id and data.Id > 0 then
-                        userId = data.Id
-                        displayName = data.Username or username
-                    end
-                end
-            end
+            local result = searchUserByUsername(username)
             
             loadingCard:Destroy()
             
-            if not userId then
+            if not result or not result.userId then
                 local notFoundCard = Instance.new("Frame", contentFrame)
-                notFoundCard.Size = UDim2.new(1, 0, 0, 90)
+                notFoundCard.Size = UDim2.new(1, 0, 0, 100)
                 notFoundCard.BackgroundColor3 = colors.card
                 corner(notFoundCard, 14)
                 stroke(notFoundCard, colors.border, 1, 0.3)
@@ -317,20 +410,20 @@ function _G.openPlayerLookupApp()
                 local notFoundText = Instance.new("TextLabel", notFoundCard)
                 notFoundText.Size = UDim2.new(1, 0, 1, 0)
                 notFoundText.BackgroundTransparency = 1
-                notFoundText.Text = "Player not found!\n@" .. username
+                notFoundText.Text = "Player not found!\n\n@" .. username .. "\n\nTips:\n• Check spelling\n• Make sure username is correct\n• Try again in a few seconds"
                 notFoundText.TextColor3 = colors.text3
-                notFoundText.Font = Enum.Font.GothamBlack
-                notFoundText.TextSize = 13
+                notFoundText.Font = Enum.Font.GothamBold
+                notFoundText.TextSize = 12
                 notFoundText.TextWrapped = true
                 notFoundText.TextXAlignment = Enum.TextXAlignment.Center
                 return
             end
             
-            playerLookupData.userId = userId
-            playerLookupData.displayName = displayName
-            playerLookupData.username = username
+            playerLookupData.userId = result.userId
+            playerLookupData.displayName = result.displayName
+            playerLookupData.username = result.username
             
-            _G.showDynamicNotification("Found: " .. displayName, colors.green)
+            _G.showDynamicNotification("Found: " .. result.displayName, colors.green)
             if _G.refreshCurr then
                 _G.refreshCurr()
             end
@@ -443,23 +536,6 @@ function _G.openPlayerLookupApp()
                 cloneBtn.Text = "Clone"
             end)
         end)
-        
-        local copyBtn = Instance.new("TextButton", quickRow)
-        copyBtn.Size = UDim2.new(0, 85, 1, 0)
-        copyBtn.Position = UDim2.new(0, 186, 0, 0)
-        copyBtn.BackgroundColor3 = colors.card2
-        copyBtn.Text = "Copy ID"
-        copyBtn.TextColor3 = colors.text
-        copyBtn.Font = Enum.Font.GothamBold
-        copyBtn.TextSize = 10
-        copyBtn.AutoButtonColor = false
-        corner(copyBtn, 8)
-        stroke(copyBtn, colors.border, 1, 0.3)
-        pressFX(copyBtn)
-        copyBtn.MouseButton1Click:Connect(function()
-            Helpers.copyToClipboard(tostring(userId))
-            _G.showDynamicNotification("ID copied!", colors.green)
-        end)
     end
     
     -- ==================== RENDER ITEMS TAB ====================
@@ -486,8 +562,6 @@ function _G.openPlayerLookupApp()
                             table.insert(allItems, {
                                 id = tostring(asset.id),
                                 name = asset.name or "Item " .. asset.id,
-                                itemType = "BODY",
-                                typeColor = Color3.fromRGB(255, 130, 80)
                             })
                         end
                     end
@@ -506,15 +580,6 @@ function _G.openPlayerLookupApp()
                 emptyText.TextSize = 12
                 emptyText.TextXAlignment = Enum.TextXAlignment.Center
             else
-                local counter = Instance.new("TextLabel", contentFrame)
-                counter.Size = UDim2.new(1, 0, 0, 18)
-                counter.BackgroundTransparency = 1
-                counter.Text = #allItems .. " items found"
-                counter.TextColor3 = colors.text2
-                counter.Font = Enum.Font.GothamBold
-                counter.TextSize = 9
-                counter.TextXAlignment = Enum.TextXAlignment.Left
-                
                 local listLayout = Instance.new("UIListLayout", contentFrame)
                 listLayout.Padding = UDim.new(0, 6)
                 listLayout.SortOrder = Enum.SortOrder.LayoutOrder
@@ -546,16 +611,6 @@ function _G.openPlayerLookupApp()
                     nameLbl.TextXAlignment = Enum.TextXAlignment.Left
                     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
                     
-                    local idLbl = Instance.new("TextLabel", card)
-                    idLbl.Size = UDim2.new(1, -120, 0, 14)
-                    idLbl.Position = UDim2.new(0, 52, 0, 26)
-                    idLbl.BackgroundTransparency = 1
-                    idLbl.Text = "ID: " .. item.id
-                    idLbl.TextColor3 = colors.text2
-                    idLbl.Font = Enum.Font.Code
-                    idLbl.TextSize = 8
-                    idLbl.TextXAlignment = Enum.TextXAlignment.Left
-                    
                     local wearBtn = Instance.new("TextButton", card)
                     wearBtn.Size = UDim2.new(0, 50, 0, 22)
                     wearBtn.Position = UDim2.new(1, -58, 0.5, -11)
@@ -570,131 +625,6 @@ function _G.openPlayerLookupApp()
                     wearBtn.MouseButton1Click:Connect(function()
                         fireHat({item.id})
                         _G.showDynamicNotification("Wearing " .. item.id, colors.green)
-                    end)
-                    
-                    local copyBtn = Instance.new("TextButton", card)
-                    copyBtn.Size = UDim2.new(0, 50, 0, 22)
-                    copyBtn.Position = UDim2.new(1, -114, 0.5, -11)
-                    copyBtn.BackgroundColor3 = colors.card2
-                    copyBtn.Text = "Copy"
-                    copyBtn.TextColor3 = colors.text
-                    copyBtn.Font = Enum.Font.GothamBold
-                    copyBtn.TextSize = 8
-                    copyBtn.AutoButtonColor = false
-                    corner(copyBtn, 6)
-                    pressFX(copyBtn)
-                    copyBtn.MouseButton1Click:Connect(function()
-                        Helpers.copyToClipboard(item.id)
-                        _G.showDynamicNotification("Copied!", colors.green)
-                    end)
-                end
-            end
-        end)
-    end
-    
-    -- ==================== RENDER OUTFITS TAB ====================
-    if lookupSelectedTab == "Outfits" and playerLookupData.userId then
-        local userId = playerLookupData.userId
-        
-        local loadingText = Instance.new("TextLabel", contentFrame)
-        loadingText.Size = UDim2.new(1, 0, 0, 24)
-        loadingText.BackgroundTransparency = 1
-        loadingText.Text = "Loading outfits..."
-        loadingText.TextColor3 = colors.text2
-        loadingText.Font = Enum.Font.Gotham
-        loadingText.TextSize = 10
-        
-        task.spawn(function()
-            local allOutfits = {}
-            
-            local raw = httpGet("https://avatar.roblox.com/v1/users/" .. userId .. "/outfits?page=1&itemsPerPage=30")
-            if raw then
-                local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
-                if ok and data and data.data then
-                    for _, outfit in ipairs(data.data) do
-                        if outfit.name and outfit.id then
-                            table.insert(allOutfits, {id = outfit.id, name = outfit.name})
-                        end
-                    end
-                end
-            end
-            
-            loadingText:Destroy()
-            
-            if #allOutfits == 0 then
-                local emptyText = Instance.new("TextLabel", contentFrame)
-                emptyText.Size = UDim2.new(1, 0, 0, 60)
-                emptyText.BackgroundTransparency = 1
-                emptyText.Text = "No outfits found"
-                emptyText.TextColor3 = colors.text3
-                emptyText.Font = Enum.Font.GothamBold
-                emptyText.TextSize = 12
-                emptyText.TextXAlignment = Enum.TextXAlignment.Center
-            else
-                local grid = Instance.new("UIGridLayout", contentFrame)
-                grid.CellSize = UDim2.new(0.5, -5, 0, 140)
-                grid.CellPadding = UDim2.new(0, 8, 0, 8)
-                grid.FillDirection = Enum.FillDirection.Horizontal
-                grid.HorizontalAlignment = Enum.HorizontalAlignment.Center
-                grid.SortOrder = Enum.SortOrder.LayoutOrder
-                
-                for i, outfit in ipairs(allOutfits) do
-                    local card = Instance.new("Frame", contentFrame)
-                    card.Size = UDim2.new(0, 0, 0, 140)
-                    card.BackgroundColor3 = colors.card
-                    card.LayoutOrder = i
-                    corner(card, 12)
-                    stroke(card, colors.border, 1, 0.3)
-                    
-                    local img = Instance.new("ImageLabel", card)
-                    img.Size = UDim2.new(0, 70, 0, 70)
-                    img.Position = UDim2.new(0.5, -35, 0, 10)
-                    img.BackgroundColor3 = colors.card2
-                    img.Image = "https://www.roblox.com/outfit-thumbnail/image?userOutfitId=" .. outfit.id .. "&width=150&height=150&format=png"
-                    img.ScaleType = Enum.ScaleType.Fit
-                    corner(img, 8)
-                    
-                    local nameLbl = Instance.new("TextLabel", card)
-                    nameLbl.Size = UDim2.new(1, -14, 0, 30)
-                    nameLbl.Position = UDim2.new(0, 7, 0, 84)
-                    nameLbl.BackgroundTransparency = 1
-                    nameLbl.Text = outfit.name
-                    nameLbl.TextColor3 = colors.text
-                    nameLbl.Font = Enum.Font.GothamBold
-                    nameLbl.TextSize = 10
-                    nameLbl.TextXAlignment = Enum.TextXAlignment.Center
-                    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-                    nameLbl.TextWrapped = true
-                    
-                    local wearBtn = Instance.new("TextButton", card)
-                    wearBtn.Size = UDim2.new(0, 65, 0, 24)
-                    wearBtn.Position = UDim2.new(0.5, -32, 0, 114)
-                    wearBtn.BackgroundColor3 = colors.purple
-                    wearBtn.Text = "Wear"
-                    wearBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-                    wearBtn.Font = Enum.Font.GothamBold
-                    wearBtn.TextSize = 9
-                    wearBtn.AutoButtonColor = false
-                    corner(wearBtn, 6)
-                    pressFX(wearBtn)
-                    wearBtn.MouseButton1Click:Connect(function()
-                        wearBtn.Text = "..."
-                        local detailRaw = httpGet("https://avatar.roblox.com/v1/outfits/" .. outfit.id .. "/details")
-                        if detailRaw then
-                            local ok, detail = pcall(function() return HttpService:JSONDecode(detailRaw) end)
-                            if ok and detail and detail.assets then
-                                local ids = {}
-                                for _, asset in ipairs(detail.assets) do
-                                    if asset.id then table.insert(ids, tostring(asset.id)) end
-                                end
-                                if #ids > 0 then
-                                    fireHat(ids)
-                                    _G.showDynamicNotification("Outfit applied!", colors.green)
-                                end
-                            end
-                        end
-                        task.wait(1)
-                        wearBtn.Text = "Wear"
                     end)
                 end
             end
