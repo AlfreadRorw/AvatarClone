@@ -1,7 +1,5 @@
 -- ================================================
--- FIREBASE.LUA - Full Rewrite
--- Support: syn.request, http_request, request, HttpService
--- Fix: key field compat (expires & expiresAt), chat reply, player reply
+-- FIREBASE.LUA - Full Rewrite (Fixed Auto-Login)
 -- ================================================
 
 local HttpService = game:GetService("HttpService")
@@ -39,19 +37,18 @@ local function doRequest(method, url, body)
 
     if not ok or not res then return nil end
 
-    -- Normalise keduanya: executor (StatusCode) dan HttpService (.Success)
     local success = res.Success or (res.StatusCode and res.StatusCode >= 200 and res.StatusCode < 300)
     if not success then return nil end
 
     local rawBody = res.Body or res.body or ""
-    if rawBody == "" or rawBody == "null" then return "_ok_" end -- DELETE etc
+    if rawBody == "" or rawBody == "null" then return "_ok_" end
     local jok, data = pcall(function() return HttpService:JSONDecode(rawBody) end)
     return jok and data or nil
 end
 
 local function url(path)
     return DB_URL .. "/" .. path .. ".json?auth=" .. API_KEY
-        .. "&nc=" .. tostring(os.time()) -- cache bust
+        .. "&nc=" .. tostring(os.time())
 end
 
 function Firebase.GetData(path)
@@ -79,7 +76,6 @@ end
 -- ==================== HELPERS ====================
 local DURATION_SECS = {["3d"] = 259200, ["7d"] = 604800, ["30d"] = 2592000}
 
--- Support both 'expires' (website lama) and 'expiresAt' (sistem baru)
 local function getExpiry(data)
     if not data then return 0 end
     return tonumber(data.expiresAt or data.expires or 0)
@@ -101,7 +97,6 @@ Firebase.fmtRemaining = fmtRemaining
 
 -- ==================== KEY SYSTEM ====================
 
--- ValidateKey: return isValid(bool), message(string)
 function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
     if not key or key == "" then return false, "Key tidak boleh kosong." end
     key = key:upper():gsub("%s+", "")
@@ -113,22 +108,18 @@ function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
 
     local now   = os.time()
     local exp   = getExpiry(data)
-    -- Normalise usedBy dari berbagai format (false/nil/""/tostring)
     local rawBy = data.usedBy or data.boundUserId
     local usedBy = (rawBy and tostring(rawBy) ~= "false" and tostring(rawBy) ~= "nil" and tostring(rawBy) ~= "") and tostring(rawBy) or ""
     local isUsed = data.used == true or usedBy ~= ""
 
-    -- Dipakai orang lain
     if isUsed and usedBy ~= "" and usedBy ~= tostring(userId) then
         return false, "Key sudah digunakan player lain."
     end
 
-    -- Expired
     if exp > 0 and now > exp then
         return false, "Key sudah expired. Beli key baru."
     end
 
-    -- Belum dipakai → bind sekarang
     if not isUsed then
         local durSecs = DURATION_SECS[data.duration or "7d"] or 604800
         exp = now + durSecs
@@ -156,38 +147,54 @@ function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
         return true, "Key aktif! " .. fmtRemaining(exp - now)
     end
 
-    -- Key milik user ini, masih valid
     return true, "Selamat datang! " .. fmtRemaining(exp - now)
 end
 
--- CheckSavedKey: cukup userId, ambil key dari /user_keys/<uid>
--- Return: bool
+-- ==================== CHECK SAVED KEY (FIXED) ====================
+-- Selalu verifikasi ke keys/<keyCode>, tidak percaya user_keys
 function Firebase.CheckSavedKey(userId, savedKeyHint)
     local uid = tostring(userId)
     local keyCode = savedKeyHint
 
+    -- Jika tidak ada hint, coba ambil dari user_keys
     if not keyCode or keyCode == "" then
         local saved = Firebase.GetData("user_keys/" .. uid)
         if saved and type(saved) == "table" then
             keyCode = saved.key or ""
-            -- Quick check dari index
-            local quickExp = getExpiry(saved)
-            if quickExp > 0 and os.time() <= quickExp then
-                return true
-            end
         end
     end
 
-    if not keyCode or keyCode == "" then return false end
+    if not keyCode or keyCode == "" then
+        -- Bersihkan index jika tidak ada key
+        Firebase.DeleteData("user_keys/" .. uid)
+        return false
+    end
 
+    -- Verifikasi penuh ke keys/
     local data = Firebase.GetData("keys/" .. keyCode)
-    if not data or type(data) ~= "table" then return false end
+    if not data or type(data) ~= "table" then
+        -- Key dihapus dari database, hapus index user_keys
+        Firebase.DeleteData("user_keys/" .. uid)
+        return false
+    end
+
     local rawBy = tostring(data.usedBy or data.boundUserId or "")
-    if rawBy ~= uid then return false end
-    return getExpiry(data) > os.time()
+    if rawBy ~= uid then
+        return false
+    end
+
+    local exp = getExpiry(data)
+    if exp <= 0 then return false end
+    if os.time() > exp then
+        -- Key expired, hapus index juga
+        Firebase.DeleteData("user_keys/" .. uid)
+        return false
+    end
+
+    return true
 end
 
--- GetKeyTimeRemaining: return sisa detik atau nil
+-- ==================== GET REMAINING TIME (FIXED) ====================
 function Firebase.GetKeyTimeRemaining(userId, savedKeyHint)
     local uid = tostring(userId)
     local keyCode = savedKeyHint
@@ -196,32 +203,25 @@ function Firebase.GetKeyTimeRemaining(userId, savedKeyHint)
         local saved = Firebase.GetData("user_keys/" .. uid)
         if saved and type(saved) == "table" then
             keyCode = saved.key or ""
-            -- Quick check
-            local quickExp = getExpiry(saved)
-            if quickExp > 0 then
-                local rem = quickExp - os.time()
-                if rem > 0 then return rem end
-            end
         end
     end
 
     if not keyCode or keyCode == "" then return nil end
 
     local data = Firebase.GetData("keys/" .. keyCode)
-    if not data or type(data) ~= "table" then return nil end
+    if not data or type(data) ~= "table" then
+        return nil
+    end
+
     local rawBy = tostring(data.usedBy or data.boundUserId or "")
     if rawBy ~= uid then return nil end
-    local rem = getExpiry(data) - os.time()
+
+    local exp = getExpiry(data)
+    local rem = exp - os.time()
     return rem > 0 and rem or nil
 end
 
--- GetKeyInfo: return raw key data
-function Firebase.GetKeyInfo(savedKey)
-    if not savedKey or savedKey == "" then return nil end
-    return Firebase.GetData("keys/" .. savedKey)
-end
-
--- GetFullKeyInfo: return tabel lengkap untuk Settings
+-- ==================== GET FULL KEY INFO ====================
 function Firebase.GetFullKeyInfo(userId)
     local uid = tostring(userId)
     local saved = Firebase.GetData("user_keys/" .. uid)
@@ -233,6 +233,8 @@ function Firebase.GetFullKeyInfo(userId)
 
     local data = Firebase.GetData("keys/" .. keyCode)
     if not data or type(data) ~= "table" then
+        -- Key dihapus, bersihkan index
+        Firebase.DeleteData("user_keys/" .. uid)
         return {ok=false, message="Key tidak ditemukan.", remaining=0}
     end
 
@@ -275,7 +277,6 @@ function Firebase.GetOnlinePlayers()
 end
 
 -- ==================== CHAT SYSTEM ====================
--- Kirim pesan dari PLAYER ke chat (muncul di website)
 function Firebase.SendChat(fromUserId, fromName, fromUsername, message, replyToId, replyToName)
     if not message or message == "" then return false end
     local chatData = {
@@ -283,7 +284,7 @@ function Firebase.SendChat(fromUserId, fromName, fromUsername, message, replyToI
         fromName     = fromName or "Player",
         fromUsername = fromUsername or "unknown",
         fromUserId   = tostring(fromUserId or 0),
-        senderName   = fromName or "Player",     -- compat website lama
+        senderName   = fromName or "Player",
         message      = message,
         target       = "admin",
         targetName   = "Admin",
@@ -294,23 +295,19 @@ function Firebase.SendChat(fromUserId, fromName, fromUsername, message, replyToI
     return Firebase.PushData("chat", chatData)
 end
 
--- Ambil semua chat
 function Firebase.GetChats()
     return Firebase.GetData("chat")
 end
 
 -- ==================== NOTIFICATION SYSTEM ====================
--- Cek notif masuk untuk userId ini
 function Firebase.GetNotifications(userId)
     return Firebase.GetData("notifications/" .. tostring(userId))
 end
 
--- Hapus notif setelah dibaca
 function Firebase.DeleteNotification(userId, notifId)
     return Firebase.DeleteData("notifications/" .. tostring(userId) .. "/" .. notifId)
 end
 
--- Hapus semua notif user
 function Firebase.ClearNotifications(userId)
     return Firebase.DeleteData("notifications/" .. tostring(userId))
 end
