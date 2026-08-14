@@ -225,22 +225,6 @@ iconBuilders.Bundle = function(p, c)
     Helpers.corner(ribbon, 3)
 end
 
-iconBuilders.Lookup = function(p, c)
-    local circle = Instance.new("Frame", p)
-    circle.Size = UDim2.new(0, 20, 0, 20)
-    circle.Position = UDim2.new(0.5, -13, 0.26, 0)
-    circle.BackgroundTransparency = 1
-    Helpers.stroke(circle, c, 3, 0)
-    Helpers.corner(circle, 100)
-    
-    local handle = Instance.new("Frame", p)
-    handle.Size = UDim2.new(0, 3, 0, 12)
-    handle.Position = UDim2.new(0.5, 5, 0.5, 3)
-    handle.BackgroundColor3 = c
-    handle.Rotation = 45
-    Helpers.corner(handle, 2)
-end
-
 iconBuilders.ServerJoiner = function(p, c)
     local rack = Instance.new("Frame", p)
     rack.Size = UDim2.new(0, 22, 0, 18)

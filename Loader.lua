@@ -100,7 +100,6 @@ local AppList = {
     {path = "Applications/Server.lua", name = "Server"},
     {path = "Applications/Bundle.lua", name = "Bundle"},
     {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
-    {path = "Applications/Lookup.lua", name = "Lookup"},
     {path = "Applications/ServerJoiner.lua", name = "ServerJoiner"},
     {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
     {path = "Applications/Messages.lua", name = "Messages"},
