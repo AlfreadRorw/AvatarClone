@@ -746,6 +746,33 @@ game:GetService("Players").LocalPlayer.OnTeleport:Connect(function()
     end
 end)
 
+-- ==================== AUTO LOCK SYSTEM ====================
+task.spawn(function()
+    while true do
+        task.wait(5)
+        if not _G.PhoneState.isLocked and Firebase and Firebase.CheckSavedKey then
+            local ok, isValid = pcall(function()
+                return Firebase.CheckSavedKey(LocalPlayer.UserId)
+            end)
+            if ok and not isValid then
+                _G.PhoneState.isLocked = true
+                if Storage and Storage.clearSavedKey then
+                    pcall(Storage.clearSavedKey)
+                end
+                if home then 
+                    home.Visible = false 
+                end
+                if _G.showKeyEntry then
+                    _G.showKeyEntry()
+                end
+                if _G.showDynamicNotification then
+                    _G.showDynamicNotification("Key Dihapus / Expired!", Color3.fromRGB(255, 50, 50))
+                end
+            end
+        end
+    end
+end)
+
 -- ==================== EXPORT ====================
 return {
     gui              = gui,
