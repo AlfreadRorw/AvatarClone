@@ -90,8 +90,6 @@ Load("Core/BuildIcons.lua")
 local AppList = {
     {path = "Applications/Players.lua", name = "Players"},
     {path = "Applications/Clone.lua", name = "Clone"},
-    {path = "Applications/Body.lua", name = "Body"},
-    {path = "Applications/Accessory.lua", name = "Accessory"},
     {path = "Applications/Preset.lua", name = "Preset"},
     {path = "Applications/Favorites.lua", name = "Favorites"},
     {path = "Applications/Items.lua", name = "Items"},

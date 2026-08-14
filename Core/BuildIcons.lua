@@ -161,8 +161,6 @@ buildAppIcon("Settings", 3, dockBg, function() _G.openApp("Settings", _G.openSet
 -- ================= GRID ICONS =================
 buildAppIcon("Players", 1, appGrid, function() _G.openApp("Players", _G.openPlayersApp) end)
 buildAppIcon("Clone", 2, appGrid, function() _G.openApp("Clone", _G.openCloneApp) end)
-buildAppIcon("Body", 3, appGrid, function() _G.openApp("Body", _G.openBodyApp) end)
-buildAppIcon("Accs", 4, appGrid, function() _G.openApp("Accessory", _G.openAccessoryApp) end)
 buildAppIcon("Preset", 5, appGrid, function() _G.openApp("Preset", _G.openPresetApp) end)
 buildAppIcon("Favs", 6, appGrid, function() _G.openApp("Favorites", _G.openFavoritesApp) end)
 buildAppIcon("Items", 7, appGrid, function() _G.openApp("Items", _G.openItemsApp) end)

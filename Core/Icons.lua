@@ -35,36 +35,6 @@ iconBuilders.Clone = function(p, c)
     Helpers.stroke(front, Color3.new(0, 0, 0), 1, 0.4)
 end
 
-iconBuilders.Body = function(p, c)
-    local head = Instance.new("Frame", p)
-    head.Size = UDim2.new(0, 14, 0, 14)
-    head.Position = UDim2.new(0.5, -7, 0.15, 0)
-    head.BackgroundColor3 = c
-    Helpers.corner(head, 100)
-    
-    local torso = Instance.new("Frame", p)
-    torso.Size = UDim2.new(0, 24, 0, 28)
-    torso.Position = UDim2.new(0.5, -12, 0.4, 0)
-    torso.BackgroundColor3 = c
-    Helpers.corner(torso, 8)
-end
-
-iconBuilders.Accs = function(p, c)
-    local left = Instance.new("Frame", p)
-    left.Size = UDim2.new(0, 18, 0, 18)
-    left.Position = UDim2.new(0.5, -22, 0.4, 0)
-    left.BackgroundColor3 = Color3.new(1, 1, 1)
-    Helpers.corner(left, 100)
-    Helpers.stroke(left, c, 3, 0)
-    
-    local right = Instance.new("Frame", p)
-    right.Size = UDim2.new(0, 18, 0, 18)
-    right.Position = UDim2.new(0.5, 4, 0.4, 0)
-    right.BackgroundColor3 = Color3.new(1, 1, 1)
-    Helpers.corner(right, 100)
-    Helpers.stroke(right, c, 3, 0)
-end
-
 iconBuilders.Preset = function(p, c)
     local box = Instance.new("Frame", p)
     box.Size = UDim2.new(0, 38, 0, 30)
