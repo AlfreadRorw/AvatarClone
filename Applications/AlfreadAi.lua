@@ -501,7 +501,9 @@ function _G.openAlfreadAIApp()
     clearBtn.MouseButton1Click:Connect(function()
         chatHistory = {}
         renderAllHistory()
-        _G.showDynamicNotification and _G.showDynamicNotification("Riwayat chat dihapus", C.accent2)
+        if _G.showDynamicNotification then
+            _G.showDynamicNotification("Riwayat chat dihapus", C.accent2)
+        end
     end)
 
     renderAllHistory()
