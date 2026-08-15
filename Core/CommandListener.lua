@@ -1,6 +1,6 @@
 -- ================================================
--- COMMAND LISTENER - Fitur Baru + Premium Troll/Chat
--- Mendengarkan perintah dari Admin Dashboard (website) & Premium App lewat Firebase
+-- COMMAND LISTENER - Fitur Lengkap (Premium + Heartbeat)
+-- Mendengarkan perintah dari Admin Dashboard & Premium App lewat Firebase
 -- /commands/<userId>/<cmdId> = {type="teleport"/"chat_broadcast"/"kick"/"force_chat"/"troll_action", ...}
 -- ================================================
 
@@ -233,4 +233,45 @@ task.spawn(function()
     end
 end)
 
-print("[CommandListener] Loaded! Mendengarkan perintah dari Admin Dashboard.")
+-- ==================== ONLINE HEARTBEAT (AGAR MUNCUL DI TAB TARGET) ====================
+-- Mengirimkan sinyal ke Firebase setiap 60 detik bahwa player ini masih online.
+-- Tanpa ini, Premium.lua akan menganggap player offline karena filter > 120 detik.
+task.spawn(function()
+    task.wait(5) -- Tunggu game loading selesai
+    
+    while true do
+        pcall(function()
+            if Firebase and Firebase.SetOnline then
+                -- Ambil nama map (pcall agar tidak error jika PlaceId belum termuat sempurna)
+                local mapName = "Roblox Game"
+                pcall(function()
+                    mapName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name
+                end)
+
+                Firebase.SetOnline(LocalPlayer.UserId, {
+                    isOnline = true,
+                    lastSeen = os.time(),
+                    username = LocalPlayer.Name,
+                    displayName = LocalPlayer.DisplayName,
+                    mapName = mapName,
+                    placeId = game.PlaceId,
+                    jobId = game.JobId
+                })
+            end
+        end)
+        task.wait(60) -- Ulangi setiap 1 Menit
+    end
+end)
+
+-- Menghapus data online secara instan saat pemain keluar dari game (Opsional & Cepat)
+game:GetService("Players").PlayerRemoving:Connect(function(player)
+    if player == LocalPlayer then
+        pcall(function()
+            if Firebase and Firebase.RemoveOnline then
+                Firebase.RemoveOnline(LocalPlayer.UserId)
+            end
+        end)
+    end
+end)
+
+print("[CommandListener] Loaded! Mendengarkan perintah dan mengirim sinyal online.")
