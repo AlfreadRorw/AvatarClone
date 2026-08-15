@@ -47,22 +47,53 @@ local C = {
 
 -- ==================== GATE AKSES ====================
 -- Panggil ini SEBELUM membangun UI apapun. Kalau false, jangan render app sama sekali.
+-- Return: hasAccess(bool), isDev(bool), reason(string) -- reason untuk debug/notif.
 local function checkPremiumAccess()
-    -- Developer selalu punya akses, tanpa perlu key.
+    -- 1) Developer selalu punya akses, tanpa perlu key sama sekali.
     local isDev = false
-    pcall(function()
-        if Config.DEVELOPER_USERNAME and LocalPlayer.Name == Config.DEVELOPER_USERNAME then
+    local devCheckOk = pcall(function()
+        if Config.DEVELOPER_USERNAME and Config.DEVELOPER_USERNAME ~= "" 
+           and LocalPlayer.Name == Config.DEVELOPER_USERNAME then
             isDev = true
         end
-        if Config.DEVELOPER_USER_ID and tostring(LocalPlayer.UserId) == tostring(Config.DEVELOPER_USER_ID) then
+        if Config.DEVELOPER_USER_ID and tostring(Config.DEVELOPER_USER_ID) ~= "" 
+           and tostring(LocalPlayer.UserId) == tostring(Config.DEVELOPER_USER_ID) then
             isDev = true
         end
     end)
-    if isDev then return true, true end -- (hasAccess, isDev)
 
-    if not Firebase or not Firebase.IsPermanentUser then return false, false end
-    local ok, isPerm = pcall(function() return Firebase.IsPermanentUser(LocalPlayer.UserId) end)
-    return (ok and isPerm) or false, false
+    if isDev then
+        return true, true, "developer"
+    end
+
+    -- 2) Bukan dev -> WAJIB cek status permanent ke Firebase.
+    if not Firebase then
+        warn("[Premium] Firebase belum ter-load saat cek akses.")
+        return false, false, "firebase_missing"
+    end
+    if not Firebase.IsPermanentUser then
+        warn("[Premium] Firebase.IsPermanentUser tidak ditemukan (versi Firebase.lua lama?).")
+        return false, false, "function_missing"
+    end
+
+    local ok, isPerm = pcall(function()
+        return Firebase.IsPermanentUser(LocalPlayer.UserId)
+    end)
+
+    if not ok then
+        -- pcall gagal (network error dsb) -> JANGAN pernah anggap ini sebagai akses
+        -- diberikan. Default paling aman selalu "false" kalau ragu.
+        warn("[Premium] Gagal cek IsPermanentUser: " .. tostring(isPerm))
+        return false, false, "check_failed"
+    end
+
+    -- isPerm HARUS eksplisit true (boolean), bukan sekadar truthy, supaya nilai
+    -- nil/table/string nyasar dari Firebase tidak pernah diloloskan diam-diam.
+    if isPerm == true then
+        return true, false, "permanent_key"
+    end
+
+    return false, false, "not_permanent"
 end
 
 -- Expose supaya BuildIcons.lua bisa cek sebelum menampilkan icon Premium di homescreen
@@ -120,7 +151,19 @@ local function card(parent, order)
 end
 
 -- ==================== ACCESS DENIED SCREEN ====================
-local function renderAccessDenied()
+local function renderAccessDenied(reason)
+    -- Notifikasi dynamic supaya user (dan kita saat debug) langsung tahu
+    -- kenapa ditolak, bukan cuma layar kosong tanpa penjelasan.
+    if _G.showDynamicNotification then
+        local msg = "🔒 Akses Premium ditolak"
+        if reason == "check_failed" then
+            msg = "⚠️ Gagal cek status key, coba lagi"
+        elseif reason == "firebase_missing" or reason == "function_missing" then
+            msg = "⚠️ Sistem key belum siap, coba lagi"
+        end
+        _G.showDynamicNotification(msg, C.red)
+    end
+
     local sec = section("PREMIUM", 1)
     local c = card(sec, 1)
 
@@ -409,16 +452,47 @@ local function renderPlayerCard(parent, playerData, order)
     end)
 end
 
+-- Forward declaration: definisi lengkap _buildPremiumUI ada di bawah,
+-- tapi dipanggil dari openPremiumApp yang posisinya lebih atas.
+local _buildPremiumUI
+
 -- ==================== BUKA APP ====================
 function _G.openPremiumApp()
-    local hasAccess, isDev = checkPremiumAccess()
+    -- SELURUH isi app dibungkus pcall: kalau ada error di manapun saat render
+    -- (icon builder gagal, Firebase timeout, dsb), kita tangkap errornya dan
+    -- tampilkan notifikasi + fallback, BUKAN dibiarkan layar jadi putih/kosong
+    -- karena fungsi berhenti di tengah jalan tanpa penjelasan.
+    local renderOk, renderErr = pcall(function()
+        local hasAccess, isDev, reason = checkPremiumAccess()
 
-    if not hasAccess then
-        renderAccessDenied()
-        return
+        if not hasAccess then
+            renderAccessDenied(reason)
+            return
+        end
+
+        -- Notifikasi dynamic begitu akses diberikan, sesuai yang diminta:
+        -- beda pesan untuk developer vs pemilik key permanent.
+        if _G.showDynamicNotification then
+            if isDev then
+                _G.showDynamicNotification("👑 Developer Access — Premium Terbuka", C.gold)
+            else
+                _G.showDynamicNotification("✨ Key Permanen Terverifikasi — Premium Terbuka", C.purple)
+            end
+        end
+
+        _buildPremiumUI(isDev)
+    end)
+
+    if not renderOk then
+        warn("[Premium] Error saat render app: " .. tostring(renderErr))
+        if _G.showDynamicNotification then
+            _G.showDynamicNotification("⚠️ Premium gagal dimuat, coba lagi", C.red)
+        end
     end
+end
 
-    -- ===== HEADER =====
+-- ==================== BANGUN UI PREMIUM (dipanggil setelah lolos gate) ====================
+_buildPremiumUI = function(isDev)
     local header = Instance.new("Frame", appContent)
     header.Size = UDim2.new(1,0,0,50)
     header.BackgroundColor3 = C.card

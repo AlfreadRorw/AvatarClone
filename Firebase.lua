@@ -86,9 +86,14 @@ local function getExpiry(data)
     return tonumber(data.expiresAt or data.expires or 0)
 end
 
--- Cek apakah data key ini bertipe permanent
+-- Cek apakah data key ini bertipe permanent.
+-- Perbandingan dibuat strict (tostring + trim) supaya tidak ada celah
+-- dari whitespace/tipe data aneh yang bikin key biasa keliru dianggap permanent.
 local function isPermanentData(data)
-    return data and data.duration == "permanent"
+    if not data or type(data) ~= "table" then return false end
+    local d = data.duration
+    if type(d) ~= "string" then return false end
+    return d:gsub("%s+", "") == "permanent"
 end
 
 local function fmtRemaining(secs, isPermanent)
@@ -366,15 +371,31 @@ function Firebase.IsPermanentUser(userId)
     local uid = tostring(userId)
     local saved = Firebase.GetData("user_keys/" .. uid)
     local keyCode = saved and (saved.key or "") or ""
-    if keyCode == "" then return false end
+    if keyCode == "" then
+        return false
+    end
 
     local data = Firebase.GetData("keys/" .. keyCode)
-    if not data or type(data) ~= "table" then return false end
+    if not data or type(data) ~= "table" then
+        warn("[Firebase] IsPermanentUser: key '" .. keyCode .. "' tidak ditemukan di /keys")
+        return false
+    end
 
     local rawBy = tostring(data.usedBy or data.boundUserId or "")
-    if rawBy ~= uid then return false end
+    if rawBy ~= uid then
+        warn("[Firebase] IsPermanentUser: key '" .. keyCode .. "' terikat ke user lain (" .. rawBy .. "), bukan " .. uid)
+        return false
+    end
 
-    return isPermanentData(data)
+    local result = isPermanentData(data)
+    if not result then
+        -- Ini KASUS NORMAL untuk key biasa (bukan bug) — di-log sebagai info,
+        -- bukan warning, supaya jelas ini keputusan yang benar (ditolak karena
+        -- memang bukan key permanent), bukan gagal karena error.
+        print("[Firebase] IsPermanentUser: key '" .. keyCode .. "' duration='" .. tostring(data.duration) .. "' -> BUKAN permanent, akses ditolak (benar).")
+    end
+
+    return result
 end
 
 return Firebase
