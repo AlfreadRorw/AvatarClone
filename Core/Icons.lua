@@ -279,4 +279,62 @@ iconBuilders.Message = function(p, c)
     Helpers.corner(handle, 2)
 end
 
+iconBuilders.Premium = function(p, c)
+    -- Lingkaran gradient emas-ungu (khas "premium/crown")
+    local bg = Instance.new("Frame", p)
+    bg.Size = UDim2.new(0, 26, 0, 26)
+    bg.Position = UDim2.new(0.5, -13, 0.28, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(255, 195, 60)
+    Helpers.corner(bg, 100)
+
+    local grad = Instance.new("UIGradient", bg)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 195, 60)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(168, 100, 255)),
+    })
+    grad.Rotation = 45
+
+    -- Ikon mahkota (crown) putih, dibentuk dari 3 segitiga kecil + alas
+    local base = Instance.new("Frame", bg)
+    base.Size = UDim2.new(0, 14, 0, 3)
+    base.Position = UDim2.new(0.5, -7, 0.5, 4)
+    base.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Helpers.corner(base, 1)
+
+    local function crownPeak(offsetX)
+        local peak = Instance.new("Frame", bg)
+        peak.Size = UDim2.new(0, 5, 0, 5)
+        peak.Position = UDim2.new(0.5, offsetX, 0.5, -3)
+        peak.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        peak.Rotation = 45
+        Helpers.corner(peak, 1)
+        return peak
+    end
+    crownPeak(-6)  -- kiri
+    crownPeak(-2.5) -- tengah (sedikit lebih tinggi secara visual karena rotasi)
+    crownPeak(3)   -- kanan
+
+    -- Badge "LOCKED" kecil kalau user belum permanent/dev
+    -- (dicek ulang tiap kali icon di-render karena status bisa berubah)
+    task.spawn(function()
+        local hasAccess = _G.hasPremiumAccess and _G.hasPremiumAccess()
+        if not hasAccess then
+            local lockBadge = Instance.new("Frame", p)
+            lockBadge.Size = UDim2.new(0, 16, 0, 16)
+            lockBadge.Position = UDim2.new(1, -14, 0.28, -4)
+            lockBadge.BackgroundColor3 = Color3.fromRGB(30, 30, 36)
+            lockBadge.ZIndex = 5
+            Helpers.corner(lockBadge, 100)
+            Helpers.stroke(lockBadge, Color3.fromRGB(255, 90, 100), 1.5, 0)
+
+            local lockIcon = Instance.new("TextLabel", lockBadge)
+            lockIcon.Size = UDim2.new(1, 0, 1, 0)
+            lockIcon.BackgroundTransparency = 1
+            lockIcon.Text = "🔒"
+            lockIcon.TextSize = 8
+            lockIcon.ZIndex = 6
+        end
+    end)
+end
+
 return iconBuilders

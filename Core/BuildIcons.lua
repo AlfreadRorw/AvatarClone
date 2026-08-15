@@ -173,6 +173,8 @@ buildAppIcon("Bundle", 13, appGrid, function() _G.openApp("Bundle", _G.openBundl
 buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner", _G.openServerJoinerApp) end)
 buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
 buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
+buildAppIcon("Premium", 18, appGrid, function() _G.openApp("Premium", _G.openPremiumApp) end)
+
 
 return {
     buildAppIcon = buildAppIcon,

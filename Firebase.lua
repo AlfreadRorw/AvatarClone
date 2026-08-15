@@ -75,13 +75,24 @@ end
 
 -- ==================== HELPERS ====================
 local DURATION_SECS = {["3d"] = 259200, ["7d"] = 604800, ["30d"] = 2592000}
+-- Key permanen: pakai expiry sangat jauh (31 Des 2099) alih-alih angka spesial
+-- seperti 0 atau -1, supaya SEMUA logic "now > exp" yang sudah ada di file ini
+-- tetap benar tanpa perlu ditambah percabangan if-permanent di setiap fungsi.
+local PERMANENT_EXPIRY = 4102444800 -- 2099-12-31 00:00:00 UTC
 
 local function getExpiry(data)
     if not data then return 0 end
+    if data.duration == "permanent" then return PERMANENT_EXPIRY end
     return tonumber(data.expiresAt or data.expires or 0)
 end
 
-local function fmtRemaining(secs)
+-- Cek apakah data key ini bertipe permanent
+local function isPermanentData(data)
+    return data and data.duration == "permanent"
+end
+
+local function fmtRemaining(secs, isPermanent)
+    if isPermanent then return "Permanen (tanpa batas waktu)" end
     if not secs or secs <= 0 then return "Expired" end
     local d = math.floor(secs / 86400)
     local h = math.floor((secs % 86400) / 3600)
@@ -121,8 +132,9 @@ function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
     end
 
     if not isUsed then
+        local isPerm = (data.duration == "permanent")
         local durSecs = DURATION_SECS[data.duration or "7d"] or 604800
-        exp = now + durSecs
+        exp = isPerm and PERMANENT_EXPIRY or (now + durSecs)
         Firebase.SetData("keys/" .. key, {
             duration      = data.duration or "7d",
             durationLabel = data.durationLabel or "7 Hari",
@@ -144,10 +156,10 @@ function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
             durationLabel = data.durationLabel or "7 Hari",
             activatedAt   = now,
         })
-        return true, "Key aktif! " .. fmtRemaining(exp - now)
+        return true, "Key aktif! " .. fmtRemaining(exp - now, isPerm)
     end
 
-    return true, "Selamat datang! " .. fmtRemaining(exp - now)
+    return true, "Selamat datang! " .. fmtRemaining(exp - now, isPermanentData(data))
 end
 
 -- ==================== CHECK SAVED KEY (FIXED) ====================
@@ -241,8 +253,9 @@ function Firebase.GetFullKeyInfo(userId)
     local now = os.time()
     local exp = getExpiry(data)
     local rem = exp > 0 and (exp - now) or 0
+    local isPerm = isPermanentData(data)
 
-    if rem <= 0 then
+    if not isPerm and rem <= 0 then
         return {ok=false, message="Key expired.", remaining=0, key=keyCode}
     end
 
@@ -252,14 +265,15 @@ function Firebase.GetFullKeyInfo(userId)
         key          = keyCode,
         remaining    = rem,
         expiresAt    = exp,
-        durationLabel= data.durationLabel or "-",
+        durationLabel= isPerm and "Permanen" or (data.durationLabel or "-"),
         duration     = data.duration or "7d",
         totalSecs    = totalSecs,
-        ratio        = math.clamp(rem / totalSecs, 0, 1),
+        ratio        = isPerm and 1 or math.clamp(rem / totalSecs, 0, 1),
+        isPermanent  = isPerm,
         playerName   = data.playerName or data.playerUsername or "Unknown",
         playerUsername = data.playerUsername or "Unknown",
         usedBy       = tostring(data.usedBy or data.boundUserId or "-"),
-        message      = fmtRemaining(rem),
+        message      = fmtRemaining(rem, isPerm),
     }
 end
 
@@ -343,6 +357,24 @@ end
 
 function Firebase.DeleteLocation(name)
     return Firebase.DeleteData("locations/" .. name)
+end
+
+-- ==================== GATE AKSES PREMIUM.LUA ====================
+-- Dipakai Premium.lua untuk memutuskan apakah app ini boleh dibuka:
+-- SYARAT: key user berstatus "permanent" ATAU dia developer.
+function Firebase.IsPermanentUser(userId)
+    local uid = tostring(userId)
+    local saved = Firebase.GetData("user_keys/" .. uid)
+    local keyCode = saved and (saved.key or "") or ""
+    if keyCode == "" then return false end
+
+    local data = Firebase.GetData("keys/" .. keyCode)
+    if not data or type(data) ~= "table" then return false end
+
+    local rawBy = tostring(data.usedBy or data.boundUserId or "")
+    if rawBy ~= uid then return false end
+
+    return isPermanentData(data)
 end
 
 return Firebase

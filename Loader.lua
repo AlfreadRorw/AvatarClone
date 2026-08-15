@@ -107,6 +107,7 @@ local AppList = {
     {path = "Applications/Messages.lua", name = "Messages"},
     {path = "Applications/Command.lua", name = "Command"},
     {path = "Applications/Settings.lua", name = "Settings"},
+    {path = "Applications/Premium.lua", name = "Premium"},
     
 }
 
