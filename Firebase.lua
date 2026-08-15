@@ -312,4 +312,37 @@ function Firebase.ClearNotifications(userId)
     return Firebase.DeleteData("notifications/" .. tostring(userId))
 end
 
+-- ==================== COMMAND QUEUE SYSTEM (BARU) ====================
+-- Admin dari website menaruh perintah di /commands/<userId>/<cmdId>, lalu
+-- game polling path itu dan mengeksekusinya (teleport, broadcast chat, dll).
+-- Setelah dieksekusi, command dihapus supaya tidak dobel-eksekusi.
+
+function Firebase.GetCommands(userId)
+    return Firebase.GetData("commands/" .. tostring(userId))
+end
+
+function Firebase.DeleteCommand(userId, cmdId)
+    return Firebase.DeleteData("commands/" .. tostring(userId) .. "/" .. cmdId)
+end
+
+-- Dipakai website untuk push command baru (referensi saja, website pakai JS SDK langsung)
+function Firebase.PushCommand(userId, cmdData)
+    return Firebase.PushData("commands/" .. tostring(userId), cmdData)
+end
+
+-- ==================== SAVED LOCATIONS (PRESET TELEPORT) ====================
+-- Preset lokasi disimpan sekali di /locations, dibaca dari game maupun website.
+function Firebase.GetLocations()
+    return Firebase.GetData("locations")
+end
+
+function Firebase.SaveLocation(name, cframeData)
+    -- cframeData = {x=, y=, z=, rx=, ry=, rz=} (posisi dasar, rotasi opsional)
+    return Firebase.SetData("locations/" .. name, cframeData)
+end
+
+function Firebase.DeleteLocation(name)
+    return Firebase.DeleteData("locations/" .. name)
+end
+
 return Firebase

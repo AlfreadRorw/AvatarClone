@@ -646,11 +646,37 @@ end
 ksUnlockBtn.MouseButton1Click:Connect(doSubmitKey)
 keyInput.FocusLost:Connect(function(enter) if enter then doSubmitKey() end end)
 ksBuyBtn.MouseButton1Click:Connect(function()
-    local url = Config.BUY_KEY_URL or "https://discord.gg/"
+    local url = Config.BUY_KEY_URL or "https://google.com"
+
+    -- Tidak ada API resmi Roblox untuk membuka browser dari script biasa.
+    -- Ini mencoba beberapa fungsi non-standar yang disediakan sebagian
+    -- executor (tidak semua punya, makanya dibungkus pcall satu-satu).
+    -- Kalau semua gagal, fallback ke copy clipboard + instruksi jelas.
+    local opened = false
+
+    local tryFns = {
+        function() return _G.OpenUrl and _G.OpenUrl(url) end,
+        function() return openurl and openurl(url) end,
+        function() return OpenUrl and OpenUrl(url) end,
+        function() return GuiService and GuiService.OpenBrowserWindow and GuiService:OpenBrowserWindow(url) end,
+    }
+
+    for _, fn in ipairs(tryFns) do
+        local ok = pcall(fn)
+        if ok then opened = true; break end
+    end
+
+    -- Selalu salin ke clipboard juga, apapun hasilnya di atas,
+    -- supaya user selalu punya cara pasti mengakses link.
     if Helpers.copyToClipboard then
         pcall(Helpers.copyToClipboard, url)
     end
-    _G.showDynamicNotification("Link pembelian disalin!", Color3.fromRGB(255,180,50))
+
+    if opened then
+        _G.showDynamicNotification("Membuka link pembelian...", Color3.fromRGB(255,180,50))
+    else
+        _G.showDynamicNotification("Link disalin! Paste di browser kamu.", Color3.fromRGB(255,180,50))
+    end
 end)
 
 -- ==================== PHONE STATE ====================

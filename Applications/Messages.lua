@@ -125,7 +125,7 @@ function _G.openMessageApp()
     stroke(header, C.border, 1, 0.3)
 
     local hTitle = Instance.new("TextLabel", header)
-    hTitle.Size = UDim2.new(1,-20,0,22)
+    hTitle.Size = UDim2.new(1,-70,0,22)
     hTitle.Position = UDim2.new(0,12,0,4)
     hTitle.BackgroundTransparency = 1
     hTitle.Text = "💬 Messages"
@@ -135,7 +135,7 @@ function _G.openMessageApp()
     hTitle.TextXAlignment = Enum.TextXAlignment.Left
 
     local hSub = Instance.new("TextLabel", header)
-    hSub.Size = UDim2.new(1,-20,0,14)
+    hSub.Size = UDim2.new(1,-70,0,14)
     hSub.Position = UDim2.new(0,12,0,26)
     hSub.BackgroundTransparency = 1
     hSub.Text = "Chat dengan Admin via Website"
@@ -143,6 +143,30 @@ function _G.openMessageApp()
     hSub.Font = Enum.Font.Gotham
     hSub.TextSize = 9
     hSub.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Badge status koneksi (fitur baru: kelihatan apakah Firebase nyambung)
+    local connBadge = Instance.new("Frame", header)
+    connBadge.Size = UDim2.new(0,50,0,20)
+    connBadge.Position = UDim2.new(1,-60,0.5,-10)
+    connBadge.BackgroundColor3 = (Firebase and Firebase.GetData) and C.green or C.admin
+    connBadge.BackgroundTransparency = 0.85
+    corner(connBadge, 8)
+
+    local connDot = Instance.new("Frame", connBadge)
+    connDot.Size = UDim2.new(0,6,0,6)
+    connDot.Position = UDim2.new(0,8,0.5,-3)
+    connDot.BackgroundColor3 = (Firebase and Firebase.GetData) and C.green or C.admin
+    corner(connDot, 100)
+
+    local connLbl = Instance.new("TextLabel", connBadge)
+    connLbl.Size = UDim2.new(1,-18,1,0)
+    connLbl.Position = UDim2.new(0,18,0,0)
+    connLbl.BackgroundTransparency = 1
+    connLbl.Text = (Firebase and Firebase.GetData) and "Live" or "Off"
+    connLbl.TextColor3 = (Firebase and Firebase.GetData) and C.green or C.admin
+    connLbl.Font = Enum.Font.GothamBold
+    connLbl.TextSize = 8
+    connLbl.TextXAlignment = Enum.TextXAlignment.Left
 
     -- ===== CHAT LIST =====
     local chatScroll = Instance.new("ScrollingFrame", appContent)

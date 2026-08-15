@@ -86,6 +86,8 @@ _G.Icons = Icons
 updateProgress("Build Icons")
 Load("Core/BuildIcons.lua")
 
+
+Load("Core/CommandListener.lua")
 -- ==================== LOAD APPLICATIONS ====================
 local AppList = {
     {path = "Applications/Players.lua", name = "Players"},
