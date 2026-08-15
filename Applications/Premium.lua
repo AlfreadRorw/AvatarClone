@@ -4,13 +4,8 @@
 --
 -- Fitur:
 --   1. Daftar SEMUA player yang online (lintas server/map, dari Firebase presence)
---   2. "TP ke Aku"      -> target dipindah ke lokasi dev. Kalau beda server,
---                          target di-teleport dulu ke server dev via TeleportService,
---                          lalu diposisikan tepat di sebelah dev.
+--   2. "TP ke Aku"      -> target dipindah ke lokasi dev. 
 --   3. "TP-on-Tap"      -> dev toggle mode ON, lalu TAP di layar dev sendiri
---                          (raycast ke ground di titik itu). Titik itu dikirim
---                          via Firebase command ke TARGET (bisa beda server) yang
---                          otomatis pindah ke situ. Dev TIDAK ikut pindah.
 --   4. Refresh daftar online, badge "same server" vs "different server".
 -- ================================================
 
@@ -24,7 +19,6 @@ local T                = _G.T or {}
 local Helpers          = _G.Helpers or {}
 local Firebase         = _G.Firebase
 local Config           = _G.Config or {}
-local appContent       = _G.appContent
 
 local corner  = Helpers.corner
 local stroke  = Helpers.stroke
@@ -46,10 +40,7 @@ local C = {
 }
 
 -- ==================== GATE AKSES ====================
--- Panggil ini SEBELUM membangun UI apapun. Kalau false, jangan render app sama sekali.
--- Return: hasAccess(bool), isDev(bool), reason(string) -- reason untuk debug/notif.
 local function checkPremiumAccess()
-    -- 1) Developer selalu punya akses, tanpa perlu key sama sekali.
     local isDev = false
     local devCheckOk = pcall(function()
         if Config.DEVELOPER_USERNAME and Config.DEVELOPER_USERNAME ~= "" 
@@ -62,41 +53,21 @@ local function checkPremiumAccess()
         end
     end)
 
-    if isDev then
-        return true, true, "developer"
-    end
+    if isDev then return true, true, "developer" end
 
-    -- 2) Bukan dev -> WAJIB cek status permanent ke Firebase.
-    if not Firebase then
-        warn("[Premium] Firebase belum ter-load saat cek akses.")
-        return false, false, "firebase_missing"
-    end
-    if not Firebase.IsPermanentUser then
-        warn("[Premium] Firebase.IsPermanentUser tidak ditemukan (versi Firebase.lua lama?).")
-        return false, false, "function_missing"
-    end
+    if not Firebase then return false, false, "firebase_missing" end
+    if not Firebase.IsPermanentUser then return false, false, "function_missing" end
 
     local ok, isPerm = pcall(function()
         return Firebase.IsPermanentUser(LocalPlayer.UserId)
     end)
 
-    if not ok then
-        -- pcall gagal (network error dsb) -> JANGAN pernah anggap ini sebagai akses
-        -- diberikan. Default paling aman selalu "false" kalau ragu.
-        warn("[Premium] Gagal cek IsPermanentUser: " .. tostring(isPerm))
-        return false, false, "check_failed"
-    end
-
-    -- isPerm HARUS eksplisit true (boolean), bukan sekadar truthy, supaya nilai
-    -- nil/table/string nyasar dari Firebase tidak pernah diloloskan diam-diam.
-    if isPerm == true then
-        return true, false, "permanent_key"
-    end
+    if not ok then return false, false, "check_failed" end
+    if isPerm == true then return true, false, "permanent_key" end
 
     return false, false, "not_permanent"
 end
 
--- Expose supaya BuildIcons.lua bisa cek sebelum menampilkan icon Premium di homescreen
 _G.hasPremiumAccess = function()
     local ok = checkPremiumAccess()
     return ok
@@ -109,7 +80,7 @@ local function section(title, order)
     sec.AutomaticSize = Enum.AutomaticSize.Y
     sec.BackgroundTransparency = 1
     sec.LayoutOrder = order
-    sec.Parent = appContent
+    sec.Parent = _G.appContent -- DYNAMIC REFERENCE FIX
 
     local lay = Instance.new("UIListLayout", sec)
     lay.Padding = UDim.new(0,6)
@@ -152,19 +123,11 @@ end
 
 -- ==================== ACCESS DENIED SCREEN ====================
 local function renderAccessDenied(reason)
-    -- Notifikasi dynamic supaya user (dan kita saat debug) langsung tahu
-    -- kenapa ditolak, bukan cuma layar kosong tanpa penjelasan.
     if _G.showDynamicNotification then
-        local msg = "🔒 Akses Premium ditolak"
-        if reason == "check_failed" then
-            msg = "⚠️ Gagal cek status key, coba lagi"
-        elseif reason == "firebase_missing" or reason == "function_missing" then
-            msg = "⚠️ Sistem key belum siap, coba lagi"
-        end
-        _G.showDynamicNotification(msg, C.red)
+        _G.showDynamicNotification("🔒 Aplikasi ini cuman untuk Dev dan User Permanen!", C.red)
     end
 
-    local sec = section("PREMIUM", 1)
+    local sec = section("AKSES DITOLAK", 1)
     local c = card(sec, 1)
 
     local icon = Instance.new("TextLabel", c)
@@ -177,7 +140,7 @@ local function renderAccessDenied(reason)
     local title = Instance.new("TextLabel", c)
     title.Size = UDim2.new(1,0,0,24)
     title.BackgroundTransparency = 1
-    title.Text = "Akses Premium Diperlukan"
+    title.Text = "Akses Terbatas"
     title.TextColor3 = C.text
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 14
@@ -186,39 +149,58 @@ local function renderAccessDenied(reason)
     local desc = Instance.new("TextLabel", c)
     desc.Size = UDim2.new(1,0,0,40)
     desc.BackgroundTransparency = 1
-    desc.Text = "Fitur ini hanya tersedia untuk pemilik Key Permanen. Hubungi admin untuk upgrade."
+    desc.Text = "Aplikasi ini hanya dapat diakses oleh Developer dan User Permanen."
     desc.TextColor3 = C.text2
     desc.Font = Enum.Font.Gotham
     desc.TextSize = 11
     desc.TextWrapped = true
     desc.LayoutOrder = 2
+
+    local backBtn = Instance.new("TextButton", c)
+    backBtn.Size = UDim2.new(1, 0, 0, 36)
+    backBtn.BackgroundColor3 = C.red
+    backBtn.BackgroundTransparency = 0.2
+    backBtn.Text = "Kembali ke Home"
+    backBtn.TextColor3 = C.text
+    backBtn.Font = Enum.Font.GothamBold
+    backBtn.TextSize = 11
+    backBtn.AutoButtonColor = false
+    backBtn.LayoutOrder = 3
+    corner(backBtn, 8)
+    pressFX(backBtn)
+
+    backBtn.MouseButton1Click:Connect(function()
+        if _G.openApp and _G.openHomeApp then
+            _G.openApp("Home", _G.openHomeApp)
+        else
+            if _G.appContent then
+                for _, child in ipairs(_G.appContent:GetChildren()) do
+                    if not child:IsA("UIListLayout") then child:Destroy() end
+                end
+            end
+            if _G.showDynamicNotification then
+                _G.showDynamicNotification("Tutup dan buka kembali handphone-mu.", C.text3)
+            end
+        end
+    end)
 end
 
 -- ==================== TP-ON-TAP RAYCAST ====================
--- Dev toggle mode ini ON, lalu tap dimana saja di layar dev SENDIRI.
--- Raycast vertikal dari tinggi tertentu turun ke ground di titik X,Z tap
--- (bukan raycast penuh ke arah kamera -> supaya selalu jatuh ke permukaan
--- terdekat, bukan menembus objek/langit).
 local tpOnTapActive  = false
-local tpOnTapTarget  = nil -- {userId, name, sameServer}
+local tpOnTapTarget  = nil 
 local tpTapConnection = nil
 
 local function screenPointToGroundWorld(screenPos)
     local camera = Workspace.CurrentCamera
     if not camera then return nil end
-
     local unitRay = camera:ViewportPointToRay(screenPos.X, screenPos.Y)
-    -- Raycast dari kamera ke arah tap, cukup jauh untuk kena ground manapun
     local raycastParams = RaycastParams.new()
     raycastParams.FilterType = Enum.RaycastFilterType.Exclude
     local excludeList = {}
     if LocalPlayer.Character then table.insert(excludeList, LocalPlayer.Character) end
     raycastParams.FilterDescendantsInstances = excludeList
-
     local result = Workspace:Raycast(unitRay.Origin, unitRay.Direction * 1000, raycastParams)
-    if result then
-        return result.Position
-    end
+    if result then return result.Position end
     return nil
 end
 
@@ -227,23 +209,17 @@ local function sendTapTeleportToTarget(worldPos)
     local targetUid = tpOnTapTarget.userId
 
     if tpOnTapTarget.sameServer then
-        -- Target ada di server yang sama -> langsung set CFrame, instan
         local targetPlayer = Players:GetPlayerByUserId(tonumber(targetUid))
         if targetPlayer and targetPlayer.Character then
             local hrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
             if hrp then
-                pcall(function()
-                    hrp.CFrame = CFrame.new(worldPos + Vector3.new(0, 3, 0))
-                end)
+                pcall(function() hrp.CFrame = CFrame.new(worldPos + Vector3.new(0, 3, 0)) end)
                 _G.showDynamicNotification("📍 " .. tpOnTapTarget.name .. " di-TP ke titik tap!", C.purple)
                 return
             end
         end
     end
 
-    -- Target beda server (atau gagal cara langsung) -> kirim command via Firebase.
-    -- CommandListener.lua di sisi target akan teleport ke server ini dulu kalau perlu,
-    -- baru posisikan ke koordinat ini.
     if Firebase and Firebase.PushCommand then
         pcall(function()
             Firebase.PushCommand(targetUid, {
@@ -255,29 +231,24 @@ local function sendTapTeleportToTarget(worldPos)
                 timestamp = os.time(),
             })
         end)
-        _G.showDynamicNotification("📡 Perintah TP dikirim ke " .. tpOnTapTarget.name .. " (beda server)", C.blue)
+        _G.showDynamicNotification("📡 Perintah TP dikirim ke " .. tpOnTapTarget.name, C.blue)
     end
 end
 
 local function enableTpOnTap(target)
     tpOnTapActive = true
     tpOnTapTarget = target
-
     tpTapConnection = UserInputService.InputBegan:Connect(function(input, processed)
-        if processed then return end -- abaikan tap yang kena UI (tombol dsb)
+        if processed then return end 
         if not tpOnTapActive then return end
-
         if input.UserInputType == Enum.UserInputType.Touch
         or input.UserInputType == Enum.UserInputType.MouseButton1 then
             local pos = input.Position
             local worldPos = screenPointToGroundWorld(Vector2.new(pos.X, pos.Y))
-            if worldPos then
-                sendTapTeleportToTarget(worldPos)
-            end
+            if worldPos then sendTapTeleportToTarget(worldPos) end
         end
     end)
-
-    _G.showDynamicNotification("🎯 TP-on-Tap AKTIF untuk " .. target.name .. " — tap dimana saja!", C.gold)
+    _G.showDynamicNotification("🎯 TP-on-Tap AKTIF untuk " .. target.name, C.gold)
 end
 
 local function disableTpOnTap()
@@ -299,17 +270,13 @@ local function teleportTargetToMe(target)
             local myHrp = myChar:FindFirstChild("HumanoidRootPart")
             local targetHrp = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
             if myHrp and targetHrp then
-                pcall(function()
-                    targetHrp.CFrame = myHrp.CFrame * CFrame.new(3, 0, 0)
-                end)
+                pcall(function() targetHrp.CFrame = myHrp.CFrame * CFrame.new(3, 0, 0) end)
                 _G.showDynamicNotification("📍 " .. target.name .. " ditarik ke posisimu!", C.purple)
                 return
             end
         end
     end
 
-    -- Beda server: kirim command "teleport_to_dev" -> target akan
-    -- TeleportToPlaceInstance ke server dev, lalu posisikan di sebelah dev.
     if Firebase and Firebase.PushCommand then
         pcall(function()
             Firebase.PushCommand(target.userId, {
@@ -321,7 +288,7 @@ local function teleportTargetToMe(target)
                 timestamp = os.time(),
             })
         end)
-        _G.showDynamicNotification("📡 Perintah TP-ke-Dev dikirim ke " .. target.name .. " (beda server)", C.blue)
+        _G.showDynamicNotification("📡 Perintah TP dikirim ke " .. target.name, C.blue)
     end
 end
 
@@ -334,7 +301,7 @@ local function renderPlayerCard(parent, playerData, order)
     local sameServer = placeId == tostring(game.PlaceId)
     local isMe = uid == tostring(LocalPlayer.UserId)
 
-    if isMe then return end -- jangan tampilkan diri sendiri di daftar
+    if isMe then return end
 
     local pcard = Instance.new("Frame", parent)
     pcard.Size = UDim2.new(1,0,0,0)
@@ -351,7 +318,6 @@ local function renderPlayerCard(parent, playerData, order)
     local lay = Instance.new("UIListLayout", pcard)
     lay.Padding = UDim.new(0,8)
 
-    -- Baris info
     local infoRow = Instance.new("Frame", pcard)
     infoRow.Size = UDim2.new(1,0,0,40)
     infoRow.BackgroundTransparency = 1
@@ -406,7 +372,6 @@ local function renderPlayerCard(parent, playerData, order)
     badgeLbl.Font = Enum.Font.GothamBlack
     badgeLbl.TextSize = 7
 
-    -- Baris aksi
     local actRow = Instance.new("Frame", pcard)
     actRow.Size = UDim2.new(1,0,0,32)
     actRow.BackgroundTransparency = 1
@@ -434,7 +399,7 @@ local function renderPlayerCard(parent, playerData, order)
     local isThisTapTarget = tpOnTapActive and tpOnTapTarget and tpOnTapTarget.userId == uid
     btnTapMode.BackgroundColor3 = isThisTapTarget and C.gold or C.card
     btnTapMode.BackgroundTransparency = isThisTapTarget and 0.75 or 0
-    btnTapMode.Text = isThisTapTarget and "🎯 Tap AKTIF (matikan)" or "🎯 TP-on-Tap"
+    btnTapMode.Text = isThisTapTarget and "🎯 Tap AKTIF" or "🎯 TP-on-Tap"
     btnTapMode.TextColor3 = isThisTapTarget and C.gold or C.text2
     btnTapMode.Font = Enum.Font.GothamBold
     btnTapMode.TextSize = 10
@@ -448,35 +413,26 @@ local function renderPlayerCard(parent, playerData, order)
         else
             enableTpOnTap({userId=uid, name=name, sameServer=sameServer})
         end
-        _G.refreshCurrentApp and _G.refreshCurrentApp() -- refresh tampilan tombol kalau ada
+        _G.refreshCurrentApp and _G.refreshCurrentApp()
     end)
 end
 
--- Forward declaration: definisi lengkap _buildPremiumUI ada di bawah,
--- tapi dipanggil dari openPremiumApp yang posisinya lebih atas.
 local _buildPremiumUI
 
 -- ==================== BUKA APP ====================
 function _G.openPremiumApp()
-    -- SELURUH isi app dibungkus pcall: kalau ada error di manapun saat render
-    -- (icon builder gagal, Firebase timeout, dsb), kita tangkap errornya dan
-    -- tampilkan notifikasi + fallback, BUKAN dibiarkan layar jadi putih/kosong
-    -- karena fungsi berhenti di tengah jalan tanpa penjelasan.
     local renderOk, renderErr = pcall(function()
         local hasAccess, isDev, reason = checkPremiumAccess()
-
         if not hasAccess then
             renderAccessDenied(reason)
             return
         end
 
-        -- Notifikasi dynamic begitu akses diberikan, sesuai yang diminta:
-        -- beda pesan untuk developer vs pemilik key permanent.
         if _G.showDynamicNotification then
             if isDev then
                 _G.showDynamicNotification("👑 Developer Access — Premium Terbuka", C.gold)
             else
-                _G.showDynamicNotification("✨ Key Permanen Terverifikasi — Premium Terbuka", C.purple)
+                _G.showDynamicNotification("✨ Key Permanen Terverifikasi", C.purple)
             end
         end
 
@@ -486,14 +442,25 @@ function _G.openPremiumApp()
     if not renderOk then
         warn("[Premium] Error saat render app: " .. tostring(renderErr))
         if _G.showDynamicNotification then
-            _G.showDynamicNotification("⚠️ Premium gagal dimuat, coba lagi", C.red)
+            _G.showDynamicNotification("⚠️ Premium gagal dimuat!", C.red)
+        end
+        -- Tampilkan pesan error di layar supaya tidak sekadar blank/putih
+        if _G.appContent then
+            local errLbl = Instance.new("TextLabel", _G.appContent)
+            errLbl.Size = UDim2.new(1, 0, 1, 0)
+            errLbl.BackgroundTransparency = 1
+            errLbl.Text = "Error Load Premium:\n" .. tostring(renderErr)
+            errLbl.TextColor3 = Color3.fromRGB(255, 50, 50)
+            errLbl.Font = Enum.Font.GothamBold
+            errLbl.TextSize = 12
+            errLbl.TextWrapped = true
         end
     end
 end
 
--- ==================== BANGUN UI PREMIUM (dipanggil setelah lolos gate) ====================
+-- ==================== BANGUN UI PREMIUM ====================
 _buildPremiumUI = function(isDev)
-    local header = Instance.new("Frame", appContent)
+    local header = Instance.new("Frame", _G.appContent) -- DYNAMIC REFERENCE FIX
     header.Size = UDim2.new(1,0,0,50)
     header.BackgroundColor3 = C.card
     header.LayoutOrder = 0
@@ -520,7 +487,6 @@ _buildPremiumUI = function(isDev)
     hSub.TextSize = 9
     hSub.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- ===== STATUS TP-ON-TAP AKTIF =====
     if tpOnTapActive and tpOnTapTarget then
         local statusSec = section("STATUS", 1)
         local statusCard = card(statusSec, 1)
@@ -539,7 +505,7 @@ _buildPremiumUI = function(isDev)
         local statusSub = Instance.new("TextLabel", statusCard)
         statusSub.Size = UDim2.new(1,0,0,16)
         statusSub.BackgroundTransparency = 1
-        statusSub.Text = "Target: " .. tpOnTapTarget.name .. " — tap dimana saja di layar untuk memindahkannya"
+        statusSub.Text = "Target: " .. tpOnTapTarget.name .. " — tap dimana saja di layar"
         statusSub.TextColor3 = C.text2
         statusSub.Font = Enum.Font.Gotham
         statusSub.TextSize = 9
@@ -564,7 +530,6 @@ _buildPremiumUI = function(isDev)
         end)
     end
 
-    -- ===== DAFTAR PLAYER ONLINE (LINTAS SERVER) =====
     local listSec = section("SEMUA PLAYER ONLINE", 2)
 
     local refreshBtn = Instance.new("TextButton", listSec)
@@ -618,7 +583,6 @@ _buildPremiumUI = function(isDev)
             return
         end
 
-        -- Urutkan: same server dulu, baru alfabetis
         local list = {}
         for _, p in pairs(onlineData) do
             if type(p) == "table" then table.insert(list, p) end
