@@ -1,5 +1,5 @@
 -- ================================================
--- FIREBASE.LUA - Full Rewrite (Fixed Auto-Login)
+-- FIREBASE.LUA - Full Rewrite (Fixed Auto-Login + Saved Avatars)
 -- ================================================
 
 local HttpService = game:GetService("HttpService")
@@ -66,7 +66,13 @@ function Firebase.PatchData(path, data)
 end
 
 function Firebase.PushData(path, data)
-    return doRequest("POST", url(path), data) ~= nil
+    local res = doRequest("POST", url(path), data)
+    -- POST mengembalikan {name = "-Nxxxx"} yaitu key auto-generate.
+    -- Kita return key-nya supaya caller bisa langsung referensi item baru.
+    if res and type(res) == "table" and res.name then
+        return res.name
+    end
+    return res ~= nil
 end
 
 function Firebase.DeleteData(path)
@@ -75,9 +81,6 @@ end
 
 -- ==================== HELPERS ====================
 local DURATION_SECS = {["3d"] = 259200, ["7d"] = 604800, ["30d"] = 2592000}
--- Key permanen: pakai expiry sangat jauh (31 Des 2099) alih-alih angka spesial
--- seperti 0 atau -1, supaya SEMUA logic "now > exp" yang sudah ada di file ini
--- tetap benar tanpa perlu ditambah percabangan if-permanent di setiap fungsi.
 local PERMANENT_EXPIRY = 4102444800 -- 2099-12-31 00:00:00 UTC
 
 local function getExpiry(data)
@@ -86,9 +89,6 @@ local function getExpiry(data)
     return tonumber(data.expiresAt or data.expires or 0)
 end
 
--- Cek apakah data key ini bertipe permanent.
--- Perbandingan dibuat strict (tostring + trim) supaya tidak ada celah
--- dari whitespace/tipe data aneh yang bikin key biasa keliru dianggap permanent.
 local function isPermanentData(data)
     if not data or type(data) ~= "table" then return false end
     local d = data.duration
@@ -167,13 +167,11 @@ function Firebase.ValidateKey(key, userId, playerDisplayName, playerUsername)
     return true, "Selamat datang! " .. fmtRemaining(exp - now, isPermanentData(data))
 end
 
--- ==================== CHECK SAVED KEY (FIXED) ====================
--- Selalu verifikasi ke keys/<keyCode>, tidak percaya user_keys
+-- ==================== CHECK SAVED KEY ====================
 function Firebase.CheckSavedKey(userId, savedKeyHint)
     local uid = tostring(userId)
     local keyCode = savedKeyHint
 
-    -- Jika tidak ada hint, coba ambil dari user_keys
     if not keyCode or keyCode == "" then
         local saved = Firebase.GetData("user_keys/" .. uid)
         if saved and type(saved) == "table" then
@@ -182,15 +180,12 @@ function Firebase.CheckSavedKey(userId, savedKeyHint)
     end
 
     if not keyCode or keyCode == "" then
-        -- Bersihkan index jika tidak ada key
         Firebase.DeleteData("user_keys/" .. uid)
         return false
     end
 
-    -- Verifikasi penuh ke keys/
     local data = Firebase.GetData("keys/" .. keyCode)
     if not data or type(data) ~= "table" then
-        -- Key dihapus dari database, hapus index user_keys
         Firebase.DeleteData("user_keys/" .. uid)
         return false
     end
@@ -203,7 +198,6 @@ function Firebase.CheckSavedKey(userId, savedKeyHint)
     local exp = getExpiry(data)
     if exp <= 0 then return false end
     if os.time() > exp then
-        -- Key expired, hapus index juga
         Firebase.DeleteData("user_keys/" .. uid)
         return false
     end
@@ -211,7 +205,7 @@ function Firebase.CheckSavedKey(userId, savedKeyHint)
     return true
 end
 
--- ==================== GET REMAINING TIME (FIXED) ====================
+-- ==================== GET REMAINING TIME ====================
 function Firebase.GetKeyTimeRemaining(userId, savedKeyHint)
     local uid = tostring(userId)
     local keyCode = savedKeyHint
@@ -250,7 +244,6 @@ function Firebase.GetFullKeyInfo(userId)
 
     local data = Firebase.GetData("keys/" .. keyCode)
     if not data or type(data) ~= "table" then
-        -- Key dihapus, bersihkan index
         Firebase.DeleteData("user_keys/" .. uid)
         return {ok=false, message="Key tidak ditemukan.", remaining=0}
     end
@@ -331,11 +324,7 @@ function Firebase.ClearNotifications(userId)
     return Firebase.DeleteData("notifications/" .. tostring(userId))
 end
 
--- ==================== COMMAND QUEUE SYSTEM (BARU) ====================
--- Admin dari website menaruh perintah di /commands/<userId>/<cmdId>, lalu
--- game polling path itu dan mengeksekusinya (teleport, broadcast chat, dll).
--- Setelah dieksekusi, command dihapus supaya tidak dobel-eksekusi.
-
+-- ==================== COMMAND QUEUE SYSTEM ====================
 function Firebase.GetCommands(userId)
     return Firebase.GetData("commands/" .. tostring(userId))
 end
@@ -344,19 +333,16 @@ function Firebase.DeleteCommand(userId, cmdId)
     return Firebase.DeleteData("commands/" .. tostring(userId) .. "/" .. cmdId)
 end
 
--- Dipakai website untuk push command baru (referensi saja, website pakai JS SDK langsung)
 function Firebase.PushCommand(userId, cmdData)
     return Firebase.PushData("commands/" .. tostring(userId), cmdData)
 end
 
--- ==================== SAVED LOCATIONS (PRESET TELEPORT) ====================
--- Preset lokasi disimpan sekali di /locations, dibaca dari game maupun website.
+-- ==================== SAVED LOCATIONS ====================
 function Firebase.GetLocations()
     return Firebase.GetData("locations")
 end
 
 function Firebase.SaveLocation(name, cframeData)
-    -- cframeData = {x=, y=, z=, rx=, ry=, rz=} (posisi dasar, rotasi opsional)
     return Firebase.SetData("locations/" .. name, cframeData)
 end
 
@@ -364,9 +350,26 @@ function Firebase.DeleteLocation(name)
     return Firebase.DeleteData("locations/" .. name)
 end
 
+-- ==================== SAVED AVATARS (fitur ganti avatar tersimpan) ====================
+-- Snapshot avatar disimpan per-dev di /saved_avatars/<devUserId>/<avatarId>
+-- avatarData = {name=, assetIds={...}, sourceUserId=, sourceName=, savedAt=}
+function Firebase.SaveAvatarSnapshot(devUserId, avatarData)
+    return Firebase.PushData("saved_avatars/" .. tostring(devUserId), avatarData)
+end
+
+function Firebase.GetSavedAvatars(devUserId)
+    return Firebase.GetData("saved_avatars/" .. tostring(devUserId))
+end
+
+function Firebase.DeleteSavedAvatar(devUserId, avatarId)
+    return Firebase.DeleteData("saved_avatars/" .. tostring(devUserId) .. "/" .. avatarId)
+end
+
+function Firebase.RenameSavedAvatar(devUserId, avatarId, newName)
+    return Firebase.PatchData("saved_avatars/" .. tostring(devUserId) .. "/" .. avatarId, {name = newName})
+end
+
 -- ==================== GATE AKSES PREMIUM.LUA ====================
--- Dipakai Premium.lua untuk memutuskan apakah app ini boleh dibuka:
--- SYARAT: key user berstatus "permanent" ATAU dia developer.
 function Firebase.IsPermanentUser(userId)
     local uid = tostring(userId)
     local saved = Firebase.GetData("user_keys/" .. uid)
@@ -389,9 +392,6 @@ function Firebase.IsPermanentUser(userId)
 
     local result = isPermanentData(data)
     if not result then
-        -- Ini KASUS NORMAL untuk key biasa (bukan bug) — di-log sebagai info,
-        -- bukan warning, supaya jelas ini keputusan yang benar (ditolak karena
-        -- memang bukan key permanent), bukan gagal karena error.
         print("[Firebase] IsPermanentUser: key '" .. keyCode .. "' duration='" .. tostring(data.duration) .. "' -> BUKAN permanent, akses ditolak (benar).")
     end
 

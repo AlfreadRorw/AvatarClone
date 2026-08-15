@@ -1,6 +1,7 @@
 -- ================================================
--- COMMAND LISTENER - Full Mega Upgrade Edition
--- Mendengarkan perintah dari Firebase, mengeksekusi fitur Teleport, Admin, dan 20+ Troll Toggles
+-- COMMAND LISTENER - Full Mega Upgrade Edition v2
+-- Mendengarkan perintah dari Firebase, mengeksekusi fitur Teleport, Admin,
+-- 20+ Troll Toggles, ganti avatar tersimpan, dan fitur-fitur baru Premium.
 -- ================================================
 
 local Services         = _G.Services
@@ -10,6 +11,7 @@ local TeleportService  = game:GetService("TeleportService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Lighting         = game:GetService("Lighting")
 local TextChatService  = game:GetService("TextChatService")
+local SoundService     = game:GetService("SoundService")
 
 local lastCheckedCmdIds = {}
 
@@ -23,7 +25,7 @@ local function teleportPlayerTo(x, y, z)
     return false
 end
 
--- Force Global Chat (Agar pesan terlihat oleh semua player di server)
+-- Force Global Chat
 local function forceGlobalChat(message)
     pcall(function()
         if TextChatService.ChatVersion == Enum.ChatVersion.TextChatService then
@@ -35,16 +37,16 @@ local function forceGlobalChat(message)
     end)
 end
 
--- Mengeksekusi RemoteEvent command (cth: "re" untuk refresh avatar)
-local function fireRemoteCommand(remotePath, cmd)
+-- Eksekusi RemoteEvent command generik
+local function fireRemoteCommand(remotePath, cmd, arg2)
     pcall(function()
-        local pathParts = string.split(remotePath, ".")
+        local pathParts = string.split(remotePath or "Remotes.Command.CommandEvent", ".")
         local obj = game
-        for _, p in ipairs(pathParts) do 
-            obj = obj:WaitForChild(p, 2) 
+        for _, p in ipairs(pathParts) do
+            obj = obj:WaitForChild(p, 2)
         end
         if obj and obj:IsA("RemoteEvent") then
-            obj:FireServer(cmd, "me")
+            obj:FireServer(cmd, arg2 or "me")
         end
     end)
 end
@@ -139,7 +141,7 @@ task.spawn(function()
                     local act = cmd.action
                     local char = LocalPlayer.Character
                     local hrp = char and char:FindFirstChild("HumanoidRootPart")
-                    local hum = char and char:FindFirstChild("Humanoid")
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
 
                     if act == "jail" and hrp then
                         local oldBox = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
@@ -154,7 +156,7 @@ task.spawn(function()
                         box.Transparency = 0.5
                         box.BrickColor = BrickColor.new("Cyan")
                         box.Parent = game.Workspace
-                        
+
                         hrp.CFrame = CFrame.new(box.Position)
                         if hum then hum.WalkSpeed = 0; hum.JumpPower = 0 end
 
@@ -207,7 +209,7 @@ task.spawn(function()
                         hum.Sit = true
                     elseif act == "unforcesit" and hum then
                         hum.Sit = false
-                    
+
                     elseif act == "spin" and hrp then
                         local b = hrp:FindFirstChild("TrollSpin") or Instance.new("BodyAngularVelocity", hrp)
                         b.Name = "TrollSpin"
@@ -249,7 +251,196 @@ task.spawn(function()
                         for _, p in ipairs(char:GetChildren()) do
                             if p:IsA("BasePart") then p.CanCollide = false end
                         end
+
+                    -- ===== FITUR BARU (10 tambahan) =====
+                    elseif act == "rainbow" and char then
+                        for _, p in ipairs(char:GetChildren()) do
+                            if p:IsA("BasePart") then
+                                p:SetAttribute("RainbowTroll", true)
+                            end
+                        end
+                        task.spawn(function()
+                            local hueStart = tick()
+                            while char and char.Parent and char:GetAttribute("RainbowActive") ~= false do
+                                local hue = (tick() - hueStart) % 5 / 5
+                                local col = Color3.fromHSV(hue, 1, 1)
+                                for _, p in ipairs(char:GetChildren()) do
+                                    if p:IsA("BasePart") and p:GetAttribute("RainbowTroll") then
+                                        p.Color = col
+                                    end
+                                end
+                                task.wait(0.05)
+                            end
+                        end)
+                    elseif act == "unrainbow" and char then
+                        char:SetAttribute("RainbowActive", false)
+
+                    elseif act == "giant" and char then
+                        pcall(function()
+                            for _, v in ipairs({"HeadScale","BodyDepthScale","BodyWidthScale","BodyHeightScale"}) do
+                                local s = char:FindFirstChild(v, true)
+                                if s then s.Value = 3 end
+                            end
+                        end)
+                    elseif act == "ungiant" and char then
+                        pcall(function()
+                            for _, v in ipairs({"HeadScale","BodyDepthScale","BodyWidthScale","BodyHeightScale"}) do
+                                local s = char:FindFirstChild(v, true)
+                                if s then s.Value = 1 end
+                            end
+                        end)
+
+                    elseif act == "tiny" and char then
+                        pcall(function()
+                            for _, v in ipairs({"HeadScale","BodyDepthScale","BodyWidthScale","BodyHeightScale"}) do
+                                local s = char:FindFirstChild(v, true)
+                                if s then s.Value = 0.4 end
+                            end
+                        end)
+                    elseif act == "untiny" and char then
+                        pcall(function()
+                            for _, v in ipairs({"HeadScale","BodyDepthScale","BodyWidthScale","BodyHeightScale"}) do
+                                local s = char:FindFirstChild(v, true)
+                                if s then s.Value = 1 end
+                            end
+                        end)
+
+                    elseif act == "invisible" and char then
+                        for _, p in ipairs(char:GetDescendants()) do
+                            if p:IsA("BasePart") or p:IsA("Decal") then
+                                p.Transparency = 1
+                            end
+                        end
+                    elseif act == "uninvisible" and char then
+                        for _, p in ipairs(char:GetDescendants()) do
+                            if p:IsA("BasePart") and p.Name ~= "HumanoidRootPart" then
+                                p.Transparency = 0
+                            end
+                        end
+
+                    elseif act == "gravity_low" and hum then
+                        pcall(function() Services.Workspace.Gravity = 40 end)
+                    elseif act == "gravity_normal" then
+                        pcall(function() Services.Workspace.Gravity = 196.2 end)
+
+                    elseif act == "earthquake" and hrp then
+                        task.spawn(function()
+                            local endTime = tick() + 3
+                            while tick() < endTime and hrp and hrp.Parent do
+                                hrp.CFrame = hrp.CFrame + Vector3.new(math.random(-2,2)*0.3, 0, math.random(-2,2)*0.3)
+                                task.wait(0.05)
+                            end
+                        end)
+
+                    elseif act == "deafen" then
+                        pcall(function() SoundService.AmbientReverb = Enum.ReverbType.NoReverb end)
+                        for _, s in ipairs(game:GetDescendants()) do
+                            if s:IsA("Sound") then s.Volume = 0 end
+                        end
+                    elseif act == "undeafen" then
+                        for _, s in ipairs(game:GetDescendants()) do
+                            if s:IsA("Sound") then s.Volume = 0.5 end
+                        end
+
+                    elseif act == "confuse_controls" and hum then
+                        -- Kebalik kontrol: WalkSpeed negatif efek visual pusing
+                        local b = Lighting:FindFirstChild("TrollConfuseBlur") or Instance.new("BlurEffect", Lighting)
+                        b.Name = "TrollConfuseBlur"
+                        b.Size = 10
+                        task.spawn(function()
+                            local t = 0
+                            while b and b.Parent and t < 6 do
+                                b.Size = 10 + math.sin(t*4) * 8
+                                t = t + 0.1
+                                task.wait(0.1)
+                            end
+                            if b then b:Destroy() end
+                        end)
+
+                    elseif act == "meme_sound" and hrp then
+                        local snd = Instance.new("Sound", hrp)
+                        snd.SoundId = cmd.soundId or "rbxassetid://9046392739"
+                        snd.Volume = 3
+                        snd:Play()
+                        game.Debris:AddItem(snd, 8)
                     end
+
+                -- 7. APPLY SAVED AVATAR (ganti avatar dari snapshot tersimpan + auto re)
+                elseif cmd.type == "apply_avatar" then
+                    pcall(function()
+                        local remote = ReplicatedStorage
+                        for _, p in ipairs(string.split(cmd.remotePath or "Remotes.Command.CommandEvent", ".")) do
+                            remote = remote:WaitForChild(p, 2)
+                        end
+                        if remote and cmd.assetIds and #cmd.assetIds > 0 then
+                            remote:FireServer("hat", {"hat", unpack(cmd.assetIds)})
+                            task.wait(0.5)
+                            remote:FireServer("re", "me")
+                            if _G.showDynamicNotification then
+                                _G.showDynamicNotification("👤 Avatar diganti oleh Dev!", Color3.fromRGB(168,100,255))
+                            end
+                        end
+                    end)
+
+                -- 8. STRIP AVATAR (copot semua aksesoris/pakaian)
+                elseif cmd.type == "strip_avatar" then
+                    local hum = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                    if hum then
+                        pcall(function()
+                            local desc = Instance.new("HumanoidDescription")
+                            hum:ApplyDescription(desc)
+                        end)
+                    end
+
+                -- 9. RANDOM RAGDOLL BOUNCE
+                elseif cmd.type == "ragdoll_bounce" then
+                    local char = LocalPlayer.Character
+                    local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                    local hum = char and char:FindFirstChildOfClass("Humanoid")
+                    if hrp and hum then
+                        hum:ChangeState(Enum.HumanoidStateType.Ragdoll)
+                        hrp.Velocity = Vector3.new(math.random(-40,40), 60, math.random(-40,40))
+                        task.delay(2, function()
+                            if hum and hum.Parent then
+                                hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                            end
+                        end)
+                    end
+
+                -- 10. SCREEN MESSAGE (pesan besar full screen, beda dari chat)
+                elseif cmd.type == "screen_message" then
+                    pcall(function()
+                        local ui = LocalPlayer.PlayerGui:FindFirstChild("ScreenMsgUI") or Instance.new("ScreenGui", LocalPlayer.PlayerGui)
+                        ui.Name = "ScreenMsgUI"
+                        ui.IgnoreGuiInset = true
+                        for _, c in ipairs(ui:GetChildren()) do c:Destroy() end
+
+                        local bg = Instance.new("Frame", ui)
+                        bg.Size = UDim2.new(1, 0, 0, 90)
+                        bg.Position = UDim2.new(0, 0, 0, -90)
+                        bg.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+                        bg.BackgroundTransparency = 0.1
+
+                        local lbl = Instance.new("TextLabel", bg)
+                        lbl.Size = UDim2.new(1, -20, 1, 0)
+                        lbl.Position = UDim2.new(0, 10, 0, 0)
+                        lbl.BackgroundTransparency = 1
+                        lbl.Text = cmd.message or "📢 Pesan dari Developer"
+                        lbl.TextColor3 = Color3.fromRGB(168, 100, 255)
+                        lbl.Font = Enum.Font.GothamBlack
+                        lbl.TextSize = 18
+                        lbl.TextWrapped = true
+
+                        local tw = game:GetService("TweenService"):Create(bg, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {Position = UDim2.new(0,0,0,0)})
+                        tw:Play()
+
+                        task.delay(cmd.duration or 5, function()
+                            local tw2 = game:GetService("TweenService"):Create(bg, TweenInfo.new(0.3), {Position = UDim2.new(0,0,0,-90)})
+                            tw2:Play()
+                            task.wait(0.35)
+                            pcall(function() ui:Destroy() end)
+                        end)
+                    end)
                 end
 
                 -- Hapus command setelah sukses dieksekusi
@@ -261,7 +452,7 @@ task.spawn(function()
     end
 end)
 
--- ==================== ONLINE HEARTBEAT (KIRIM SINYAL SETIAP 60 DETIK) ====================
+-- ==================== ONLINE HEARTBEAT ====================
 task.spawn(function()
     task.wait(5)
     while true do
@@ -287,7 +478,6 @@ task.spawn(function()
     end
 end)
 
--- Bersihkan data saat player keluar
 game:GetService("Players").PlayerRemoving:Connect(function(player)
     if player == LocalPlayer then
         pcall(function()
@@ -298,4 +488,4 @@ game:GetService("Players").PlayerRemoving:Connect(function(player)
     end
 end)
 
-print("[CommandListener] Full Engine Loaded Successfully!")
+print("[CommandListener] Full Engine v2 Loaded — 10 fitur baru + avatar apply ready!")
