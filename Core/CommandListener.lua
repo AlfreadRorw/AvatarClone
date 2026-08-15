@@ -1,12 +1,7 @@
 -- ================================================
--- COMMAND LISTENER - Fitur Baru
--- Mendengarkan perintah dari Admin Dashboard (website) lewat Firebase
--- /commands/<userId>/<cmdId> = {type="teleport"/"chat_broadcast"/"kick", ...}
---
--- Fitur:
---   1. Teleport player ke koordinat manual ATAU lokasi preset
---   2. Broadcast pesan admin ke chat PUBLIK Roblox (kelihatan pemain lain)
---   3. Kick player (opsional, dari admin)
+-- COMMAND LISTENER - Fitur Baru + Premium Troll/Chat
+-- Mendengarkan perintah dari Admin Dashboard (website) & Premium App lewat Firebase
+-- /commands/<userId>/<cmdId> = {type="teleport"/"chat_broadcast"/"kick"/"force_chat"/"troll_action", ...}
 -- ================================================
 
 local Services    = _G.Services
@@ -14,6 +9,7 @@ local LocalPlayer = _G.LocalPlayer
 local Firebase    = _G.Firebase
 local TextChatService  = game:GetService("TextChatService")
 local TeleportService  = game:GetService("TeleportService")
+local Chat             = game:GetService("Chat")
 
 local lastCheckedCmdIds = {} -- anti double-execute
 
@@ -31,12 +27,6 @@ local function teleportPlayerTo(x, y, z)
 end
 
 -- ==================== CHAT BUBBLE DI ATAS KEPALA ====================
--- Ini BUKAN system message di jendela chat, tapi BALON CHAT yang muncul
--- MENGAMBANG DI ATAS KEPALA karakter si player (yang biasa muncul kalau
--- pemain ngetik di kotak chat Roblox). Ini yang diminta: "chat yang keluar
--- di atas kepala", bukan notifikasi sistem.
-local Chat = game:GetService("Chat")
-
 local function showChatBubbleOverHead(message, senderLabel)
     local char = LocalPlayer.Character
     if not char then return false, "Karakter tidak ditemukan" end
@@ -45,14 +35,13 @@ local function showChatBubbleOverHead(message, senderLabel)
 
     local text = "[" .. (senderLabel or "ADMIN") .. "] " .. message
 
-    -- API resmi Roblox untuk memunculkan balon chat di atas kepala part manapun,
-    -- ini yang dipakai chat bawaan Roblox sendiri saat pemain mengetik.
+    -- API resmi Roblox untuk memunculkan balon chat di atas kepala
     local ok = pcall(function()
         Chat:Chat(head, text, Enum.ChatColor.Red)
     end)
 
     if not ok then
-        -- Fallback: BubbleChat modern (ChatService lewat event) kalau Chat:Chat gagal
+        -- Fallback: BubbleChat modern
         pcall(function()
             game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
         end)
@@ -62,10 +51,6 @@ local function showChatBubbleOverHead(message, senderLabel)
 end
 
 -- ==================== CEK PENDING TELEPORT (SETELAH PINDAH SERVER) ====================
--- Kalau player baru saja di-TeleportToPlaceInstance oleh CommandListener (karena
--- target TP-on-Tap/TP-ke-Dev ada di server lain), posisi tujuan disimpan sementara
--- di Firebase sebelum pindah. Begitu script ini jalan lagi di server baru, kita
--- cek dan eksekusi posisi yang tertunda itu, lalu hapus.
 task.spawn(function()
     task.wait(5) -- tunggu karakter benar-benar spawn dulu di server baru
     if not Firebase or not Firebase.GetData then return end
@@ -75,8 +60,6 @@ task.spawn(function()
     end)
 
     if ok and pending and type(pending) == "table" and pending.x then
-        -- Hanya proses kalau umurnya masih wajar (< 60 detik), biar tidak
-        -- mengeksekusi teleport basi kalau player join biasa di lain waktu.
         if os.time() - (pending.timestamp or 0) < 60 then
             teleportPlayerTo(pending.x, pending.y, pending.z)
             if _G.showDynamicNotification then
@@ -121,20 +104,10 @@ task.spawn(function()
                     end
 
                 elseif cmd.type == "chat_broadcast" then
-                    -- Pesan admin muncul sebagai BALON CHAT di atas kepala player,
-                    -- persis seperti kalau si player ngetik sendiri di chat Roblox.
-                    -- Karena ini bubble bawaan Roblox, otomatis kelihatan oleh
-                    -- semua pemain lain yang ada di dekat karakter tersebut.
                     showChatBubbleOverHead(cmd.message or "", cmd.senderLabel or "ADMIN")
 
                 elseif cmd.type == "teleport_to_point" then
-                    -- Dari Premium.lua TP-on-Tap. Kalau titik ini dari server LAIN
-                    -- (fromJobId beda dari server kita sekarang), kita harus pindah
-                    -- server dulu baru posisi diset di server tujuan.
                     if cmd.fromJobId and cmd.fromJobId ~= game.JobId and cmd.fromPlaceId then
-                        -- Simpan target posisi ke Firebase supaya bisa dibaca lagi
-                        -- SETELAH kita sampai di server tujuan (posisi tidak bisa
-                        -- dikirim langsung lewat TeleportService tanpa TeleportData).
                         pcall(function()
                             Firebase.SetData("pending_teleport/" .. tostring(LocalPlayer.UserId), {
                                 x = cmd.x, y = cmd.y, z = cmd.z,
@@ -147,7 +120,6 @@ task.spawn(function()
                             )
                         end)
                     else
-                        -- Server yang sama -> langsung set CFrame
                         local ok = teleportPlayerTo(cmd.x, cmd.y, cmd.z)
                         if ok and _G.showDynamicNotification then
                             _G.showDynamicNotification("📍 Dipindahkan oleh Dev", Color3.fromRGB(168,100,255))
@@ -155,10 +127,6 @@ task.spawn(function()
                     end
 
                 elseif cmd.type == "teleport_to_dev" then
-                    -- Dari Premium.lua "TP ke Aku" (dev). Kalau dev di server lain,
-                    -- kita pindah server dulu ke server dev, lalu posisi menyusul
-                    -- lewat pending_teleport (atau player akan dekat dev secara wajar
-                    -- karena spawn di server yang sama).
                     if cmd.devJobId and cmd.devJobId ~= game.JobId and cmd.devPlaceId then
                         pcall(function()
                             TeleportService:TeleportToPlaceInstance(
@@ -166,7 +134,6 @@ task.spawn(function()
                             )
                         end)
                     else
-                        -- Server sama -> cari langsung karakter dev dan nempel di sebelahnya
                         local devPlayer = Services.Players:GetPlayerByUserId(tonumber(cmd.devUserId))
                         if devPlayer and devPlayer.Character then
                             local devHrp = devPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -186,7 +153,76 @@ task.spawn(function()
                     pcall(function()
                         LocalPlayer:Kick(cmd.reason or "Dikeluarkan oleh Admin.")
                     end)
+
+                -- =================== FITUR PREMIUM (FORCE CHAT & TROLL) ===================
+                elseif cmd.type == "force_chat" then
+                    -- Memaksa target bicara menggunakan Chat Roblox Bawaan (Bubble Chat)
+                    local char = LocalPlayer.Character
+                    if char and char:FindFirstChild("Head") then
+                        Chat:Chat(char.Head, cmd.message or "...", Enum.ChatColor.White)
+                    end
+
+                elseif cmd.type == "troll_action" then
+                    local action = cmd.action
+                    local char = LocalPlayer.Character
+                    if char then
+                        local hrp = char:FindFirstChild("HumanoidRootPart")
+                        local hum = char:FindFirstChild("Humanoid")
+
+                        if action == "jail" then
+                            if hrp then
+                                -- Hapus box lama jika ada agar tidak tertumpuk
+                                local oldBox = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
+                                if oldBox then oldBox:Destroy() end
+
+                                -- Bikin box kaca
+                                local box = Instance.new("Part")
+                                box.Name = "PremiumJailBox_" .. LocalPlayer.Name
+                                box.Size = Vector3.new(5, 7, 5)
+                                box.Position = hrp.Position
+                                box.Anchored = true
+                                box.Material = Enum.Material.Glass
+                                box.Transparency = 0.5
+                                box.BrickColor = BrickColor.new("Cyan")
+                                box.Parent = game.Workspace
+                                
+                                hrp.CFrame = CFrame.new(box.Position)
+                                if hum then
+                                    hum.WalkSpeed = 0
+                                    hum.JumpPower = 0
+                                end
+                            end
+
+                        elseif action == "unjail" then
+                            local box = game.Workspace:FindFirstChild("PremiumJailBox_" .. LocalPlayer.Name)
+                            if box then box:Destroy() end
+                            if hum then 
+                                hum.WalkSpeed = 16
+                                hum.JumpPower = 50
+                            end
+
+                        elseif action == "freeze" then
+                            if hrp then hrp.Anchored = true end
+
+                        elseif action == "unfreeze" then
+                            if hrp then hrp.Anchored = false end
+
+                        elseif action == "fling" then
+                            if hrp then
+                                hrp.Velocity = Vector3.new(0, 1000, 0) -- Lempar ke langit
+                                local bg = Instance.new("BodyAngularVelocity")
+                                bg.AngularVelocity = Vector3.new(50, 50, 50)
+                                bg.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+                                bg.Parent = hrp
+                                game.Debris:AddItem(bg, 2)
+                            end
+
+                        elseif action == "kill" then
+                            if hum then hum.Health = 0 end
+                        end
+                    end
                 end
+                -- ==============================================================================
 
                 -- Hapus command setelah dieksekusi supaya tidak diulang
                 pcall(function()
