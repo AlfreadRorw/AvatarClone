@@ -337,4 +337,39 @@ iconBuilders.Premium = function(p, c)
     end)
 end
 
+iconBuilders.ChatAI = function(p, c)
+    -- Bot head
+    local head = Instance.new("Frame", p)
+    head.Size = UDim2.new(0, 24, 0, 24)
+    head.Position = UDim2.new(0.5, -12, 0.3, 0)
+    head.BackgroundColor3 = c
+    Helpers.corner(head, 8)
+    
+    -- Eyes
+    local leftEye = Instance.new("Frame", p)
+    leftEye.Size = UDim2.new(0, 4, 0, 4)
+    leftEye.Position = UDim2.new(0.5, -8, 0.4, 0)
+    leftEye.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Helpers.corner(leftEye, 100)
+    
+    local rightEye = Instance.new("Frame", p)
+    rightEye.Size = UDim2.new(0, 4, 0, 4)
+    rightEye.Position = UDim2.new(0.5, 4, 0.4, 0)
+    rightEye.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Helpers.corner(rightEye, 100)
+    
+    -- Antenna
+    local antenna = Instance.new("Frame", p)
+    antenna.Size = UDim2.new(0, 2, 0, 8)
+    antenna.Position = UDim2.new(0.5, -1, 0.2, -4)
+    antenna.BackgroundColor3 = c
+    Helpers.corner(antenna, 1)
+    
+    local antennaDot = Instance.new("Frame", p)
+    antennaDot.Size = UDim2.new(0, 4, 0, 4)
+    antennaDot.Position = UDim2.new(0.5, -2, 0.15, -6)
+    antennaDot.BackgroundColor3 = c
+    Helpers.corner(antennaDot, 100)
+end
+
 return iconBuilders

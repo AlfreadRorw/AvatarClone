@@ -174,6 +174,7 @@ buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner",
 buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
 buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
 buildAppIcon("Premium", 18, appGrid, function() _G.openApp("Premium", _G.openPremiumApp) end)
+buildAppIcon("ChatAI", 19, appGrid, function() _G.openApp("Chat AI", _G.openChatAIApp) end)
 
 
 return {
