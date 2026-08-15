@@ -599,8 +599,5 @@ function _G.openAlfreadAIApp()
     renderAllHistory(false)
 end
 
-<<<<<<< HEAD
 print("[Alfread AI] Loaded! Siap menjawab pertanyaan seputar AvatarClone.")
-=======
 print("[Alfread AI] Loaded! Liquid Glass UI, instant text render.")
->>>>>>> eb16fad (update)
