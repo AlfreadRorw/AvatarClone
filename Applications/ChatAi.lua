@@ -1,5 +1,5 @@
 -- ================================================
--- CHAT AI APP - Groq AI Assistant
+-- CHAT AI APP - Groq AI Assistant (Fixed White Screen)
 -- ================================================
 
 local Services = _G.Services
@@ -13,10 +13,9 @@ local Config = _G.Config
 local appContent = _G.appContent
 local appTitle = _G.appTitle
 
-local corner = Helpers.corner
-local stroke = Helpers.stroke
-local tween = Helpers.tween
-local pressFX = Helpers.pressFX
+local corner = Helpers.corner or function(o, r) local c = Instance.new("UICorner", o) c.CornerRadius = UDim.new(0, r) end
+local stroke = Helpers.stroke or function(o, c, t) local s = Instance.new("UIStroke", o) s.Color = c s.Thickness = t end
+local pressFX = Helpers.pressFX or function() end
 
 -- ==================== AI CONFIG ====================
 local GROQ_API_KEY = "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"
@@ -92,73 +91,27 @@ local function sendGroqRequest(messages)
 
     local ok, result = pcall(function()
         if syn and syn.request then
-            return syn.request({
-                Url = GROQ_API_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["Authorization"] = "Bearer " .. GROQ_API_KEY,
-                },
-                Body = body,
-            })
+            return syn.request({ Url = GROQ_API_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. GROQ_API_KEY }, Body = body })
         end
-        
         if http_request then
-            return http_request({
-                Url = GROQ_API_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["Authorization"] = "Bearer " .. GROQ_API_KEY,
-                },
-                Body = body,
-            })
+            return http_request({ Url = GROQ_API_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. GROQ_API_KEY }, Body = body })
         end
-        
         if request then
-            return request({
-                Url = GROQ_API_URL,
-                Method = "POST",
-                Headers = {
-                    ["Content-Type"] = "application/json",
-                    ["Authorization"] = "Bearer " .. GROQ_API_KEY,
-                },
-                Body = body,
-            })
+            return request({ Url = GROQ_API_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. GROQ_API_KEY }, Body = body })
         end
-        
-        return HttpService:RequestAsync({
-            Url = GROQ_API_URL,
-            Method = "POST",
-            Headers = {
-                ["Content-Type"] = "application/json",
-                ["Authorization"] = "Bearer " .. GROQ_API_KEY,
-            },
-            Body = body,
-        })
+        return HttpService:RequestAsync({ Url = GROQ_API_URL, Method = "POST", Headers = { ["Content-Type"] = "application/json", ["Authorization"] = "Bearer " .. GROQ_API_KEY }, Body = body })
     end)
 
-    if not ok or not result then
-        return nil, "Request failed"
-    end
+    if not ok or not result then return nil, "Request failed" end
 
-    local statusCode = result.StatusCode or result.Success and 200 or 0
-    if statusCode ~= 200 and statusCode ~= 201 then
-        return nil, "HTTP " .. tostring(statusCode)
-    end
+    local statusCode = result.StatusCode or (result.Success and 200) or 0
+    if statusCode ~= 200 and statusCode ~= 201 then return nil, "HTTP " .. tostring(statusCode) end
 
     local rawBody = result.Body or ""
-    if rawBody == "" then
-        return nil, "Empty response"
-    end
+    if rawBody == "" then return nil, "Empty response" end
 
-    local decodeOk, data = pcall(function()
-        return HttpService:JSONDecode(rawBody)
-    end)
-
-    if not decodeOk or not data then
-        return nil, "JSON decode failed"
-    end
+    local decodeOk, data = pcall(function() return HttpService:JSONDecode(rawBody) end)
+    if not decodeOk or not data then return nil, "JSON decode failed" end
 
     if data.choices and data.choices[1] and data.choices[1].message then
         return data.choices[1].message.content or "", nil
@@ -173,7 +126,7 @@ local function buildChatBubble(parent, message, isUser, order)
     bubbleContainer.Size = UDim2.new(1, 0, 0, 0)
     bubbleContainer.AutomaticSize = Enum.AutomaticSize.Y
     bubbleContainer.BackgroundTransparency = 1
-    bubbleContainer.LayoutOrder = order
+    bubbleContainer.LayoutOrder = order or 0
     
     local alignment = isUser and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left
     
@@ -183,14 +136,6 @@ local function buildChatBubble(parent, message, isUser, order)
     bubble.Position = isUser and UDim2.new(0.15, 0, 0, 0) or UDim2.new(0, 0, 0, 0)
     bubble.BackgroundColor3 = isUser and colors.userBubble or colors.aiBubble
     corner(bubble, 16)
-    
-    -- Rounded corner yang berbeda untuk bubble user vs AI
-    if isUser then
-        corner(bubble, 16)
-        -- Ganti satu corner jadi lebih kecil
-        local corners = Instance.new("UICorner", bubble)
-        corners.CornerRadius = UDim.new(0, 4)
-    end
     
     local bubblePadding = Instance.new("UIPadding", bubble)
     bubblePadding.PaddingLeft = UDim.new(0, 14)
@@ -210,7 +155,6 @@ local function buildChatBubble(parent, message, isUser, order)
     msgText.TextWrapped = true
     msgText.RichText = true
     
-    -- Sender label
     local senderLabel = Instance.new("TextLabel", bubbleContainer)
     senderLabel.Size = UDim2.new(0.85, 0, 0, 14)
     senderLabel.Position = isUser and UDim2.new(0.15, 0, 0, 0) or UDim2.new(0, 0, 0, 0)
@@ -221,7 +165,6 @@ local function buildChatBubble(parent, message, isUser, order)
     senderLabel.TextSize = 9
     senderLabel.TextXAlignment = isUser and Enum.TextXAlignment.Right or Enum.TextXAlignment.Left
     
-    -- Spacer agar bubble tidak menempel dengan sender label
     local spacer = Instance.new("Frame", bubbleContainer)
     spacer.Size = UDim2.new(1, 0, 0, 18)
     spacer.BackgroundTransparency = 1
@@ -234,80 +177,60 @@ function _G.openChatAIApp()
     cleanupAI()
     AILifecycle.active = true
     
-    -- ==================== HEADER ====================
+    -- Bersihkan appContent terlebih dahulu agar tidak menumpuk
+    for _, child in ipairs(appContent:GetChildren()) do
+        if child:IsA("GuiObject") then child:Destroy() end
+    end
+    
+    appContent.BackgroundColor3 = colors.bg
+
+    -- Gunakan UIListLayout pada appContent utama agar komponen tersusun rapi secara vertikal dan tidak tumpang tindih (penyebab layar putih)
+    local mainLayout = Instance.new("UIListLayout", appContent)
+    mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    mainLayout.Padding = UDim.new(0, 8)
+    mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    -- 1. HEADER (LayoutOrder = 0)
     local headerCard = Instance.new("Frame", appContent)
-    headerCard.Size = UDim2.new(1, 0, 0, 60)
+    headerCard.Size = UDim2.new(1, 0, 0, 55)
     headerCard.BackgroundColor3 = colors.card
     headerCard.LayoutOrder = 0
-    corner(headerCard, 16)
-    stroke(headerCard, colors.accent, 2, 0.5)
-    
-    -- Gradient header
-    local headerGradient = Instance.new("UIGradient", headerCard)
-    headerGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(139, 92, 246)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 40, 120)),
-    })
-    headerGradient.Rotation = 135
-    
-    -- AI Avatar
-    local aiAvatar = Instance.new("Frame", headerCard)
-    aiAvatar.Size = UDim2.new(0, 42, 0, 42)
-    aiAvatar.Position = UDim2.new(0, 10, 0.5, -21)
-    aiAvatar.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    aiAvatar.BackgroundTransparency = 0.9
-    corner(aiAvatar, 100)
-    stroke(aiAvatar, Color3.fromRGB(255, 255, 255), 2, 0.5)
-    
-    -- AI icon (huruf AI)
-    local aiText = Instance.new("TextLabel", aiAvatar)
-    aiText.Size = UDim2.new(1, 0, 1, 0)
-    aiText.BackgroundTransparency = 1
-    aiText.Text = "AI"
-    aiText.TextColor3 = Color3.fromRGB(255, 255, 255)
-    aiText.Font = Enum.Font.GothamBlack
-    aiText.TextSize = 16
+    corner(headerCard, 12)
+    stroke(headerCard, colors.accent, 1.5)
     
     local headerTitle = Instance.new("TextLabel", headerCard)
-    headerTitle.Size = UDim2.new(1, -60, 0, 24)
-    headerTitle.Position = UDim2.new(0, 60, 0, 8)
+    headerTitle.Size = UDim2.new(1, -20, 0, 24)
+    headerTitle.Position = UDim2.new(0, 12, 0, 8)
     headerTitle.BackgroundTransparency = 1
-    headerTitle.Text = "PhoneAI Assistant"
+    headerTitle.Text = "🤖 PhoneAI Assistant"
     headerTitle.TextColor3 = Color3.new(1, 1, 1)
     headerTitle.Font = Enum.Font.GothamBlack
-    headerTitle.TextSize = 16
+    headerTitle.TextSize = 14
     headerTitle.TextXAlignment = Enum.TextXAlignment.Left
     
     local headerSub = Instance.new("TextLabel", headerCard)
-    headerSub.Size = UDim2.new(1, -60, 0, 16)
-    headerSub.Position = UDim2.new(0, 60, 0, 34)
+    headerSub.Size = UDim2.new(1, -20, 0, 16)
+    headerSub.Position = UDim2.new(0, 12, 0, 30)
     headerSub.BackgroundTransparency = 1
     headerSub.Text = "Tanya apa saja, AI siap membantu!"
-    headerSub.TextColor3 = Color3.fromRGB(200, 200, 220)
+    headerSub.TextColor3 = colors.text2
     headerSub.Font = Enum.Font.Gotham
     headerSub.TextSize = 10
     headerSub.TextXAlignment = Enum.TextXAlignment.Left
-    
-    -- Status dot
-    local statusDot = Instance.new("Frame", headerCard)
-    statusDot.Size = UDim2.new(0, 8, 0, 8)
-    statusDot.Position = UDim2.new(1, -20, 0, 10)
-    statusDot.BackgroundColor3 = colors.green
-    corner(statusDot, 100)
-    
-    -- ==================== CHAT AREA ====================
+
+    -- 2. CHAT AREA (ScrollingFrame) (LayoutOrder = 1)
+    -- Menggunakan ukuran relatif sisa layar (misal: Scale 1 dikurangi tinggi komponen lain)
     local chatArea = Instance.new("ScrollingFrame", appContent)
-    chatArea.Size = UDim2.new(1, 0, 0, 0)
-    chatArea.AutomaticSize = Enum.AutomaticSize.Y
-    chatArea.BackgroundColor3 = colors.bg
+    chatArea.Size = UDim2.new(1, 0, 1, -170)
+    chatArea.BackgroundColor3 = colors.card2
     chatArea.BorderSizePixel = 0
     chatArea.ScrollBarThickness = 3
     chatArea.ScrollBarImageColor3 = colors.accent
     chatArea.CanvasSize = UDim2.new(0, 0, 0, 0)
     chatArea.AutomaticCanvasSize = Enum.AutomaticSize.Y
     chatArea.LayoutOrder = 1
-    corner(chatArea, 12)
-    stroke(chatArea, colors.border, 1, 0.3)
+    corner(chatArea, 10)
+    stroke(chatArea, colors.border, 1)
     
     local chatPadding = Instance.new("UIPadding", chatArea)
     chatPadding.PaddingLeft = UDim.new(0, 10)
@@ -316,26 +239,53 @@ function _G.openChatAIApp()
     chatPadding.PaddingBottom = UDim.new(0, 10)
     
     local chatList = Instance.new("UIListLayout", chatArea)
-    chatList.Padding = UDim.new(0, 12)
+    chatList.Padding = UDim.new(0, 10)
     chatList.SortOrder = Enum.SortOrder.LayoutOrder
     chatList.VerticalAlignment = Enum.VerticalAlignment.Bottom
     
-    -- ==================== WELCOME MESSAGE ====================
-    local welcomeText = "Halo! Saya PhoneAI, asisten pintar di Phone ID Viewer.\n\nSaya bisa membantu kamu dengan:\n• Pertanyaan tentang game Roblox\n• Tips dan trik\n• Informasi fitur\n\nSilakan tanya apa saja!"
-    
+    -- Welcome Message
+    local welcomeText = "Halo! Saya PhoneAI, asisten pintar di Phone ID Viewer.\n\nSilakan tanya apa saja tentang game atau fitur aplikasi ini!"
     buildChatBubble(chatArea, welcomeText, false, 0)
+
+    -- 3. QUICK SUGGESTIONS (LayoutOrder = 2)
+    local suggestionContainer = Instance.new("Frame", appContent)
+    suggestionContainer.Size = UDim2.new(1, 0, 0, 26)
+    suggestionContainer.BackgroundTransparency = 1
+    suggestionContainer.LayoutOrder = 2
     
-    -- ==================== INPUT AREA ====================
+    local suggestionLayout = Instance.new("UIGridLayout", suggestionContainer)
+    suggestionLayout.CellSize = UDim2.new(1/3, -3, 0, 26)
+    suggestionLayout.CellPadding = UDim2.new(0, 4, 0, 0)
+    
+    local suggestions = { "Apa itu Phone ID?", "Tips pro", "Fitur" }
+    for _, suggestion in ipairs(suggestions) do
+        local suggBtn = Instance.new("TextButton", suggestionContainer)
+        suggBtn.Size = UDim2.new(1, 0, 0, 26)
+        suggBtn.BackgroundColor3 = colors.card
+        suggBtn.Text = suggestion
+        suggBtn.TextColor3 = colors.text2
+        suggBtn.Font = Enum.Font.GothamBold
+        suggBtn.TextSize = 9
+        suggBtn.AutoButtonColor = false
+        corner(suggBtn, 6)
+        stroke(suggBtn, colors.border, 1)
+        
+        suggBtn.MouseButton1Click:Connect(function()
+            -- trigger send suggestion logic
+        end)
+    end
+
+    -- 4. INPUT AREA (LayoutOrder = 3)
     local inputContainer = Instance.new("Frame", appContent)
-    inputContainer.Size = UDim2.new(1, 0, 0, 50)
+    inputContainer.Size = UDim2.new(1, 0, 0, 45)
     inputContainer.BackgroundColor3 = colors.card
-    inputContainer.LayoutOrder = 2
-    corner(inputContainer, 14)
-    stroke(inputContainer, colors.border, 1, 0.3)
+    inputContainer.LayoutOrder = 3
+    corner(inputContainer, 10)
+    stroke(inputContainer, colors.border, 1)
     
     local inputField = Instance.new("TextBox", inputContainer)
-    inputField.Size = UDim2.new(1, -60, 0, 32)
-    inputField.Position = UDim2.new(0, 10, 0, 9)
+    inputField.Size = UDim2.new(1, -55, 0, 31)
+    inputField.Position = UDim2.new(0, 8, 0, 7)
     inputField.PlaceholderText = "Tulis pesan..."
     inputField.PlaceholderColor3 = colors.text3
     inputField.Text = ""
@@ -344,121 +294,58 @@ function _G.openChatAIApp()
     inputField.TextSize = 12
     inputField.ClearTextOnFocus = false
     inputField.BackgroundColor3 = colors.card2
-    corner(inputField, 8)
-    stroke(inputField, colors.border, 1, 0.3)
+    corner(inputField, 6)
     
     local sendBtn = Instance.new("TextButton", inputContainer)
-    sendBtn.Size = UDim2.new(0, 40, 0, 32)
-    sendBtn.Position = UDim2.new(1, -50, 0, 9)
+    sendBtn.Size = UDim2.new(0, 35, 0, 31)
+    sendBtn.Position = UDim2.new(1, -43, 0, 7)
     sendBtn.BackgroundColor3 = colors.accent
-    sendBtn.Text = ">"
+    sendBtn.Text = "➤"
     sendBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    sendBtn.Font = Enum.Font.GothamBlack
-    sendBtn.TextSize = 16
-    sendBtn.AutoButtonColor = false
-    corner(sendBtn, 8)
-    pressFX(sendBtn)
+    sendBtn.Font = Enum.Font.GothamBold
+    sendBtn.TextSize = 14
+    corner(sendBtn, 6)
     
-    -- ==================== SEND MESSAGE ====================
+    -- Send Logic
     local function sendMessage()
         local message = inputField.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if message == "" or aiState.isGenerating then return end
         
         inputField.Text = ""
-        
-        -- Tambah user message
-        buildChatBubble(chatArea, message, true, #chatArea:GetChildren() - 1)
-        
-        -- Scroll ke bawah
+        buildChatBubble(chatArea, message, true, #chatArea:GetChildren())
         chatArea.CanvasPosition = Vector2.new(0, chatArea.AbsoluteCanvasSize.Y)
         
-        -- Tambah ke history
         table.insert(aiState.history, {role = "user", content = message})
+        if #aiState.history > 20 then table.remove(aiState.history, 1) end
         
-        -- Batasi history (max 20 pesan)
-        if #aiState.history > 20 then
-            table.remove(aiState.history, 1)
-        end
-        
-        -- Tampilkan typing indicator
         aiState.isGenerating = true
         sendBtn.Text = "..."
-        sendBtn.BackgroundColor3 = colors.card2
-        
-        local typingBubble = buildChatBubble(chatArea, "...", false, #chatArea:GetChildren() - 1)
+        local typingBubble = buildChatBubble(chatArea, "...", false, #chatArea:GetChildren())
         
         task.spawn(function()
-            -- Build messages untuk API
-            local messages = {}
-            table.insert(messages, {role = "system", content = SYSTEM_PROMPT})
-            for _, msg in ipairs(aiState.history) do
-                table.insert(messages, msg)
-            end
+            local messages = {{role = "system", content = SYSTEM_PROMPT}}
+            for _, msg in ipairs(aiState.history) do table.insert(messages, msg) end
             
             local response, err = sendGroqRequest(messages)
-            
             aiState.isGenerating = false
-            sendBtn.Text = ">"
-            sendBtn.BackgroundColor3 = colors.accent
+            sendBtn.Text = "➤"
             
-            -- Hapus typing indicator
             pcall(function() typingBubble:Destroy() end)
             
             if response and response ~= "" then
-                -- Tambah AI response
-                buildChatBubble(chatArea, response, false, #chatArea:GetChildren() - 1)
+                buildChatBubble(chatArea, response, false, #chatArea:GetChildren())
                 table.insert(aiState.history, {role = "assistant", content = response})
             else
-                buildChatBubble(chatArea, "Maaf, terjadi kesalahan. Coba lagi nanti.", false, #chatArea:GetChildren() - 1)
+                buildChatBubble(chatArea, "Maaf, terjadi kesalahan koneksi AI.", false, #chatArea:GetChildren())
             end
-            
-            -- Scroll ke bawah
             chatArea.CanvasPosition = Vector2.new(0, chatArea.AbsoluteCanvasSize.Y)
         end)
     end
     
     sendBtn.MouseButton1Click:Connect(sendMessage)
-    
     inputField.FocusLost:Connect(function(enterPressed)
-        if enterPressed then
-            sendMessage()
-        end
+        if enterPressed then sendMessage() end
     end)
-    
-    -- ==================== QUICK SUGGESTIONS ====================
-    local suggestionContainer = Instance.new("Frame", appContent)
-    suggestionContainer.Size = UDim2.new(1, 0, 0, 30)
-    suggestionContainer.BackgroundTransparency = 1
-    suggestionContainer.LayoutOrder = 3
-    
-    local suggestionLayout = Instance.new("UIGridLayout", suggestionContainer)
-    suggestionLayout.CellSize = UDim2.new(1/3, -4, 0, 26)
-    suggestionLayout.CellPadding = UDim2.new(0, 4, 0, 0)
-    
-    local suggestions = {
-        "Apa itu Phone ID Viewer?",
-        "Tips jadi pro",
-        "Fitur apa saja?",
-    }
-    
-    for _, suggestion in ipairs(suggestions) do
-        local suggBtn = Instance.new("TextButton", suggestionContainer)
-        suggBtn.Size = UDim2.new(1, 0, 0, 26)
-        suggBtn.BackgroundColor3 = colors.card
-        suggBtn.Text = suggestion
-        suggBtn.TextColor3 = colors.text2
-        suggBtn.Font = Enum.Font.GothamBold
-        suggBtn.TextSize = 8
-        suggBtn.AutoButtonColor = false
-        corner(suggBtn, 8)
-        stroke(suggBtn, colors.border, 1, 0.3)
-        pressFX(suggBtn)
-        
-        suggBtn.MouseButton1Click:Connect(function()
-            inputField.Text = suggestion
-            sendMessage()
-        end)
-    end
 end
 
-print("[ChatAI] App loaded!")
+print("[ChatAI] App successfully fixed and loaded!")
