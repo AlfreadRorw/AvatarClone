@@ -19,7 +19,7 @@ local pressFX = Helpers.pressFX
 
 -- ==================== KONFIGURASI GROQ ====================
 -- GANTI dengan API key Groq milik kamu sendiri (jangan share/commit ke publik).
-local GROQ_API_KEY = "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"
+local GROQ_API_KEY = "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"
 local GROQ_MODEL   = "llama-3.3-70b-versatile"
 local GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions"
 
@@ -501,7 +501,9 @@ function _G.openAlfreadAIApp()
     clearBtn.MouseButton1Click:Connect(function()
         chatHistory = {}
         renderAllHistory()
-        _G.showDynamicNotification and _G.showDynamicNotification("Riwayat chat dihapus", C.accent2)
+        if _G.showDynamicNotification then
+            _G.showDynamicNotification("Riwayat chat dihapus", C.accent2)
+        end
     end)
 
     renderAllHistory()
