@@ -337,7 +337,7 @@ iconBuilders.Premium = function(p, c)
     end)
 end
 
-iconBuilders.ChatAI = function(p, c)
+iconBuilders.AlfreadAi = function(p, c)
     -- Bot head
     local head = Instance.new("Frame", p)
     head.Size = UDim2.new(0, 24, 0, 24)

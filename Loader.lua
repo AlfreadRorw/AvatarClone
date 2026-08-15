@@ -108,7 +108,7 @@ local AppList = {
     {path = "Applications/Command.lua", name = "Command"},
     {path = "Applications/Settings.lua", name = "Settings"},
     {path = "Applications/Premium.lua", name = "Premium"},
-    {path = "Applications/ChatAI.lua", name = "ChatAI"},
+    {path = "Applications/AlfreadAi.lua", name = "AlfreadAi"},
     
 }
 
