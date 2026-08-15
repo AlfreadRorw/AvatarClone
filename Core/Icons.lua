@@ -337,39 +337,26 @@ iconBuilders.Premium = function(p, c)
     end)
 end
 
-iconBuilders.AlfreadAi = function(p, c)
-    -- Bot head
-    local head = Instance.new("Frame", p)
-    head.Size = UDim2.new(0, 24, 0, 24)
-    head.Position = UDim2.new(0.5, -12, 0.3, 0)
-    head.BackgroundColor3 = c
-    Helpers.corner(head, 8)
-    
-    -- Eyes
-    local leftEye = Instance.new("Frame", p)
-    leftEye.Size = UDim2.new(0, 4, 0, 4)
-    leftEye.Position = UDim2.new(0.5, -8, 0.4, 0)
-    leftEye.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    Helpers.corner(leftEye, 100)
-    
-    local rightEye = Instance.new("Frame", p)
-    rightEye.Size = UDim2.new(0, 4, 0, 4)
-    rightEye.Position = UDim2.new(0.5, 4, 0.4, 0)
-    rightEye.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    Helpers.corner(rightEye, 100)
-    
-    -- Antenna
-    local antenna = Instance.new("Frame", p)
-    antenna.Size = UDim2.new(0, 2, 0, 8)
-    antenna.Position = UDim2.new(0.5, -1, 0.2, -4)
-    antenna.BackgroundColor3 = c
-    Helpers.corner(antenna, 1)
-    
-    local antennaDot = Instance.new("Frame", p)
-    antennaDot.Size = UDim2.new(0, 4, 0, 4)
-    antennaDot.Position = UDim2.new(0.5, -2, 0.15, -6)
-    antennaDot.BackgroundColor3 = c
-    Helpers.corner(antennaDot, 100)
+
+iconBuilders.AlfreadAI = function(p, c)
+    local bg = Instance.new("Frame", p)
+    bg.Size = UDim2.new(0, 26, 0, 26)
+    bg.Position = UDim2.new(0.5, -13, 0.28, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(130, 120, 255)
+    Helpers.corner(bg, 100)
+
+    local grad = Instance.new("UIGradient", bg)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(130, 120, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 200, 255)),
+    })
+    grad.Rotation = 45
+
+    local sparkle = Instance.new("TextLabel", bg)
+    sparkle.Size = UDim2.new(1, 0, 1, 0)
+    sparkle.BackgroundTransparency = 1
+    sparkle.Text = "✨"
+    sparkle.TextSize = 13
 end
 
 return iconBuilders
