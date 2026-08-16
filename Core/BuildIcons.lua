@@ -168,7 +168,7 @@ buildAppIcon("Teleport", 8, appGrid, function() _G.openApp("Save & Teleport", _G
 buildAppIcon("Size", 9, appGrid, function() _G.openApp("Size", _G.openSizeApp) end)
 buildAppIcon("Volume", 10, appGrid, function() _G.openApp("Volume", _G.openVolumeApp) end)
 buildAppIcon("Friends", 11, appGrid, function() _G.openApp("Friends", _G.openFriendsApp) end)
-buildAppIcon("Server", 12, appGrid, function() _G.openApp("Server", _G.openServerApp) end)
+buildAppIcon("Server", 12, appGrid, function() _G.openApp("Server", _G.openServerListApp) end)
 buildAppIcon("Bundle", 13, appGrid, function() _G.openApp("Bundle", _G.openBundleApp) end)
 buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner", _G.openServerJoinerApp) end)
 buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
