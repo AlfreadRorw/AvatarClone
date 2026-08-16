@@ -2,6 +2,11 @@
 -- SHADER.LUA — Visual Effects Panel (nama bisa diganti sendiri)
 -- Tiap toggle benar-benar memodifikasi Lighting service Roblox,
 -- efeknya nyata dan reversible (bisa dimatikan lagi kapan saja).
+--
+-- FIX: Atmosphere TIDAK PUNYA properti .Enabled (beda dari BloomEffect/
+-- ColorCorrectionEffect/SunRaysEffect yang punya). Atmosphere cuma
+-- dikendalikan lewat nilai property-nya sendiri (Density, Haze, dll).
+-- "Mematikan" Atmosphere = set Density & Haze ke 0, BUKAN set .Enabled.
 -- ================================================
 
 local Services    = _G.Services
@@ -27,11 +32,6 @@ local C = {
 }
 
 -- ==================== DEFINISI EFEK ====================
--- Tiap efek adalah fungsi yang MENGUBAH Lighting saat ON, dan fungsi
--- untuk MENGEMBALIKAN ke default saat OFF. Instance efek (Bloom dkk)
--- dibuat sekali dan disimpan supaya bisa di-enable/disable berulang
--- tanpa numpuk instance baru tiap toggle.
-
 local originalLighting = {
     Brightness = Lighting.Brightness,
     ColorShift_Bottom = Lighting.ColorShift_Bottom,
@@ -49,14 +49,12 @@ local function resetLightingToDefault()
     end
 end
 
--- Buat/ambil efek instance dari Lighting (dipakai bareng beberapa mode)
 local function getOrCreate(className, name)
     local existing = Lighting:FindFirstChild(name)
     if existing then return existing end
     local inst = Instance.new(className)
     inst.Name = name
     inst.Parent = Lighting
-    inst.Enabled = false
     return inst
 end
 
@@ -65,12 +63,25 @@ local colorCorrection  = getOrCreate("ColorCorrectionEffect", "ShaderColorCorrec
 local atmosphereEffect = getOrCreate("Atmosphere", "ShaderAtmosphere")
 local sunRaysEffect    = getOrCreate("SunRaysEffect", "ShaderSunRays")
 
+-- Hanya set .Enabled untuk instance yang MEMANG PUNYA property itu.
+bloomEffect.Enabled = false
+colorCorrection.Enabled = false
+sunRaysEffect.Enabled = false
+
+-- Atmosphere di-nol-kan lewat nilainya sendiri, bukan .Enabled.
 atmosphereEffect.Density = 0
 atmosphereEffect.Offset = 0
 atmosphereEffect.Color = Color3.fromRGB(255,255,255)
 atmosphereEffect.Decay = Color3.fromRGB(255,255,255)
 atmosphereEffect.Glare = 0
 atmosphereEffect.Haze = 0
+
+-- Helper: "matikan" Atmosphere dengan aman (dipakai di banyak tempat)
+local function disableAtmosphere()
+    atmosphereEffect.Density = 0
+    atmosphereEffect.Glare = 0
+    atmosphereEffect.Haze = 0
+end
 
 local EFFECTS = {
     {
@@ -88,7 +99,6 @@ local EFFECTS = {
             colorCorrection.Saturation = 0.1
             colorCorrection.TintColor = Color3.fromRGB(255, 250, 245)
 
-            atmosphereEffect.Enabled = true
             atmosphereEffect.Density = 0.25
             atmosphereEffect.Glare = 0.3
             atmosphereEffect.Haze = 1.2
@@ -101,11 +111,10 @@ local EFFECTS = {
         label = "Shader Full Max FPS",
         color = Color3.fromRGB(110, 230, 150),
         apply = function()
-            -- Mode performa: matikan semua efek berat supaya FPS maksimal
             bloomEffect.Enabled = false
             colorCorrection.Enabled = false
-            atmosphereEffect.Enabled = false
             sunRaysEffect.Enabled = false
+            disableAtmosphere()
             Lighting.GlobalShadows = false
             Lighting.ExposureCompensation = 0
         end,
@@ -125,7 +134,6 @@ local EFFECTS = {
             colorCorrection.Saturation = -0.05
             colorCorrection.TintColor = Color3.fromRGB(250, 248, 245)
 
-            atmosphereEffect.Enabled = true
             atmosphereEffect.Density = 0.15
             atmosphereEffect.Haze = 0.8
 
@@ -147,7 +155,6 @@ local EFFECTS = {
             colorCorrection.Saturation = 0.25
             colorCorrection.Brightness = 0.05
 
-            atmosphereEffect.Enabled = true
             atmosphereEffect.Density = 0.3
             atmosphereEffect.Glare = 0.4
             atmosphereEffect.Haze = 1.5
@@ -173,9 +180,8 @@ local EFFECTS = {
             colorCorrection.Enabled = true
             colorCorrection.Contrast = 0.25
             colorCorrection.Saturation = -0.15
-            colorCorrection.TintColor = Color3.fromRGB(255, 230, 210) -- teal-orange look
+            colorCorrection.TintColor = Color3.fromRGB(255, 230, 210)
 
-            atmosphereEffect.Enabled = true
             atmosphereEffect.Density = 0.2
             atmosphereEffect.Haze = 1.0
 
@@ -193,7 +199,6 @@ local EFFECTS = {
             colorCorrection.Saturation = -0.2
             colorCorrection.TintColor = Color3.fromRGB(180, 190, 255)
 
-            atmosphereEffect.Enabled = true
             atmosphereEffect.Density = 0.35
             atmosphereEffect.Color = Color3.fromRGB(40, 40, 80)
 
@@ -213,19 +218,19 @@ local EFFECTS = {
             colorCorrection.Brightness = 0.1
 
             bloomEffect.Enabled = false
-            atmosphereEffect.Enabled = false
             sunRaysEffect.Enabled = false
+            disableAtmosphere()
         end,
     },
 }
 
-local activeEffectId = nil -- cuma satu efek aktif dalam satu waktu (masuk akal, gak numpuk)
+local activeEffectId = nil
 
 local function turnOffAll()
     bloomEffect.Enabled = false
     colorCorrection.Enabled = false
-    atmosphereEffect.Enabled = false
     sunRaysEffect.Enabled = false
+    disableAtmosphere()
     resetLightingToDefault()
     activeEffectId = nil
 end
@@ -243,7 +248,7 @@ function _G.openShaderApp()
     hTitle.Size = UDim2.new(1,-16,0,22)
     hTitle.Position = UDim2.new(0,14,0,6)
     hTitle.BackgroundTransparency = 1
-    hTitle.Text = "SHADER" -- <- ganti sesuai nama yang kamu mau
+    hTitle.Text = "SHADER"
     hTitle.TextColor3 = C.accent
     hTitle.Font = Enum.Font.GothamBlack
     hTitle.TextSize = 15
@@ -267,6 +272,8 @@ function _G.openShaderApp()
 
     local listLayout = Instance.new("UIListLayout", listSec)
     listLayout.Padding = UDim.new(0,8)
+
+    if not _G._shaderToggleRefs then _G._shaderToggleRefs = {} end
 
     for i, effect in ipairs(EFFECTS) do
         local row = Instance.new("Frame", listSec)
@@ -292,7 +299,6 @@ function _G.openShaderApp()
         label.TextSize = 11
         label.TextXAlignment = Enum.TextXAlignment.Left
 
-        -- ===== TOGGLE ON/OFF (gaya seperti referensi gambar) =====
         local toggleBg = Instance.new("Frame", row)
         toggleBg.Size = UDim2.new(0,42,0,22)
         toggleBg.Position = UDim2.new(1,-58,0.5,-11)
@@ -336,40 +342,31 @@ function _G.openShaderApp()
         toggleBtn.Text = ""
         toggleBtn.MouseButton1Click:Connect(function()
             if activeEffectId == effect.id then
-                -- Klik lagi efek yang sama = matikan
                 turnOffAll()
                 setToggleVisual(false)
             else
-                -- Matikan visual semua toggle lain dulu (cuma 1 efek aktif)
-                for _, otherRow in ipairs(listSec:GetChildren()) do
-                    if otherRow:IsA("Frame") and otherRow ~= row then
-                        local otherState = otherRow:FindFirstChild("TextLabel")
+                turnOffAll()
+                local ok, err = pcall(effect.apply)
+                if ok then
+                    activeEffectId = effect.id
+                    setToggleVisual(true)
+                    if _G.showDynamicNotification then
+                        _G.showDynamicNotification(effect.label .. " diaktifkan", effect.color)
+                    end
+                else
+                    warn("[Shader] Gagal apply efek " .. effect.label .. ": " .. tostring(err))
+                    if _G.showDynamicNotification then
+                        _G.showDynamicNotification("Gagal aktifkan " .. effect.label, Color3.fromRGB(255,90,100))
                     end
                 end
-                turnOffAll()
-                effect.apply()
-                activeEffectId = effect.id
-                setToggleVisual(true)
-                if _G.showDynamicNotification then
-                    _G.showDynamicNotification(effect.label .. " diaktifkan", effect.color)
-                end
             end
-            -- Refresh semua toggle visual di layar (biar yang lain balik OFF)
             _G.refreshShaderToggles()
         end)
 
-        row:SetAttribute("EffectId", effect.id)
-        row:SetAttribute("SetToggleFn", nil) -- placeholder, referensi lewat closure di bawah
-
-        -- Simpan referensi fungsi biar bisa dipanggil dari refreshShaderToggles
-        if not _G._shaderToggleRefs then _G._shaderToggleRefs = {} end
         _G._shaderToggleRefs[effect.id] = setToggleVisual
-
-        -- Set kondisi awal sesuai status aktif saat ini
         setToggleVisual(activeEffectId == effect.id)
     end
 
-    -- ===== TOMBOL RESET =====
     local resetBtn = Instance.new("TextButton", appContent)
     resetBtn.Size = UDim2.new(1,0,0,36)
     resetBtn.BackgroundColor3 = Color3.fromRGB(255,90,100)
@@ -391,8 +388,6 @@ function _G.openShaderApp()
     end)
 end
 
--- Dipanggil tiap kali toggle berubah, supaya semua row lain otomatis balik OFF
--- secara visual saat user pilih efek baru (karena cuma 1 efek yang aktif).
 function _G.refreshShaderToggles()
     if not _G._shaderToggleRefs then return end
     for id, setFn in pairs(_G._shaderToggleRefs) do
