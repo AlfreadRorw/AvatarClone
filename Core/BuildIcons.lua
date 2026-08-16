@@ -175,6 +175,7 @@ buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.
 buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
 buildAppIcon("Premium", 18, appGrid, function() _G.openApp("Premium", _G.openPremiumApp) end)
 buildAppIcon("AlfreadAI", 19, appGrid, function() _G.openApp("AlfreadAI", _G.openAlfreadAIApp) end)
+buildAppIcon("Shader", 20, appGrid, function() _G.openApp("Shader", _G.openShaderApp) end)
 
 
 return {

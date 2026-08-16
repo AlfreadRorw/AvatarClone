@@ -359,4 +359,27 @@ iconBuilders.AlfreadAI = function(p, c)
     sparkle.TextSize = 13
 end
 
+iconBuilders.Shader = function(p, c)
+    local bg = Instance.new("Frame", p)
+    bg.Size = UDim2.new(0, 26, 0, 26)
+    bg.Position = UDim2.new(0.5, -13, 0.28, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(90, 150, 255)
+    Helpers.corner(bg, 100)
+
+    local grad = Instance.new("UIGradient", bg)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(90, 150, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 130, 255)),
+    })
+    grad.Rotation = 45
+
+    local icon = Instance.new("TextLabel", bg)
+    icon.Size = UDim2.new(1, 0, 1, 0)
+    icon.BackgroundTransparency = 1
+    icon.Text = "◈"
+    icon.TextColor3 = Color3.new(1,1,1)
+    icon.TextSize = 14
+    icon.Font = Enum.Font.GothamBlack
+end
+
 return iconBuilders
