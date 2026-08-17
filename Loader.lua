@@ -102,7 +102,6 @@ local AppList = {
     {path = "Applications/Server.lua", name = "Server"},
     {path = "Applications/Bundle.lua", name = "Bundle"},
     {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
-    {path = "Applications/Server.lua", name = "Server"},
     {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
     {path = "Applications/Messages.lua", name = "Messages"},
     {path = "Applications/Command.lua", name = "Command"},

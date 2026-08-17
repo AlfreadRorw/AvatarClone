@@ -170,12 +170,11 @@ buildAppIcon("Volume", 10, appGrid, function() _G.openApp("Volume", _G.openVolum
 buildAppIcon("Friends", 11, appGrid, function() _G.openApp("Friends", _G.openFriendsApp) end)
 buildAppIcon("Server", 12, appGrid, function() _G.openApp("Server", _G.openServerListApp) end)
 buildAppIcon("Bundle", 13, appGrid, function() _G.openApp("Bundle", _G.openBundleApp) end)
-buildAppIcon("ServerJoiner", 15, appGrid, function() _G.openApp("Server Joiner", _G.openServerJoinerApp) end)
-buildAppIcon("WhoOnline", 16, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
-buildAppIcon("Message", 17, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
-buildAppIcon("Premium", 18, appGrid, function() _G.openApp("Premium", _G.openPremiumApp) end)
-buildAppIcon("AlfreadAI", 19, appGrid, function() _G.openApp("AlfreadAI", _G.openAlfreadAIApp) end)
-buildAppIcon("Shader", 20, appGrid, function() _G.openApp("Shader", _G.openShaderApp) end)
+buildAppIcon("WhoOnline", 14, appGrid, function() _G.openApp("Who's Online", _G.openWhoOnlineApp) end)
+buildAppIcon("Message", 15, appGrid, function() _G.openApp("Messages", _G.openMessageApp) end)
+buildAppIcon("Premium", 16, appGrid, function() _G.openApp("Premium", _G.openPremiumApp) end)
+buildAppIcon("AlfreadAI", 17, appGrid, function() _G.openApp("AlfreadAI", _G.openAlfreadAIApp) end)
+buildAppIcon("Shader", 18, appGrid, function() _G.openApp("Shader", _G.openShaderApp) end)
 
 
 return {

@@ -266,23 +266,6 @@ iconBuilders.Bundle = function(p, c)
 end
 
 -- ================================================================
--- 16. SERVER JOINER — rak + 2 lampu (dibedakan dari Server: cuma 2 titik)
--- ================================================================
-iconBuilders.ServerJoiner = function(p, c)
-    local tile = baseTile(p)
-    glyphRect(tile, 18, 14, 0, 0, 3)
-    for _, i in ipairs({-1, 1}) do
-        local light = Instance.new("Frame", tile)
-        light.Size = UDim2.new(0, 4, 0, 4)
-        light.AnchorPoint = Vector2.new(0.5, 0.5)
-        light.Position = UDim2.new(0.5, i * 5, 0.5, 0)
-        light.BackgroundColor3 = BLACK
-        light.ZIndex = 3
-        Helpers.corner(light, 100)
-    end
-end
-
--- ================================================================
 -- 17. WHO ONLINE — ring + dot status
 -- ================================================================
 iconBuilders.WhoOnline = function(p, c)
