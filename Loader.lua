@@ -109,6 +109,7 @@ local AppList = {
     {path = "Applications/Premium.lua", name = "Premium"},
     {path = "Applications/AlfreadAI.lua", name = "AlfreadAI"},
     {path = "Applications/Shader.lua", name = "Shader"},
+    {path = "Applications/Games.lua", name = "Games"},
     
 }
 

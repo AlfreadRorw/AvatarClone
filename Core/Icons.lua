@@ -375,4 +375,18 @@ iconBuilders.Shader = function(p, c)
     Helpers.stroke(diamond, WHITE, 2, 0)
 end
 
+iconBuilders.Games = function(p, c)
+    local bg = Instance.new("Frame", p)
+    bg.Size = UDim2.new(0, 26, 0, 26)
+    bg.Position = UDim2.new(0.5, -13, 0.28, 0)
+    bg.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Helpers.corner(bg, 8)
+
+    local icon = Instance.new("TextLabel", bg)
+    icon.Size = UDim2.new(1, 0, 1, 0)
+    icon.BackgroundTransparency = 1
+    icon.Text = "🎮"
+    icon.TextSize = 15
+end
+
 return iconBuilders
