@@ -4,6 +4,7 @@
 -- Fix: No frame drop (staggered rendering)
 -- Fix: Tab system (All / Favorites / Search)
 -- Fix: Grid 3 columns card layout
+-- Fix: White screen on reopen (appContent UIListLayout)
 -- ================================================
 
 local Services    = _G.Services
@@ -298,7 +299,6 @@ end
 
 -- ==================== RENDER CARD (GRID 3 KOLOM) ====================
 local function renderEmoteCard(parent, emote, order, isFavorite)
-    -- Kartu berukuran 1/3 lebar baris, tinggi penuh baris
     local card = Instance.new("Frame", parent)
     card.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 kartu per baris dengan jarak 4px
     card.BackgroundColor3 = C.card
@@ -307,21 +307,26 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    -- Gambar emote (atas)
+    -- Gambar emote (atas) dengan fallback aman
     local thumb = Instance.new("ImageLabel", card)
-    thumb.Size = UDim2.new(1, 0, 0, 100)  -- Tinggi gambar tetap 100px
+    thumb.Size = UDim2.new(1, 0, 0, 100)
     thumb.Position = UDim2.new(0, 0, 0, 0)
     thumb.BackgroundColor3 = C.card2
-    thumb.Image = emote.icon or "rbxassetid://0"
-    thumb.ScaleType = Enum.ScaleType.Crop  -- Crop agar memenuhi frame
     thumb.BorderSizePixel = 0
     corner(thumb, 12)
     stroke(thumb, C.border, 1, 0.2)
+    -- Hindari gambar putih: gunakan string kosong jika tidak ada URL valid
+    if emote.icon and emote.icon ~= "" then
+        thumb.Image = emote.icon
+    else
+        thumb.Image = ""  -- Image kosong hanya menampilkan BackgroundColor3
+    end
+    thumb.ScaleType = Enum.ScaleType.Crop
 
     -- Bintang favorit (overlay di pojok kanan atas gambar)
     local favBtn = Instance.new("TextButton", card)
     favBtn.Size = UDim2.new(0, 24, 0, 24)
-    favBtn.Position = UDim2.new(1, -28, 0, 4)  -- Pojok kanan atas
+    favBtn.Position = UDim2.new(1, -28, 0, 4)
     favBtn.BackgroundTransparency = 1
     favBtn.Text = isFavorite and "★" or "☆"
     favBtn.TextColor3 = isFavorite and C.gold or C.text3
@@ -412,7 +417,7 @@ local function renderEmotes()
         if currentTab == "favorites" then
             local isFav = table.find(Favorites, e.id) ~= nil
             if not isFav then
-                -- Lewati jika bukan favorit (gunakan continue dalam Luau)
+                -- Lewati jika bukan favorit
                 goto continue
             end
         elseif currentTab == "search" then
@@ -450,7 +455,7 @@ local function renderEmotes()
         return
     end
 
-    local BATCH_SIZE = 6  -- Sekarang 6 item = 2 baris, biar lebih responsif
+    local BATCH_SIZE = 6  -- 6 item = 2 baris
     local total = #sorted
 
     task.spawn(function()
@@ -463,21 +468,18 @@ local function renderEmotes()
                 local emote = sorted[idx]
                 local isFav = table.find(Favorites, emote.id) ~= nil
 
-                -- Buat baris baru setiap 3 item (indeks relatif)
                 local rowIndex = math.floor((idx - 1) / 3) + 1
                 local posInRow = ((idx - 1) % 3) + 1
 
-                -- Cari atau buat baris yang sesuai
                 local row = resultsContainer:FindFirstChild("Row_" .. rowIndex)
                 if not row then
                     row = Instance.new("Frame", resultsContainer)
                     row.Name = "Row_" .. rowIndex
-                    row.Size = UDim2.new(1, 0, 0, 150)  -- Tinggi baris tetap 150px
+                    row.Size = UDim2.new(1, 0, 0, 150)
                     row.BackgroundTransparency = 1
                     row.LayoutOrder = rowIndex
                     corner(row, 8)
 
-                    -- Layout horizontal untuk 3 kartu
                     local rowLayout = Instance.new("UIListLayout", row)
                     rowLayout.FillDirection = Enum.FillDirection.Horizontal
                     rowLayout.Padding = UDim.new(0, 6)
@@ -503,6 +505,14 @@ function _G.openEmoteApp()
     if appContent then
         appContent:ClearAllChildren()
     end
+
+    -- ===== PERBAIKAN UTAMA: Tambahkan UIListLayout ke appContent =====
+    local mainLayout = Instance.new("UIListLayout", appContent)
+    mainLayout.FillDirection = Enum.FillDirection.Vertical
+    mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    mainLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+    mainLayout.Padding = UDim.new(0, 8)
+    mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
     -- ===== HEADER =====
     local header = Instance.new("Frame", appContent)
@@ -577,7 +587,7 @@ function _G.openEmoteApp()
     local tabBtns = {}
     for i, tab in ipairs(tabs) do
         local btn = Instance.new("TextButton", tabBar)
-        btn.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 tab sama besar
+        btn.Size = UDim2.new(0.333, -4, 1, 0)
         btn.BackgroundColor3 = (currentTab == tab.id) and C.accent or C.card
         btn.Text = tab.label
         btn.TextColor3 = (currentTab == tab.id) and Color3.new(1, 1, 1) or C.text2
