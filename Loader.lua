@@ -1,17 +1,75 @@
 -- ================================================
--- PHONE ID VIEWER - Modular Loader (FIXED + Premium Sub-Apps)
+-- PHONE ID VIEWER - Modular Loader (FINAL - Premium Sub-Apps)
 -- ================================================
+
+-- Duplicate execution guard
+if _G.AvatarCloneLoaded then
+    warn("[PhoneIDViewer] Already loaded. Cleaning up previous instance...")
+    if _G.AvatarCloneCleanup then
+        _G.AvatarCloneCleanup()
+    end
+end
+
+_G.AvatarCloneLoaded = true
+_G.AvatarCloneCleanupTasks = {}
+
+_G.AvatarCloneCleanup = function()
+    for _, cleanup in ipairs(_G.AvatarCloneCleanupTasks or {}) do
+        pcall(cleanup)
+    end
+    _G.AvatarCloneCleanupTasks = {}
+    _G.AvatarCloneLoaded = false
+end
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
 
+local LoadStats = {
+    loaded = 0,
+    failed = 0,
+    skipped = 0,
+    errors = {},
+}
+
 local function Load(path)
-    local ok, result = pcall(function()
-        return loadstring(game:HttpGet(BASE_URL .. path, true))()
-    end)
-    if not ok then
-        warn("[PhoneIDViewer] Failed: " .. path .. " | " .. tostring(result))
+    local function logError(stage, err)
+        local msg = string.format("[PhoneIDViewer][ERROR] Module: %s | Stage: %s | Error: %s", path, stage, tostring(err))
+        warn(msg)
+        table.insert(LoadStats.errors, msg)
+        LoadStats.failed = LoadStats.failed + 1
     end
-    return ok and result or nil
+
+    -- Stage 1: HTTP Download
+    local httpOk, source = pcall(function()
+        return game:HttpGet(BASE_URL .. path, true)
+    end)
+    
+    if not httpOk then
+        logError("http", source)
+        return nil
+    end
+    
+    -- Stage 2: Loadstring
+    local loadOk, loadedFunc = pcall(function()
+        return loadstring(source)
+    end)
+    
+    if not loadOk or not loadedFunc then
+        logError("loadstring", loadedFunc or "Invalid source")
+        return nil
+    end
+    
+    -- Stage 3: Execution
+    local execOk, result = pcall(function()
+        return loadedFunc()
+    end)
+    
+    if not execOk then
+        logError("execute", result)
+        return nil
+    end
+    
+    LoadStats.loaded = LoadStats.loaded + 1
+    return result
 end
 
 -- ==================== SERVICES ====================
@@ -33,25 +91,35 @@ _G.Services = Services
 local LocalPlayer = Services.Players.LocalPlayer
 _G.LocalPlayer = LocalPlayer
 
--- ==================== LOAD CORE MODULES ====================
+-- ==================== LOAD CONFIG ====================
+print("[PhoneIDViewer] Loading Config...")
 local Config = Load("Config.lua")
+
+if not Config then
+    error("[PhoneIDViewer] CRITICAL: Config failed to load. Initialization aborted.")
+end
+
 _G.Config = Config
 
+-- ==================== LOAD CORE MODULES ====================
 local Theme = Load("Core/Theme.lua")
 _G.T = Theme
 
 local Helpers = Load("Core/Helpers.lua")
 _G.Helpers = Helpers
 
+local Assets = Load("Core/Assets.lua")
+_G.Assets = Assets
+
 -- ==================== LOADING NOTIFICATION ====================
 Load("Core/LoadingNotif.lua")
 
--- ==================== LOAD MODULES WITH PROGRESS ====================
--- Hitung langkah: Core (7) + Apps (20) + Permanent Apps (11) + FloatingIcon (1) = 39
+-- ==================== HITUNG TOTAL STEPS ====================
 local coreSteps = 7  -- Storage, Firebase, Phone, Icons, BuildIcons, CommandListener
-local appSteps = 20  -- AppList
+local appSteps = 20  -- AppList (20 apps)
+local iconPremSteps = 1  -- IconPrem/Premium.lua
 local permanentSteps = 11  -- Permanent sub-apps
-local totalSteps = coreSteps + appSteps + permanentSteps + 1  -- +1 FloatingIcon
+local totalSteps = coreSteps + appSteps + iconPremSteps + permanentSteps + 1  -- +1 FloatingIcon
 
 local currentStep = 0
 
@@ -65,6 +133,16 @@ end
 -- Tampilkan loading notification
 if _G.showLoadingNotification then
     _G.showLoadingNotification()
+end
+
+-- ==================== APP REGISTRY ====================
+_G.AppRegistry = {}
+
+local function registerApp(name, opener)
+    _G.AppRegistry[name] = {
+        opener = opener,
+        available = type(opener) == "function",
+    }
 end
 
 -- Load Storage
@@ -87,46 +165,48 @@ updateProgress("Icons")
 local Icons = Load("Core/Icons.lua")
 _G.Icons = Icons
 
--- Load BuildIcons
-updateProgress("Build Icons")
-Load("Core/BuildIcons.lua")
-
 -- Load CommandListener
 updateProgress("Command Listener")
 Load("Core/CommandListener.lua")
 
 -- ==================== LOAD APPLICATIONS ====================
 local AppList = {
-    {path = "Applications/Players.lua", name = "Players"},
-    {path = "Applications/Clone.lua", name = "Clone"},
-    {path = "Applications/Preset.lua", name = "Preset"},
-    {path = "Applications/Favorites.lua", name = "Favorites"},
-    {path = "Applications/Items.lua", name = "Items"},
-    {path = "Applications/Teleport.lua", name = "Teleport"},
-    {path = "Applications/Size.lua", name = "Size"},
-    {path = "Applications/Volume.lua", name = "Volume"},
-    {path = "Applications/Friends.lua", name = "Friends"},
-    {path = "Applications/Server.lua", name = "Server"},
-    {path = "Applications/Bundle.lua", name = "Bundle"},
-    {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
-    {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
-    {path = "Applications/Messages.lua", name = "Messages"},
-    {path = "Applications/Command.lua", name = "Command"},
-    {path = "Applications/Settings.lua", name = "Settings"},
-    {path = "Applications/Premium.lua", name = "Premium"},
-    {path = "Applications/AlfreadAI.lua", name = "AlfreadAI"},
-    {path = "Applications/Shader.lua", name = "Shader"},
-    {path = "Applications/Games.lua", name = "Games"},
+    {path = "Applications/Players.lua", name = "Players", register = "Players"},
+    {path = "Applications/Clone.lua", name = "Clone", register = "Clone"},
+    {path = "Applications/Preset.lua", name = "Preset", register = "Preset"},
+    {path = "Applications/Favorites.lua", name = "Favorites", register = "Favorites"},
+    {path = "Applications/Items.lua", name = "Items", register = "Items"},
+    {path = "Applications/Teleport.lua", name = "Teleport", register = "Teleport"},
+    {path = "Applications/Size.lua", name = "Size", register = "Size"},
+    {path = "Applications/Volume.lua", name = "Volume", register = "Volume"},
+    {path = "Applications/Friends.lua", name = "Friends", register = "Friends"},
+    {path = "Applications/Server.lua", name = "Server", register = "Server"},
+    {path = "Applications/Bundle.lua", name = "Bundle", register = "Bundle"},
+    {path = "Applications/AvatarItems.lua", name = "AvatarItems", register = "AvatarItems"},
+    {path = "Applications/WhoOnline.lua", name = "WhoOnline", register = "WhoOnline"},
+    {path = "Applications/Messages.lua", name = "Messages", register = "Messages"},
+    {path = "Applications/Command.lua", name = "Command", register = "Command"},
+    {path = "Applications/Settings.lua", name = "Settings", register = "Settings"},
+    {path = "Applications/Premium.lua", name = "Premium", register = "Premium"},
+    {path = "Applications/AlfreadAI.lua", name = "AlfreadAI", register = "AlfreadAI"},
+    {path = "Applications/Shader.lua", name = "Shader", register = "Shader"},
+    {path = "Applications/Games.lua", name = "Games", register = "Games"},
+    {path = "Applications/Emote.lua", name = "Emote", register = "Emote"},
 }
 
 for _, app in ipairs(AppList) do
     updateProgress(app.name)
-    Load(app.path)
+    local result = Load(app.path)
+    if result then
+        registerApp(app.register, _G["open" .. app.register .. "App"])
+    end
 end
 
+-- ==================== LOAD PREMIUM ICONS ====================
+updateProgress("Premium Icons")
+Load("Applications/IconPrem/Premium.lua")
+
 -- ==================== LOAD PREMIUM PERMANENT SUB-APPS ====================
--- Ini adalah sub-app yang di-load oleh Premium.lua sebagai loader
--- Semua file di folder Applications/Permanent/
 local PermanentAppList = {
     {path = "Applications/Permanent/Target.lua", name = "Premium/Target"},
     {path = "Applications/Permanent/Chat.lua", name = "Premium/Chat"},
@@ -146,17 +226,35 @@ for _, app in ipairs(PermanentAppList) do
     Load(app.path)
 end
 
--- Load FloatingIcon
+-- ==================== LOAD BUILD ICONS (SETELAH SEMUA APP) ====================
+updateProgress("Build Icons")
+Load("Core/BuildIcons.lua")
+
+-- ==================== LOAD FLOATING ICON ====================
 updateProgress("Floating Icon")
 Load("Core/FloatingIcon.lua")
 
--- Selesai
+-- ==================== FINISH ====================
 if _G.finishLoading then
     _G.finishLoading()
 end
 
-print("[PhoneIDViewer] All modules loaded successfully!")
+-- ==================== FINAL REPORT ====================
+print("[PhoneIDViewer] ============ LOAD REPORT ============")
+print(string.format("[PhoneIDViewer] Loaded: %d | Failed: %d", LoadStats.loaded, LoadStats.failed))
+
+if LoadStats.failed > 0 then
+    print("[PhoneIDViewer] Loaded with errors!")
+    for _, err in ipairs(LoadStats.errors) do
+        warn(err)
+    end
+else
+    print("[PhoneIDViewer] All modules loaded successfully!")
+end
+
 print("[PhoneIDViewer] Phone:", _G.Phone and "OK" or "FAILED")
 print("[PhoneIDViewer] Firebase:", _G.Firebase and "OK" or "FAILED")
 print("[PhoneIDViewer] Storage:", _G.Storage and "OK" or "FAILED")
+print("[PhoneIDViewer] Assets:", _G.Assets and "OK" or "FAILED")
 print("[PhoneIDViewer] Premium Sub-Apps:", #PermanentAppList .. " loaded")
+print("[PhoneIDViewer] =====================================")

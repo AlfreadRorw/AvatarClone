@@ -176,6 +176,7 @@ buildAppIcon("Premium", 16, appGrid, function() _G.openApp("Premium", _G.openPre
 buildAppIcon("AlfreadAI", 17, appGrid, function() _G.openApp("AlfreadAI", _G.openAlfreadAIApp) end)
 buildAppIcon("Shader", 18, appGrid, function() _G.openApp("Shader", _G.openShaderApp) end)
 buildAppIcon("Games", 19, appGrid, function() _G.openApp("Games", _G.openGamesApp) end)
+buildAppIcon("Emote", 20, appGrid, function() _G.openApp("Emote", _G.openEmoteApp) end)
 
 
 return {

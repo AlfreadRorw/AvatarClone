@@ -389,4 +389,48 @@ iconBuilders.Games = function(p, c)
     icon.TextSize = 15
 end
 
+iconBuilders.Emote = function(p, c)
+    -- Tile dasar (kotak gelap rounded)
+    local tile = Instance.new("Frame", p)
+    tile.Size = UDim2.new(0, 30, 0, 30)
+    tile.AnchorPoint = Vector2.new(0.5, 0.5)
+    tile.Position = UDim2.new(0.5, 0, 0.42, 0)
+    tile.BackgroundColor3 = Color3.new(0, 0, 0)
+    tile.ZIndex = 1
+    _G.Helpers.corner(tile, 10)
+    _G.Helpers.stroke(tile, Color3.new(1, 1, 1), 1, 0.75)
+
+    -- Mata (dua lingkaran putih)
+    local function eye(offX, offY)
+        local e = Instance.new("Frame", tile)
+        e.Size = UDim2.new(0, 5, 0, 5)
+        e.AnchorPoint = Vector2.new(0.5, 0.5)
+        e.Position = UDim2.new(0.5, offX, 0.5, offY)
+        e.BackgroundColor3 = Color3.new(1, 1, 1)
+        e.ZIndex = 2
+        _G.Helpers.corner(e, 100)
+        return e
+    end
+    eye(-6, -4)
+    eye(6, -4)
+
+    -- Senyum (lengkungan putih)
+    local smile = Instance.new("Frame", tile)
+    smile.Size = UDim2.new(0, 10, 0, 5)
+    smile.AnchorPoint = Vector2.new(0.5, 0.5)
+    smile.Position = UDim2.new(0.5, 0, 0.5, 3)
+    smile.BackgroundTransparency = 1
+    smile.ZIndex = 2
+    _G.Helpers.corner(smile, 100)
+    _G.Helpers.stroke(smile, Color3.new(1, 1, 1), 2, 0)
+    -- Ubah bentuk menjadi setengah lingkaran bawah
+    -- Dengan clipping agar hanya bagian bawah terlihat
+    local clip = Instance.new("Frame", smile)
+    clip.Size = UDim2.new(1, 0, 0.5, 0)
+    clip.Position = UDim2.new(0, 0, 0.5, 0)
+    clip.BackgroundColor3 = Color3.new(0, 0, 0)  -- warna tile
+    clip.ZIndex = 3
+    -- Tambahkan juga outline di bagian bawah? Sudah cukup.
+end
+
 return iconBuilders
