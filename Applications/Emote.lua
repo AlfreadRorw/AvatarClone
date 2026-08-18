@@ -3,7 +3,7 @@
 -- Fix: Cache emote data, load once, instant display
 -- Fix: No frame drop (staggered rendering)
 -- Fix: Tab system (All / Favorites)
--- Fix: White screen on reopen
+-- Fix: White screen on reopen (SOLVED)
 -- ================================================
 
 local Services    = _G.Services
@@ -42,10 +42,9 @@ local C = {
 }
 
 -- ==================== CACHE GLOBAL ====================
--- Data disimpan di _G supaya tetap ada walau app ditutup/dibuka ulang
 _G.EmoteCache = _G.EmoteCache or {
-    emotes = {},           -- {id, name, price, icon}
-    favorites = {},        -- list of favorite IDs
+    emotes = {},           
+    favorites = {},        
     loaded = false,
     loading = false,
 }
@@ -61,7 +60,7 @@ local currentAnimId = nil
 local isPaused = false
 local loopEnabled = false
 local currentSpeed = 1.0
-local currentTab = "all"  -- "all" | "favorites"
+local currentTab = "all"  
 local searchQuery = ""
 local currentSort = "recentfirst"
 local renderToken = 0
@@ -115,13 +114,12 @@ local function fetchEmotePage(cursor)
     return dok and data or nil
 end
 
--- Ambil emotes (hanya sekali, disimpan di cache)
 local function fetchAllEmotes(maxPages)
     if isLoading or isLoaded then return end
     isLoading = true
     _G.EmoteCache.loading = true
 
-    maxPages = maxPages or 4  -- ~120 emotes, cukup dan cepat
+    maxPages = maxPages or 4 
 
     task.spawn(function()
         local cursor = ""
@@ -134,7 +132,6 @@ local function fetchAllEmotes(maxPages)
 
             for _, item in ipairs(page.data) do
                 if item.id and item.name then
-                    -- Cegah duplikat
                     local exists = false
                     for _, e in ipairs(newEmotes) do
                         if e.id == item.id then exists = true; break end
@@ -157,7 +154,6 @@ local function fetchAllEmotes(maxPages)
             task.wait(0.3)
         end
 
-        -- Tambahkan emotes populer yang mungkin tidak muncul di API
         local popular = {
             {id = 5915773155, name = "Arm Wave"},
             {id = 5915779725, name = "Head Banging"},
@@ -181,7 +177,6 @@ local function fetchAllEmotes(maxPages)
             end
         end
 
-        -- Update cache
         for _, e in ipairs(newEmotes) do
             table.insert(Emotes, e)
         end
@@ -191,9 +186,8 @@ local function fetchAllEmotes(maxPages)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
 
-        -- Render ulang kalau app sedang terbuka
         if appTitle and appTitle.Text == "Emote" then
-            renderEmotes()
+            if _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
         end
 
         if _G.showDynamicNotification then
@@ -269,7 +263,9 @@ local function playEmote(assetId)
             for _, e in ipairs(Emotes) do
                 if e.id == assetId then emoteName = e.name; break end
             end
-            if emoteName == "" then emoteName = "Emote_" .. assetId
+            
+            -- FIX 1: Missing 'end' statement here causing syntax error!
+            if emoteName == "" then emoteName = "Emote_" .. assetId end 
 
             pcall(function()
                 description:AddEmote(emoteName, assetId)
@@ -301,17 +297,16 @@ local function playEmote(assetId)
     end
 end
 
--- ==================== RENDER CARD (dengan staggered render) ====================
+-- ==================== RENDER CARD ====================
 local function renderEmoteCard(parent, emote, order, isFavorite)
     local card = Instance.new("Frame", parent)
     card.Size = UDim2.new(1, 0, 0, 64)
     card.BackgroundColor3 = C.card
     card.LayoutOrder = order
-    card.BackgroundTransparency = 1  -- fade in
+    card.BackgroundTransparency = 1  
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    -- Thumbnail
     local thumb = Instance.new("ImageLabel", card)
     thumb.Size = UDim2.new(0, 44, 0, 44)
     thumb.Position = UDim2.new(0, 10, 0.5, -22)
@@ -321,7 +316,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     corner(thumb, 8)
     stroke(thumb, C.border, 1, 0.2)
 
-    -- Nama
     local nameLbl = Instance.new("TextLabel", card)
     nameLbl.Size = UDim2.new(1, -150, 0, 20)
     nameLbl.Position = UDim2.new(0, 62, 0, 8)
@@ -333,19 +327,17 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     nameLbl.TextXAlignment = Enum.TextXAlignment.Left
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
-    -- Info
-    local infoLbl = Instance.new("TextLabel", card)
-    infoLbl.Size = UDim2.new(1, -150, 0, 14)
-    infoLbl.Position = UDim2.new(0, 62, 0, 28)
-    infoLbl.BackgroundTransparency = 1
+    local infoLblCard = Instance.new("TextLabel", card)
+    infoLblCard.Size = UDim2.new(1, -150, 0, 14)
+    infoLblCard.Position = UDim2.new(0, 62, 0, 28)
+    infoLblCard.BackgroundTransparency = 1
     local priceStr = (emote.price and emote.price > 0) and ("💰 " .. emote.price .. " Robux") or "🆓 Gratis"
-    infoLbl.Text = "ID: " .. emote.id .. "  " .. priceStr
-    infoLbl.TextColor3 = C.text2
-    infoLbl.Font = Enum.Font.Gotham
-    infoLbl.TextSize = 8
-    infoLbl.TextXAlignment = Enum.TextXAlignment.Left
+    infoLblCard.Text = "ID: " .. emote.id .. "  " .. priceStr
+    infoLblCard.TextColor3 = C.text2
+    infoLblCard.Font = Enum.Font.Gotham
+    infoLblCard.TextSize = 8
+    infoLblCard.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- Play button
     local playBtn = Instance.new("TextButton", card)
     playBtn.Size = UDim2.new(0, 48, 0, 28)
     playBtn.Position = UDim2.new(1, -58, 0.5, -14)
@@ -361,7 +353,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
         playEmote(emote.id)
     end)
 
-    -- Favorite button
     local favBtn = Instance.new("TextButton", card)
     favBtn.Size = UDim2.new(0, 28, 0, 28)
     favBtn.Position = UDim2.new(1, -90, 0.5, -14)
@@ -385,15 +376,13 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
             if _G.showDynamicNotification then _G.showDynamicNotification("Ditambahkan ke favorit!", C.gold) end
         end
         saveFavorites()
-        -- Refresh tab favorites
-        if currentTab == "favorites" then
-            renderEmotes()
+        if currentTab == "favorites" and _G.renderEmotesRefresh then
+            _G.renderEmotesRefresh()
         end
     end)
 
-    -- Fade in animation
     task.spawn(function()
-        task.wait(order * 0.02)  -- staggered fade
+        task.wait(order * 0.02)  
         if card.Parent then
             tween(card, {BackgroundTransparency = 0}, 0.15)
         end
@@ -402,12 +391,14 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     return card
 end
 
--- ==================== RENDER EMOTES ====================
+-- ==================== BUKA APP ====================
+local resultsContainer = nil
+local infoLbl = nil
+
 local function renderEmotes()
     local token = renderToken + 1
     renderToken = token
 
-    -- Bersihkan container
     if not resultsContainer then return end
     for _, c in ipairs(resultsContainer:GetChildren()) do
         if c:IsA("Frame") or c:IsA("ImageLabel") then
@@ -417,32 +408,26 @@ local function renderEmotes()
         end
     end
 
-    -- Filter berdasarkan tab dan search
     local filtered = {}
     local q = searchQuery:lower()
 
     for _, e in ipairs(Emotes) do
-        -- Filter tab
         if currentTab == "favorites" then
             local isFav = table.find(Favorites, e.id) ~= nil
             if not isFav then continue end
         end
 
-        -- Filter search
         if q == "" or e.name:lower():find(q, 1, true) then
             table.insert(filtered, e)
         end
     end
 
-    -- Sort
     local sorted = sortEmotes(filtered, currentSort)
 
-    -- Update count
     if infoLbl then
         infoLbl.Text = #sorted .. " emote" .. (#sorted ~= 1 and "s" or "")
     end
 
-    -- Empty state
     if #sorted == 0 then
         local empty = Instance.new("TextLabel", resultsContainer)
         empty.Size = UDim2.new(1, 0, 0, 60)
@@ -456,14 +441,13 @@ local function renderEmotes()
         return
     end
 
-    -- Render dengan stagger (no frame drop)
     local BATCH_SIZE = 5
     local total = #sorted
 
     task.spawn(function()
         local i = 1
         while i <= total do
-            if renderToken ~= token then return end  -- cancel jika render baru
+            if renderToken ~= token then return end 
 
             local batchEnd = math.min(i + BATCH_SIZE - 1, total)
             for idx = i, batchEnd do
@@ -474,22 +458,19 @@ local function renderEmotes()
 
             i = batchEnd + 1
             if i <= total then
-                task.wait()  -- beri jeda 1 frame antar batch
+                task.wait() 
             end
         end
     end)
 end
-
--- ==================== REFRESH ====================
-local function refreshDisplay()
-    renderEmotes()
-end
-
--- ==================== BUKA APP ====================
-local resultsContainer = nil
-local infoLbl = nil
+_G.renderEmotesRefresh = renderEmotes
 
 function _G.openEmoteApp()
+    -- FIX 2: Bersihkan kontainer UI terlebih dahulu agar tidak numpuk dan memutih
+    if appContent then
+        appContent:ClearAllChildren()
+    end
+
     -- ===== HEADER =====
     local header = Instance.new("Frame", appContent)
     header.Size = UDim2.new(1, 0, 0, 44)
@@ -636,7 +617,6 @@ function _G.openEmoteApp()
     cLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     cLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 
-    -- Speed
     local speedLbl = Instance.new("TextLabel", controls)
     speedLbl.Size = UDim2.new(0, 36, 1, 0)
     speedLbl.BackgroundTransparency = 1
@@ -671,7 +651,6 @@ function _G.openEmoteApp()
         end)
     end
 
-    -- Loop
     local loopBtn = Instance.new("TextButton", controls)
     loopBtn.Size = UDim2.new(0, 42, 0, 24)
     loopBtn.BackgroundColor3 = loopEnabled and C.accent or C.card
@@ -689,7 +668,6 @@ function _G.openEmoteApp()
         loopBtn.TextColor3 = loopEnabled and Color3.new(1, 1, 1) or C.text2
     end)
 
-    -- Pause
     local pauseBtn = Instance.new("TextButton", controls)
     pauseBtn.Size = UDim2.new(0, 36, 0, 24)
     pauseBtn.BackgroundColor3 = C.card
@@ -716,7 +694,6 @@ function _G.openEmoteApp()
         end
     end)
 
-    -- Stop
     local stopBtn = Instance.new("TextButton", controls)
     stopBtn.Size = UDim2.new(0, 36, 0, 24)
     stopBtn.BackgroundColor3 = C.red
@@ -738,7 +715,6 @@ function _G.openEmoteApp()
         fetchAllEmotes(4)
     end
 
-    -- Render emotes (dengan delay kecil agar UI siap)
     task.spawn(function()
         task.wait(0.1)
         renderEmotes()
@@ -746,7 +722,6 @@ function _G.openEmoteApp()
         if infoLbl then infoLbl.Text = #Emotes .. " emotes" end
     end)
 
-    -- ===== CLEANUP =====
     return true
 end
 
