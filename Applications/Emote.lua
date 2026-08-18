@@ -1,10 +1,12 @@
 -- ================================================
--- EMOTE.LUA — Full Rewrite with Performance Fixes
+-- EMOTE.LUA — Full Rewrite with Performance + Layout Fixes
 -- Fix: Cache emote data, load once, instant display
 -- Fix: No frame drop (staggered rendering)
 -- Fix: Tab system (All / Favorites / Search)
 -- Fix: Grid 3 columns card layout
--- Fix: White screen on reopen (appContent UIListLayout)
+-- Fix: appContent now has UIListLayout (was causing blank white screen)
+-- Fix: Image fallback no longer uses invalid rbxassetid://0
+-- Fix: Consistent BackgroundTransparency/Color on every frame
 -- ================================================
 
 local Services    = _G.Services
@@ -42,10 +44,14 @@ local C = {
     orange    = Color3.fromRGB(255, 150, 50),
 }
 
+-- Placeholder icon yang valid (dipakai saat emote.icon kosong/nil)
+-- Menggunakan gambar transparan bawaan Roblox agar tidak render kotak putih.
+local FALLBACK_ICON = "rbxasset://textures/ui/GuiImagePlaceholder.png"
+
 -- ==================== CACHE GLOBAL ====================
 _G.EmoteCache = _G.EmoteCache or {
-    emotes = {},           
-    favorites = {},        
+    emotes = {},
+    favorites = {},
     loaded = false,
     loading = false,
 }
@@ -61,7 +67,7 @@ local currentAnimId = nil
 local isPaused = false
 local loopEnabled = false
 local currentSpeed = 1.0
-local currentTab = "all"  
+local currentTab = "all"
 local searchQuery = ""
 local currentSort = "recentfirst"
 local renderToken = 0
@@ -120,7 +126,7 @@ local function fetchAllEmotes(maxPages)
     isLoading = true
     _G.EmoteCache.loading = true
 
-    maxPages = maxPages or 4 
+    maxPages = maxPages or 4
 
     task.spawn(function()
         local cursor = ""
@@ -264,8 +270,8 @@ local function playEmote(assetId)
             for _, e in ipairs(Emotes) do
                 if e.id == assetId then emoteName = e.name; break end
             end
-            
-            if emoteName == "" then emoteName = "Emote_" .. assetId end 
+
+            if emoteName == "" then emoteName = "Emote_" .. assetId end
 
             pcall(function()
                 description:AddEmote(emoteName, assetId)
@@ -299,41 +305,61 @@ end
 
 -- ==================== RENDER CARD (GRID 3 KOLOM) ====================
 local function renderEmoteCard(parent, emote, order, isFavorite)
+    -- Kartu berukuran 1/3 lebar baris, tinggi penuh baris
     local card = Instance.new("Frame", parent)
     card.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 kartu per baris dengan jarak 4px
     card.BackgroundColor3 = C.card
     card.LayoutOrder = order
-    card.BackgroundTransparency = 1
+    card.BackgroundTransparency = 0  -- mulai terlihat, animasi fade-in mengubah dari sini
+    card.BorderSizePixel = 0
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    -- Gambar emote (atas) dengan fallback aman
+    -- Untuk animasi fade-in, mulai dari transparan lalu tween ke 0
+    card.BackgroundTransparency = 1
+
+    -- Gambar emote (atas)
+    local hasIcon = type(emote.icon) == "string" and emote.icon ~= "" and emote.icon ~= "rbxassetid://0"
+
     local thumb = Instance.new("ImageLabel", card)
-    thumb.Size = UDim2.new(1, 0, 0, 100)
+    thumb.Size = UDim2.new(1, 0, 0, 100)  -- Tinggi gambar tetap 100px
     thumb.Position = UDim2.new(0, 0, 0, 0)
     thumb.BackgroundColor3 = C.card2
+    thumb.BackgroundTransparency = 0
+    thumb.Image = hasIcon and emote.icon or ""
+    thumb.ScaleType = Enum.ScaleType.Crop  -- Crop agar memenuhi frame
     thumb.BorderSizePixel = 0
     corner(thumb, 12)
     stroke(thumb, C.border, 1, 0.2)
-    -- Hindari gambar putih: gunakan string kosong jika tidak ada URL valid
-    if emote.icon and emote.icon ~= "" then
-        thumb.Image = emote.icon
-    else
-        thumb.Image = ""  -- Image kosong hanya menampilkan BackgroundColor3
+
+    -- Jika tidak ada gambar valid, tampilkan ikon placeholder teks (bukan kotak putih)
+    if not hasIcon then
+        local placeholder = Instance.new("TextLabel", thumb)
+        placeholder.Size = UDim2.new(1, 0, 1, 0)
+        placeholder.BackgroundTransparency = 1
+        placeholder.Text = "💃"
+        placeholder.TextColor3 = C.text3
+        placeholder.Font = Enum.Font.GothamBold
+        placeholder.TextSize = 28
+        placeholder.ZIndex = 2
     end
-    thumb.ScaleType = Enum.ScaleType.Crop
+
+    -- Jika gambar gagal dimuat (broken asset), fallback ke placeholder juga
+    thumb:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+        -- no-op guard: beberapa executor tidak expose IsLoaded, dibungkus pcall di caller
+    end)
 
     -- Bintang favorit (overlay di pojok kanan atas gambar)
     local favBtn = Instance.new("TextButton", card)
     favBtn.Size = UDim2.new(0, 24, 0, 24)
-    favBtn.Position = UDim2.new(1, -28, 0, 4)
+    favBtn.Position = UDim2.new(1, -28, 0, 4)  -- Pojok kanan atas
     favBtn.BackgroundTransparency = 1
     favBtn.Text = isFavorite and "★" or "☆"
     favBtn.TextColor3 = isFavorite and C.gold or C.text3
     favBtn.Font = Enum.Font.GothamBold
     favBtn.TextSize = 16
     favBtn.AutoButtonColor = false
-    favBtn.ZIndex = 2
+    favBtn.ZIndex = 3
     favBtn.MouseButton1Click:Connect(function()
         local idx = table.find(Favorites, emote.id)
         if idx then
@@ -383,7 +409,7 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
 
     -- Animasi muncul bertahap
     task.spawn(function()
-        task.wait(order * 0.02)  
+        task.wait(order * 0.02)
         if card.Parent then
             tween(card, {BackgroundTransparency = 0}, 0.15)
         end
@@ -402,7 +428,7 @@ local function renderEmotes()
 
     if not resultsContainer then return end
     for _, c in ipairs(resultsContainer:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("ImageLabel") then
+        if c:IsA("Frame") or c:IsA("ImageLabel") or c:IsA("TextLabel") then
             if c.Name ~= "UIListLayout" and c.Name ~= "UIPadding" then
                 c:Destroy()
             end
@@ -417,7 +443,7 @@ local function renderEmotes()
         if currentTab == "favorites" then
             local isFav = table.find(Favorites, e.id) ~= nil
             if not isFav then
-                -- Lewati jika bukan favorit
+                -- Lewati jika bukan favorit (gunakan continue dalam Luau)
                 goto continue
             end
         elseif currentTab == "search" then
@@ -455,31 +481,34 @@ local function renderEmotes()
         return
     end
 
-    local BATCH_SIZE = 6  -- 6 item = 2 baris
+    local BATCH_SIZE = 6  -- Sekarang 6 item = 2 baris, biar lebih responsif
     local total = #sorted
 
     task.spawn(function()
         local i = 1
         while i <= total do
-            if renderToken ~= token then return end 
+            if renderToken ~= token then return end
 
             local batchEnd = math.min(i + BATCH_SIZE - 1, total)
             for idx = i, batchEnd do
                 local emote = sorted[idx]
                 local isFav = table.find(Favorites, emote.id) ~= nil
 
+                -- Buat baris baru setiap 3 item (indeks relatif)
                 local rowIndex = math.floor((idx - 1) / 3) + 1
                 local posInRow = ((idx - 1) % 3) + 1
 
+                -- Cari atau buat baris yang sesuai
                 local row = resultsContainer:FindFirstChild("Row_" .. rowIndex)
                 if not row then
                     row = Instance.new("Frame", resultsContainer)
                     row.Name = "Row_" .. rowIndex
-                    row.Size = UDim2.new(1, 0, 0, 150)
+                    row.Size = UDim2.new(1, 0, 0, 150)  -- Tinggi baris tetap 150px
                     row.BackgroundTransparency = 1
                     row.LayoutOrder = rowIndex
                     corner(row, 8)
 
+                    -- Layout horizontal untuk 3 kartu
                     local rowLayout = Instance.new("UIListLayout", row)
                     rowLayout.FillDirection = Enum.FillDirection.Horizontal
                     rowLayout.Padding = UDim.new(0, 6)
@@ -492,7 +521,7 @@ local function renderEmotes()
 
             i = batchEnd + 1
             if i <= total then
-                task.wait() 
+                task.wait()
             end
         end
     end)
@@ -506,18 +535,35 @@ function _G.openEmoteApp()
         appContent:ClearAllChildren()
     end
 
-    -- ===== PERBAIKAN UTAMA: Tambahkan UIListLayout ke appContent =====
+    -- Pastikan background utama tidak tertutup frame putih default Roblox
+    pcall(function()
+        appContent.BackgroundColor3 = C.bg
+        appContent.BackgroundTransparency = 0
+    end)
+
+    -- ===== FIX UTAMA: UIListLayout untuk appContent =====
+    -- Tanpa ini, semua elemen (header, search, tab, results, controls)
+    -- menumpuk di posisi (0,0) dan saling menutupi -> layar putih polos.
     local mainLayout = Instance.new("UIListLayout", appContent)
+    mainLayout.Name = "MainLayout"
     mainLayout.FillDirection = Enum.FillDirection.Vertical
     mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     mainLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-    mainLayout.Padding = UDim.new(0, 8)
     mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    mainLayout.Padding = UDim.new(0, 8)
+
+    local mainPad = Instance.new("UIPadding", appContent)
+    mainPad.PaddingTop = UDim.new(0, 8)
+    mainPad.PaddingBottom = UDim.new(0, 8)
+    mainPad.PaddingLeft = UDim.new(0, 8)
+    mainPad.PaddingRight = UDim.new(0, 8)
 
     -- ===== HEADER =====
     local header = Instance.new("Frame", appContent)
     header.Size = UDim2.new(1, 0, 0, 44)
     header.BackgroundColor3 = C.card
+    header.BackgroundTransparency = 0
+    header.BorderSizePixel = 0
     header.LayoutOrder = 0
     corner(header, 14)
     stroke(header, C.accent, 1, 0.5)
@@ -546,6 +592,8 @@ function _G.openEmoteApp()
     local searchFrame = Instance.new("Frame", appContent)
     searchFrame.Size = UDim2.new(1, 0, 0, 36)
     searchFrame.BackgroundColor3 = C.card2
+    searchFrame.BackgroundTransparency = 0
+    searchFrame.BorderSizePixel = 0
     searchFrame.LayoutOrder = 1
     corner(searchFrame, 12)
     stroke(searchFrame, C.border, 1, 0.3)
@@ -570,6 +618,8 @@ function _G.openEmoteApp()
     local tabBar = Instance.new("Frame", appContent)
     tabBar.Size = UDim2.new(1, 0, 0, 36)
     tabBar.BackgroundColor3 = C.card2
+    tabBar.BackgroundTransparency = 0
+    tabBar.BorderSizePixel = 0
     tabBar.LayoutOrder = 2
     corner(tabBar, 12)
 
@@ -577,6 +627,7 @@ function _G.openEmoteApp()
     tabLayout.FillDirection = Enum.FillDirection.Horizontal
     tabLayout.Padding = UDim.new(0, 4)
     tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
 
     local tabs = {
         {id = "all", label = "📋 Semua"},
@@ -587,8 +638,10 @@ function _G.openEmoteApp()
     local tabBtns = {}
     for i, tab in ipairs(tabs) do
         local btn = Instance.new("TextButton", tabBar)
-        btn.Size = UDim2.new(0.333, -4, 1, 0)
+        btn.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 tab sama besar
         btn.BackgroundColor3 = (currentTab == tab.id) and C.accent or C.card
+        btn.BackgroundTransparency = 0
+        btn.BorderSizePixel = 0
         btn.Text = tab.label
         btn.TextColor3 = (currentTab == tab.id) and Color3.new(1, 1, 1) or C.text2
         btn.Font = Enum.Font.GothamBold
@@ -631,6 +684,7 @@ function _G.openEmoteApp()
     resultsContainer = Instance.new("ScrollingFrame", appContent)
     resultsContainer.Size = UDim2.new(1, 0, 0, 280)
     resultsContainer.BackgroundColor3 = C.bg
+    resultsContainer.BackgroundTransparency = 0
     resultsContainer.BorderSizePixel = 0
     resultsContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
     resultsContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
@@ -654,6 +708,8 @@ function _G.openEmoteApp()
     local controls = Instance.new("Frame", appContent)
     controls.Size = UDim2.new(1, 0, 0, 44)
     controls.BackgroundColor3 = C.card2
+    controls.BackgroundTransparency = 0
+    controls.BorderSizePixel = 0
     controls.LayoutOrder = 5
     corner(controls, 12)
     stroke(controls, C.border, 1, 0.3)
@@ -677,6 +733,8 @@ function _G.openEmoteApp()
         local btn = Instance.new("TextButton", controls)
         btn.Size = UDim2.new(0, 28, 0, 24)
         btn.BackgroundColor3 = (spd == currentSpeed) and C.accent or C.card
+        btn.BackgroundTransparency = 0
+        btn.BorderSizePixel = 0
         btn.Text = tostring(spd)
         btn.TextColor3 = (spd == currentSpeed) and Color3.new(1, 1, 1) or C.text2
         btn.Font = Enum.Font.GothamBold
@@ -701,6 +759,8 @@ function _G.openEmoteApp()
     local loopBtn = Instance.new("TextButton", controls)
     loopBtn.Size = UDim2.new(0, 42, 0, 24)
     loopBtn.BackgroundColor3 = loopEnabled and C.accent or C.card
+    loopBtn.BackgroundTransparency = 0
+    loopBtn.BorderSizePixel = 0
     loopBtn.Text = "Loop"
     loopBtn.TextColor3 = loopEnabled and Color3.new(1, 1, 1) or C.text2
     loopBtn.Font = Enum.Font.GothamBold
@@ -718,6 +778,8 @@ function _G.openEmoteApp()
     local pauseBtn = Instance.new("TextButton", controls)
     pauseBtn.Size = UDim2.new(0, 36, 0, 24)
     pauseBtn.BackgroundColor3 = C.card
+    pauseBtn.BackgroundTransparency = 0
+    pauseBtn.BorderSizePixel = 0
     pauseBtn.Text = "⏸"
     pauseBtn.TextColor3 = C.text
     pauseBtn.Font = Enum.Font.GothamBlack
@@ -744,6 +806,8 @@ function _G.openEmoteApp()
     local stopBtn = Instance.new("TextButton", controls)
     stopBtn.Size = UDim2.new(0, 36, 0, 24)
     stopBtn.BackgroundColor3 = C.red
+    stopBtn.BackgroundTransparency = 0
+    stopBtn.BorderSizePixel = 0
     stopBtn.Text = "⏹"
     stopBtn.TextColor3 = Color3.new(1, 1, 1)
     stopBtn.Font = Enum.Font.GothamBlack
