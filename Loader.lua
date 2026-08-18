@@ -1,5 +1,5 @@
 -- ================================================
--- PHONE ID VIEWER - Modular Loader (FIXED)
+-- PHONE ID VIEWER - Modular Loader (FIXED + Premium Sub-Apps)
 -- ================================================
 
 local BASE_URL = "https://raw.githubusercontent.com/AlfreadRorw/AvatarClone/main/"
@@ -47,7 +47,12 @@ _G.Helpers = Helpers
 Load("Core/LoadingNotif.lua")
 
 -- ==================== LOAD MODULES WITH PROGRESS ====================
-local totalSteps = 25
+-- Hitung langkah: Core (7) + Apps (20) + Permanent Apps (11) + FloatingIcon (1) = 39
+local coreSteps = 7  -- Storage, Firebase, Phone, Icons, BuildIcons, CommandListener
+local appSteps = 20  -- AppList
+local permanentSteps = 11  -- Permanent sub-apps
+local totalSteps = coreSteps + appSteps + permanentSteps + 1  -- +1 FloatingIcon
+
 local currentStep = 0
 
 local function updateProgress(stepName)
@@ -86,8 +91,10 @@ _G.Icons = Icons
 updateProgress("Build Icons")
 Load("Core/BuildIcons.lua")
 
-
+-- Load CommandListener
+updateProgress("Command Listener")
 Load("Core/CommandListener.lua")
+
 -- ==================== LOAD APPLICATIONS ====================
 local AppList = {
     {path = "Applications/Players.lua", name = "Players"},
@@ -110,10 +117,31 @@ local AppList = {
     {path = "Applications/AlfreadAI.lua", name = "AlfreadAI"},
     {path = "Applications/Shader.lua", name = "Shader"},
     {path = "Applications/Games.lua", name = "Games"},
-    
 }
 
 for _, app in ipairs(AppList) do
+    updateProgress(app.name)
+    Load(app.path)
+end
+
+-- ==================== LOAD PREMIUM PERMANENT SUB-APPS ====================
+-- Ini adalah sub-app yang di-load oleh Premium.lua sebagai loader
+-- Semua file di folder Applications/Permanent/
+local PermanentAppList = {
+    {path = "Applications/Permanent/Target.lua", name = "Premium/Target"},
+    {path = "Applications/Permanent/Chat.lua", name = "Premium/Chat"},
+    {path = "Applications/Permanent/Jail.lua", name = "Premium/Jail"},
+    {path = "Applications/Permanent/Teleport.lua", name = "Premium/Teleport"},
+    {path = "Applications/Permanent/Bling.lua", name = "Premium/Bling"},
+    {path = "Applications/Permanent/Fly.lua", name = "Premium/Fly"},
+    {path = "Applications/Permanent/Movement.lua", name = "Premium/Movement"},
+    {path = "Applications/Permanent/Jumpscare.lua", name = "Premium/Jumpscare"},
+    {path = "Applications/Permanent/Aura.lua", name = "Premium/Aura"},
+    {path = "Applications/Permanent/Sky.lua", name = "Premium/Sky"},
+    {path = "Applications/Permanent/Dex.lua", name = "Premium/Dex"},
+}
+
+for _, app in ipairs(PermanentAppList) do
     updateProgress(app.name)
     Load(app.path)
 end
@@ -131,3 +159,4 @@ print("[PhoneIDViewer] All modules loaded successfully!")
 print("[PhoneIDViewer] Phone:", _G.Phone and "OK" or "FAILED")
 print("[PhoneIDViewer] Firebase:", _G.Firebase and "OK" or "FAILED")
 print("[PhoneIDViewer] Storage:", _G.Storage and "OK" or "FAILED")
+print("[PhoneIDViewer] Premium Sub-Apps:", #PermanentAppList .. " loaded")
