@@ -1,26 +1,23 @@
 -- ================================================
--- PRESET APP - Dark Theme, Custom Name, Edit, Clone, View & Wear Single
+-- PRESET APP - Dark Theme, Custom Name, Edit, Clone
 -- ================================================
 
-local Services = _G.Services or {
-    Players = game:GetService("Players"),
-    HttpService = game:GetService("HttpService"),
-    ReplicatedStorage = game:GetService("ReplicatedStorage")
-}
-local LocalPlayer = Services.Players.LocalPlayer
+local Services = _G.Services
+local LocalPlayer = _G.LocalPlayer
 local Players = Services.Players
 local HttpService = Services.HttpService
 local ReplicatedStorage = Services.ReplicatedStorage
-local T = _G.T or {}
-local Helpers = _G.Helpers or {}
-local Config = _G.Config or {}
-local Storage = _G.Storage or {}
+local T = _G.T
+local Helpers = _G.Helpers
+local Config = _G.Config
+local Storage = _G.Storage
 
 local appContent = _G.appContent
 
-local corner = Helpers.corner or function() end
-local stroke = Helpers.stroke or function() end
-local pressFX = Helpers.pressFX or function() end
+local corner = Helpers.corner
+local stroke = Helpers.stroke
+local tween = Helpers.tween
+local pressFX = Helpers.pressFX
 
 -- ==================== DARK THEME ====================
 local colors = {
@@ -38,10 +35,8 @@ local colors = {
     border = Color3.fromRGB(45, 45, 55),
 }
 
-if not Storage.presets then
-    Storage.presets = {}
-end
-local presets = Storage.presets
+local presets = Storage.presets or {}
+local PRESET_FILE = "PhoneIDViewer_Presets.json"
 
 -- ==================== LIFECYCLE ====================
 local PresetLifecycle = {
@@ -61,9 +56,7 @@ table.insert(_G.AvatarCloneCleanupTasks or {}, cleanupPreset)
 
 -- ==================== HELPERS ====================
 local function savePresets()
-    if Storage.persistPresets then
-        pcall(function() Storage.persistPresets() end)
-    end
+    Storage.persistPresets()
 end
 
 local function getItems(player)
@@ -71,19 +64,20 @@ local function getItems(player)
     if not player then return items end
     
     local ok, data = pcall(function()
-        local response = game:HttpGet("https://avatar.roblox.com/v1/users/" .. player.UserId .. "/avatar")
-        return HttpService:JSONDecode(response)
+        return HttpService:JSONDecode(HttpService:GetAsync("https://avatar.roblox.com/v1/users/" .. player.UserId .. "/avatar"))
     end)
     
-    if ok and data and data.assets then
-        for _, asset in ipairs(data.assets) do
-            if asset.id and type(asset.id) == "number" then
-                table.insert(items, {
-                    Value = tostring(asset.id),
-                    Label = asset.name or ("Item " .. asset.id),
-                    Type = "ACC",
-                })
-            end
+    if not ok or not data or not data.assets then
+        return items
+    end
+    
+    for _, asset in ipairs(data.assets) do
+        if asset.id and type(asset.id) == "number" then
+            table.insert(items, {
+                Value = tostring(asset.id),
+                Label = asset.name or "Item " .. asset.id,
+                Type = "ACC",
+            })
         end
     end
     
@@ -94,8 +88,7 @@ local function fireHat(ids)
     if #ids == 0 then return end
     
     local remote = ReplicatedStorage
-    local path = (Config.REMOTE_PATH or "remotes.hat"):split(".")
-    for _, part in ipairs(path) do
+    for _, part in ipairs(Config.REMOTE_PATH:split(".")) do
         remote = remote:FindFirstChild(part)
         if not remote then return end
     end
@@ -169,13 +162,13 @@ function _G.openPresetApp()
     
     saveBtn.MouseButton1Click:Connect(function()
         if not selectedPlayer then
-            if _G.showDynamicNotification then _G.showDynamicNotification("Select a player first!", colors.red) end
+            _G.showDynamicNotification("Select a player first!", colors.red)
             return
         end
         
         local items = getItems(selectedPlayer)
         if #items == 0 then
-            if _G.showDynamicNotification then _G.showDynamicNotification("Player has no items!", colors.red) end
+            _G.showDynamicNotification("Player has no items!", colors.red)
             return
         end
         
@@ -200,9 +193,7 @@ function _G.openPresetApp()
         })
         
         savePresets()
-        if _G.showDynamicNotification then
-            _G.showDynamicNotification("Preset saved! (" .. #ids .. " items)", colors.green)
-        end
+        _G.showDynamicNotification("Preset saved! (" .. #ids .. " items)", colors.green)
         nameInput.Text = ""
         
         if _G.refreshCurr then
@@ -260,13 +251,13 @@ function _G.openPresetApp()
     -- ==================== RENDER PRESETS ====================
     for i, preset in ipairs(sorted) do
         local row = Instance.new("Frame", appContent)
-        row.Size = UDim2.new(1, 0, 0, 114)
+        row.Size = UDim2.new(1, 0, 0, 110)
         row.BackgroundColor3 = colors.card
         row.LayoutOrder = i + 1
-        row.ClipsDescendants = true
         corner(row, 12)
         stroke(row, preset.favorite and colors.gold or colors.border, preset.favorite and 1.5 or 1, preset.favorite and 0.2 or 0.3)
         
+        -- Gold accent for favorites
         if preset.favorite then
             local accent = Instance.new("Frame", row)
             accent.Size = UDim2.new(0, 3, 1, -16)
@@ -301,13 +292,13 @@ function _G.openPresetApp()
         
         -- ==================== ACTION BUTTONS ROW 1 ====================
         local btnRow1 = Instance.new("Frame", row)
-        btnRow1.Size = UDim2.new(1, -24, 0, 26)
+        btnRow1.Size = UDim2.new(1, -24, 0, 28)
         btnRow1.Position = UDim2.new(0, 12, 0, 50)
         btnRow1.BackgroundTransparency = 1
         
         -- Clone button
         local cloneBtn = Instance.new("TextButton", btnRow1)
-        cloneBtn.Size = UDim2.new(0, 70, 1, 0)
+        cloneBtn.Size = UDim2.new(0, 75, 1, 0)
         cloneBtn.BackgroundColor3 = colors.green
         cloneBtn.Text = "Clone"
         cloneBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
@@ -319,28 +310,28 @@ function _G.openPresetApp()
         
         cloneBtn.MouseButton1Click:Connect(function()
             if #preset.ids == 0 then
-                if _G.showDynamicNotification then _G.showDynamicNotification("Preset has no items!", colors.red) end
+                _G.showDynamicNotification("Preset has no items!", colors.red)
                 return
             end
             
             cloneBtn.Text = "Cloning..."
             cloneBtn.BackgroundColor3 = colors.gold
             
-            local batchSize = Config.CLONE_BATCH_SIZE or 5
-            local totalBatches = math.ceil(#preset.ids / batchSize)
+            local totalBatches = math.ceil(#preset.ids / (Config.CLONE_BATCH_SIZE or 5))
+            local currentBatch = 0
             
             local function cloneBatch(batchIndex)
                 if batchIndex > totalBatches then
                     cloneBtn.Text = "Done!"
                     cloneBtn.BackgroundColor3 = colors.green
-                    if _G.showDynamicNotification then _G.showDynamicNotification("Clone complete!", colors.green) end
+                    _G.showDynamicNotification("Clone complete! (" .. #preset.ids .. " items)", colors.green)
                     task.wait(1.5)
                     cloneBtn.Text = "Clone"
                     return
                 end
                 
-                local startIdx = (batchIndex - 1) * batchSize + 1
-                local endIdx = math.min(batchIndex * batchSize, #preset.ids)
+                local startIdx = (batchIndex - 1) * (Config.CLONE_BATCH_SIZE or 5) + 1
+                local endIdx = math.min(batchIndex * (Config.CLONE_BATCH_SIZE or 5), #preset.ids)
                 local batchIds = {}
                 
                 for j = startIdx, endIdx do
@@ -348,7 +339,7 @@ function _G.openPresetApp()
                 end
                 
                 fireHat(batchIds)
-                cloneBtn.Text = batchIndex .. "/" .. totalBatches
+                cloneBtn.Text = "Clone " .. batchIndex .. "/" .. totalBatches
                 
                 task.delay(Config.CLONE_DELAY or 6, function()
                     cloneBatch(batchIndex + 1)
@@ -358,10 +349,10 @@ function _G.openPresetApp()
             cloneBatch(1)
         end)
         
-        -- Wear All button
+        -- Wear button
         local wearBtn = Instance.new("TextButton", btnRow1)
-        wearBtn.Size = UDim2.new(0, 70, 1, 0)
-        wearBtn.Position = UDim2.new(0, 75, 0, 0)
+        wearBtn.Size = UDim2.new(0, 75, 1, 0)
+        wearBtn.Position = UDim2.new(0, 80, 0, 0)
         wearBtn.BackgroundColor3 = colors.accent
         wearBtn.Text = "Wear All"
         wearBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
@@ -373,97 +364,11 @@ function _G.openPresetApp()
         
         wearBtn.MouseButton1Click:Connect(function()
             if #preset.ids == 0 then
-                if _G.showDynamicNotification then _G.showDynamicNotification("Preset has no items!", colors.red) end
+                _G.showDynamicNotification("Preset has no items!", colors.red)
                 return
             end
             fireHat(preset.ids)
-            if _G.showDynamicNotification then _G.showDynamicNotification("Wearing " .. #preset.ids .. " items!", colors.green) end
-        end)
-        
-        -- View Items button (Liat Items)
-        local itemsBtn = Instance.new("TextButton", btnRow1)
-        itemsBtn.Size = UDim2.new(0, 70, 1, 0)
-        itemsBtn.Position = UDim2.new(0, 150, 0, 0)
-        itemsBtn.BackgroundColor3 = colors.card2
-        itemsBtn.Text = "Items (" .. #preset.ids .. ")"
-        itemsBtn.TextColor3 = colors.text
-        itemsBtn.Font = Enum.Font.GothamBold
-        itemsBtn.TextSize = 9
-        itemsBtn.AutoButtonColor = false
-        corner(itemsBtn, 6)
-        stroke(itemsBtn, colors.border, 1, 0.3)
-        pressFX(itemsBtn)
-        
-        -- Container untuk list item individual
-        local itemsListFrame = Instance.new("Frame", row)
-        itemsListFrame.Size = UDim2.new(1, -24, 0, 0)
-        itemsListFrame.Position = UDim2.new(0, 12, 0, 114)
-        itemsListFrame.BackgroundColor3 = colors.card2
-        itemsListFrame.Visible = false
-        itemsListFrame.ClipsDescendants = true
-        corner(itemsListFrame, 8)
-        stroke(itemsListFrame, colors.border, 1, 0.3)
-        
-        local itemsLayout = Instance.new("UIListLayout", itemsListFrame)
-        itemsLayout.Padding = UDim.new(0, 4)
-        
-        local itemsPadding = Instance.new("UIPadding", itemsListFrame)
-        itemsPadding.PaddingTop = UDim.new(0, 6)
-        itemsPadding.PaddingBottom = UDim.new(0, 6)
-        itemsPadding.PaddingLeft = UDim.new(0, 6)
-        itemsPadding.PaddingRight = UDim.new(0, 6)
-
-        -- Render item list
-        for idx, id in ipairs(preset.ids) do
-            local itemRow = Instance.new("Frame", itemsListFrame)
-            itemRow.Size = UDim2.new(1, 0, 0, 24)
-            itemRow.BackgroundColor3 = colors.card
-            corner(itemRow, 4)
-            
-            local idLbl = Instance.new("TextLabel", itemRow)
-            idLbl.Size = UDim2.new(1, -60, 1, 0)
-            idLbl.Position = UDim2.new(0, 8, 0, 0)
-            idLbl.BackgroundTransparency = 1
-            idLbl.Text = "#" .. idx .. ": " .. tostring(id)
-            idLbl.TextColor3 = colors.text
-            idLbl.Font = Enum.Font.Gotham
-            idLbl.TextSize = 9
-            idLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-            -- Wear 1 Button
-            local wear1Btn = Instance.new("TextButton", itemRow)
-            wear1Btn.Size = UDim2.new(0, 48, 0, 18)
-            wear1Btn.Position = UDim2.new(1, -52, 0.5, -9)
-            wear1Btn.BackgroundColor3 = colors.accent2
-            wear1Btn.Text = "Wear 1"
-            wear1Btn.TextColor3 = Color3.fromRGB(0, 0, 0)
-            wear1Btn.Font = Enum.Font.GothamBold
-            wear1Btn.TextSize = 8
-            wear1Btn.AutoButtonColor = false
-            corner(wear1Btn, 4)
-            pressFX(wear1Btn)
-
-            wear1Btn.MouseButton1Click:Connect(function()
-                fireHat({id})
-                if _G.showDynamicNotification then
-                    _G.showDynamicNotification("Wearing item: " .. id, colors.green)
-                end
-            end)
-        end
-
-        itemsBtn.MouseButton1Click:Connect(function()
-            itemsListFrame.Visible = not itemsListFrame.Visible
-            if itemsListFrame.Visible then
-                local contentHeight = (#preset.ids * 28) + 12
-                itemsListFrame.Size = UDim2.new(1, -24, 0, contentHeight)
-                row.Size = UDim2.new(1, 0, 0, 114 + contentHeight + 8)
-                itemsBtn.BackgroundColor3 = colors.accent2
-                itemsBtn.TextColor3 = Color3.fromRGB(0, 0, 0)
-            else
-                row.Size = UDim2.new(1, 0, 0, 114)
-                itemsBtn.BackgroundColor3 = colors.card2
-                itemsBtn.TextColor3 = colors.text
-            end
+            _G.showDynamicNotification("Wearing " .. #preset.ids .. " items!", colors.green)
         end)
         
         -- ==================== ACTION BUTTONS ROW 2 ====================
@@ -527,7 +432,7 @@ function _G.openPresetApp()
                 if newName ~= "" and newName:match("%S") then
                     preset.name = newName
                     savePresets()
-                    if _G.showDynamicNotification then _G.showDynamicNotification("Preset renamed!", colors.green) end
+                    _G.showDynamicNotification("Preset renamed!", colors.green)
                 end
                 editInput:Destroy()
                 nameLbl.Visible = true
@@ -552,12 +457,8 @@ function _G.openPresetApp()
         pressFX(copyBtn)
         
         copyBtn.MouseButton1Click:Connect(function()
-            if Helpers.copyToClipboard then
-                Helpers.copyToClipboard(table.concat(preset.ids, " "))
-            elseif setclipboard then
-                setclipboard(table.concat(preset.ids, " "))
-            end
-            if _G.showDynamicNotification then _G.showDynamicNotification("Copied " .. #preset.ids .. " IDs!", colors.green) end
+            Helpers.copyToClipboard(table.concat(preset.ids, " "))
+            _G.showDynamicNotification("Copied " .. #preset.ids .. " IDs!", colors.green)
         end)
         
         -- Delete button
@@ -583,7 +484,7 @@ function _G.openPresetApp()
                     table.remove(presets, idx)
                 end
                 savePresets()
-                if _G.showDynamicNotification then _G.showDynamicNotification("Preset deleted!", colors.red) end
+                _G.showDynamicNotification("Preset deleted!", colors.red)
                 if _G.refreshCurr then
                     _G.refreshCurr()
                 end
@@ -592,4 +493,4 @@ function _G.openPresetApp()
     end
 end
 
-print("[Preset] App loaded successfully!")
+print("[Preset] App loaded!")
