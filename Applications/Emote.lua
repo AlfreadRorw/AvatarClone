@@ -529,34 +529,24 @@ end
 _G.renderEmotesRefresh = renderEmotes
 
 -- ==================== BUKA APP ====================
+-- CATATAN PENTING:
+-- appContent (dari Core/BuildIcons.lua) SUDAH memiliki UIListLayout sendiri
+-- ("acl") dan dikendalikan oleh _G.openApp():
+--   - _G.openApp() yang membersihkan appContent (clearAppContent, tetap
+--     mempertahankan UIListLayout aslinya) SEBELUM memanggil fungsi ini.
+--   - _G.openApp() juga yang mengatur appScr.BackgroundColor3 = T.BG.
+-- Maka fungsi ini TIDAK BOLEH:
+--   1. Membuat UIListLayout baru di appContent (akan bentrok/duplikat
+--      dengan layout bawaan dan menyebabkan anak-anak salah posisi).
+--   2. Memanggil appContent:ClearAllChildren() (akan ikut menghapus
+--      UIListLayout bawaan milik sistem inti).
+--   3. Mengubah appContent.BackgroundColor3 (dikendalikan oleh
+--      _G.openApp/appScr, mengubahnya di sini tidak berefek pada area
+--      appScr yang lebih luas dan bisa menyisakan celah putih).
+-- Cukup isi appContent dengan frame-frame anak ber-LayoutOrder berurutan,
+-- persis seperti Settings.lua, Profile.lua, dsb.
 function _G.openEmoteApp()
-    -- Bersihkan konten lama
-    if appContent then
-        appContent:ClearAllChildren()
-    end
-
-    -- Pastikan background utama tidak tertutup frame putih default Roblox
-    pcall(function()
-        appContent.BackgroundColor3 = C.bg
-        appContent.BackgroundTransparency = 0
-    end)
-
-    -- ===== FIX UTAMA: UIListLayout untuk appContent =====
-    -- Tanpa ini, semua elemen (header, search, tab, results, controls)
-    -- menumpuk di posisi (0,0) dan saling menutupi -> layar putih polos.
-    local mainLayout = Instance.new("UIListLayout", appContent)
-    mainLayout.Name = "MainLayout"
-    mainLayout.FillDirection = Enum.FillDirection.Vertical
-    mainLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    mainLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-    mainLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    mainLayout.Padding = UDim.new(0, 8)
-
-    local mainPad = Instance.new("UIPadding", appContent)
-    mainPad.PaddingTop = UDim.new(0, 8)
-    mainPad.PaddingBottom = UDim.new(0, 8)
-    mainPad.PaddingLeft = UDim.new(0, 8)
-    mainPad.PaddingRight = UDim.new(0, 8)
+    if not appContent then return end
 
     -- ===== HEADER =====
     local header = Instance.new("Frame", appContent)
