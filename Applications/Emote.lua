@@ -1,6 +1,5 @@
 -- ================================================
--- EMOTE.LUA — Premium Futuristic Mobile UI
--- Feature: Active Play State & Toggle Stop
+-- EMOTE.LUA — Premium Futuristic Mobile UI (Fixed Loading & Search)
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -45,8 +44,11 @@ local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
 local IdSet = _G.EmoteCache.idSet
 
+-- NEW: LoadedEmotes tracking per emote ID
+local LoadedEmotes = {} -- [emoteId] = true/false
+
 local currentAnimTrack = nil
-local activeEmoteId = nil -- Untuk melacak emote mana yang sedang diputar
+local activeEmoteId = nil
 local currentSpeed = 1.0
 local loopEnabled = false
 local currentTab = "all"
@@ -59,15 +61,20 @@ local cardConnections = {}
 -- UI state references (assigned in buildEmoteApp)
 local loadingState = nil
 local emptyState = nil
+local contentOverlay = nil
 
 -- ==================== JSON & FAVORITES ====================
 local function loadEmotesFromDisk()
     if isfile and isfile(CACHE_FILE_NAME) then
         local success, result = pcall(function() return HttpService:JSONDecode(readfile(CACHE_FILE_NAME)) end)
         if success and type(result) == "table" and #result > 0 then
-            table.clear(Emotes); table.clear(IdSet)
+            table.clear(Emotes); table.clear(IdSet); table.clear(LoadedEmotes)
             for _, item in ipairs(result) do
-                if item.id then table.insert(Emotes, item); IdSet[item.id] = true end
+                if item.id then
+                    table.insert(Emotes, item)
+                    IdSet[item.id] = true
+                    LoadedEmotes[item.id] = true -- cached items considered loaded
+                end
             end
             _G.EmoteCache.loaded = true
             return true
@@ -100,6 +107,16 @@ local function saveFavorites()
 end
 loadFavorites()
 
+-- ==================== EMOTE LOADED CHECK ====================
+local function EmotesLoaded()
+    for _, loaded in pairs(LoadedEmotes) do
+        if not loaded then
+            return false
+        end
+    end
+    return true
+end
+
 -- ==================== FETCH API ====================
 local function fetchEmotePage(cursor)
     local url = "https://catalog.roblox.com/v1/search/items/details?Category=12&Subcategory=39&SortType=1&SortAggregation=&limit=30&IncludeNotForSale=true"
@@ -111,51 +128,88 @@ local function fetchEmotePage(cursor)
         elseif request then return request(opts)
         else return {Body = game:HttpGet(url)} end
     end)
-    if not ok or not result or not result.Body then return nil end
+    if not ok or not result or not result.Body then
+        warn("[Emote] Fetch failed:", ok and "no body" or result)
+        return nil
+    end
     local dok, data = pcall(function() return HttpService:JSONDecode(result.Body) end)
-    return dok and data or nil
+    if not dok then
+        warn("[Emote] JSON decode failed:", data)
+        return nil
+    end
+    return data
 end
 
 local function fetchAllEmotes(maxPages)
     if _G.EmoteCache.loading then return end
     _G.EmoteCache.loading = true
-    maxPages = maxPages or 50 -- Meload hingga ~900 emote (Limit aman biar tidak lag)
+    maxPages = maxPages or 30
 
     task.spawn(function()
+        print("[Emote] Fetch started")
         local cursor = ""
         local pages = 0
         local newItemsAdded = false
 
         while pages < maxPages do
             local page = fetchEmotePage(cursor)
-            if not page or not page.data or #page.data == 0 then break end
+            if not page or not page.data or #page.data == 0 then
+                print("[Emote] No more data or fetch failed, breaking")
+                break
+            end
+            print("[Emote] Page loaded:", #page.data)
             local newBatch = {}
             for _, item in ipairs(page.data) do
                 if item.id and item.name and not IdSet[item.id] then
                     IdSet[item.id] = true
                     newItemsAdded = true
-                    local emoteObj = { id = item.id, name = item.name, icon = "rbxthumb://type=Asset&id=" .. item.id .. "&w=150&h=150", updated = item.updated or "" }
+                    local emoteObj = {
+                        id = item.id,
+                        name = item.name,
+                        icon = "rbxthumb://type=Asset&id=" .. item.id .. "&w=150&h=150",
+                        updated = item.updated or ""
+                    }
                     table.insert(Emotes, emoteObj)
                     table.insert(newBatch, emoteObj.icon)
+                    -- Mark as not loaded initially, will become true after preload
+                    LoadedEmotes[item.id] = false
                 end
             end
-            if #newBatch > 0 then task.spawn(function() pcall(function() ContentProvider:PreloadAsync(newBatch) end) end) end
+            -- Preload icons asynchronously
+            if #newBatch > 0 then
+                task.spawn(function()
+                    pcall(function() ContentProvider:PreloadAsync(newBatch) end)
+                    -- Mark all newly added as loaded after preload attempt
+                    for _, emote in ipairs(Emotes) do
+                        if not LoadedEmotes[emote.id] then
+                            LoadedEmotes[emote.id] = true
+                        end
+                    end
+                end)
+            end
             cursor = page.nextPageCursor or ""
             pages = pages + 1
             if cursor == "" then break end
             task.wait(0.2)
         end
 
+        print("[Emote] Total after fetch:", #Emotes)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
         if newItemsAdded then saveEmotesToDisk() end
-        if _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
+        -- Ensure all loaded flags are true (if any missed)
+        for _, emote in ipairs(Emotes) do
+            LoadedEmotes[emote.id] = true
+        end
+        if _G.renderEmotesRefresh then
+            print("[Emote] Calling renderEmotesRefresh")
+            _G.renderEmotesRefresh()
+        end
     end)
 end
 
 -- ==================== ANIMATION & SMART BUTTONS ====================
 local function updateAllPlayButtons()
-    -- Memperbarui visual semua tombol Play di layar
     for _, cardWrapper in ipairs(cardPool) do
         if cardWrapper.Visible then
             local card = cardWrapper:FindFirstChild("Card")
@@ -165,7 +219,6 @@ local function updateAllPlayButtons()
             
             if playBtn and eId then
                 if eId == activeEmoteId then
-                    -- State saat diputar
                     smoothTween(playBtn, {BackgroundColor3 = C.darkPurple, TextColor3 = C.white}, 0.1)
                     playBtn.Text = "■ Playing"
                     if playBtn:FindFirstChild("UIStroke") then
@@ -175,7 +228,6 @@ local function updateAllPlayButtons()
                         smoothTween(cardStroke, {Color = C.purple, Thickness = 2}, 0.1)
                     end
                 else
-                    -- State saat diam
                     smoothTween(playBtn, {BackgroundColor3 = C.white, TextColor3 = C.black}, 0.1)
                     playBtn.Text = "▶ Play"
                     if playBtn:FindFirstChild("UIStroke") then
@@ -200,7 +252,7 @@ local function stopAnimation()
 end
 
 local function playEmote(assetId)
-    stopAnimation() -- Hentikan yang lama dulu
+    stopAnimation()
     
     local char = LocalPlayer.Character
     local humanoid = char and char:FindFirstChildOfClass("Humanoid")
@@ -221,13 +273,12 @@ local function playEmote(assetId)
     if track then
         currentAnimTrack = track
         activeEmoteId = assetId
-        updateAllPlayButtons() -- Update UI tombol menjadi hitam "Playing"
+        updateAllPlayButtons()
         
         track:AdjustSpeed(currentSpeed)
         track.Looped = loopEnabled
         track:Play()
         
-        -- Reset tombol saat animasi otomatis selesai
         track.Stopped:Connect(function()
             if activeEmoteId == assetId then
                 activeEmoteId = nil
@@ -253,7 +304,6 @@ local function createEmoteCard(parent)
     cardWrapper.Size = UDim2.new(1, 0, 1, 0)
     cardWrapper.ClipsDescendants = false
 
-    -- Shadow
     local shadow = Instance.new("Frame", cardWrapper)
     shadow.Name = "Shadow"
     shadow.Size = UDim2.new(1, 0, 1, 0)
@@ -264,7 +314,6 @@ local function createEmoteCard(parent)
     corner(shadow, 16)
     shadow.ZIndex = 0
 
-    -- Card
     local card = Instance.new("Frame", cardWrapper)
     card.Name = "Card"
     card.Size = UDim2.new(1, 0, 1, 0)
@@ -277,7 +326,6 @@ local function createEmoteCard(parent)
     cardStroke.Name = "CardStroke"
     card.ZIndex = 1
 
-    -- Thumbnail container
     local thumbWrap = Instance.new("Frame", card)
     thumbWrap.Name = "ThumbWrap"
     thumbWrap.Size = UDim2.new(1, -10, 0, 88)
@@ -297,7 +345,6 @@ local function createEmoteCard(parent)
     corner(thumb, 12)
     thumb.ZIndex = 3
 
-    -- Favorite button
     local favBtn = Instance.new("TextButton", card)
     favBtn.Name = "FavBtn"
     favBtn.Size = UDim2.new(0, 24, 0, 24)
@@ -314,7 +361,6 @@ local function createEmoteCard(parent)
     favStroke.Thickness = 1
     favStroke.Enabled = true
 
-    -- Emote name
     local nameLbl = Instance.new("TextLabel", card)
     nameLbl.Name = "NameLbl"
     nameLbl.Size = UDim2.new(1, -10, 0, 18)
@@ -328,7 +374,6 @@ local function createEmoteCard(parent)
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
     nameLbl.ZIndex = 2
 
-    -- Play button
     local playBtn = Instance.new("TextButton", card)
     playBtn.Name = "PlayBtn"
     playBtn.Size = UDim2.new(1, -10, 0, 26)
@@ -344,7 +389,6 @@ local function createEmoteCard(parent)
     local playStroke = stroke(playBtn, C.purple, 1, 0)
     playStroke.Name = "UIStroke"
 
-    -- Press animation for card and play button
     card.InputBegan:Connect(function(input)
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             smoothTween(card, {Size = UDim2.new(0.96, 0, 0.96, 0)}, 0.1)
@@ -373,7 +417,7 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
     clearCardConnections(cardWrapper)
     cardWrapper.LayoutOrder = order
     cardWrapper.Visible = true
-    cardWrapper:SetAttribute("EmoteId", emote.id) -- Simpan ID untuk Smart Play Button
+    cardWrapper:SetAttribute("EmoteId", emote.id)
 
     local card = cardWrapper:FindFirstChild("Card")
     card.ThumbWrap.Thumb.Image = emote.icon or ""
@@ -385,7 +429,6 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
     favBtn.Text = isFavorite and "★" or "☆"
     favBtn.TextColor3 = isFavorite and C.purple or C.black
     
-    -- Inisialisasi tampilan awal Play Button
     if emote.id == activeEmoteId then
         playBtn.BackgroundColor3 = C.darkPurple
         playBtn.TextColor3 = C.white
@@ -408,7 +451,6 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
         card.ThumbWrap.ThumbStroke.Thickness = 1
     end
 
-    -- Reveal animation (subtle)
     if card.BackgroundTransparency > 0 then
         smoothTween(card, {BackgroundTransparency = 0}, 0.15)
     end
@@ -416,7 +458,6 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
     local conns = cardConnections[cardWrapper]
 
     table.insert(conns, favBtn.MouseButton1Click:Connect(function()
-        -- Bounce animation
         smoothTween(favBtn, {Size = UDim2.new(0, 30, 0, 30)}, 0.08)
         task.wait(0.08)
         smoothTween(favBtn, {Size = UDim2.new(0, 24, 0, 24)}, 0.08)
@@ -435,18 +476,14 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
         if currentTab == "favorites" and _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
     end))
 
-    -- Logika Toggle Play / Stop
     table.insert(conns, playBtn.MouseButton1Click:Connect(function()
         if activeEmoteId == emote.id then
-            -- Kalau emote ini sedang diputar, pencet lagi untuk STOP
             stopAnimation()
         else
-            -- Kalau tidak, Play emotenya
             playEmote(emote.id)
         end
     end))
     
-    -- Efek hover ringan jika tombol sedang tidak aktif
     table.insert(conns, playBtn.MouseEnter:Connect(function() 
         if activeEmoteId ~= emote.id then smoothTween(playBtn, {BackgroundColor3 = C.searchBg}, 0.1) end
     end))
@@ -462,21 +499,28 @@ local function renderEmotes()
     local token = renderToken + 1
     renderToken = token
 
-    if not resultsContainer or not resultsContainer.Parent then return end
+    if not resultsContainer or not resultsContainer.Parent then
+        print("[Emote] renderEmotes: resultsContainer not ready")
+        return
+    end
 
     local filtered = {}
     local q = searchQuery:lower()
     for _, e in ipairs(Emotes) do
         local include = true
-        if currentTab == "favorites" then include = table.find(Favorites, e.id) ~= nil
-        elseif q ~= "" then include = e.name:lower():find(q, 1, true) ~= nil end
-        if include then table.insert(filtered, e) end
+        if currentTab == "favorites" then
+            include = table.find(Favorites, e.id) ~= nil
+        elseif q ~= "" then
+            include = e.name:lower():find(q, 1, true) ~= nil
+        end
+        if include then
+            table.insert(filtered, e)
+        end
     end
 
     table.sort(filtered, function(a, b) return (a.updated or "") > (b.updated or "") end)
     for _, card in ipairs(cardPool) do card.Visible = false end
 
-    -- Determine overlay state
     local showLoading = false
     local showEmpty = false
     if currentTab == "favorites" then
@@ -487,15 +531,13 @@ local function renderEmotes()
         end
     end
 
-    if loadingState then
-        loadingState.Visible = showLoading
-    end
-    if emptyState then
-        emptyState.Visible = showEmpty
+    if contentOverlay then
+        contentOverlay.Visible = showLoading or showEmpty
+        if loadingState then loadingState.Visible = showLoading end
+        if emptyState then emptyState.Visible = showEmpty end
     end
 
     if showLoading or showEmpty then
-        -- Hide all cards
         for _, card in ipairs(cardPool) do card.Visible = false end
         return
     end
@@ -512,11 +554,11 @@ local function renderEmotes()
             updateCardData(card, emote, idx, table.find(Favorites, emote.id) ~= nil)
             if idx % batchSize == 0 then task.wait() end
         end
-        -- Hide any remaining pooled cards beyond filtered count
         for i = #filtered + 1, #cardPool do
             cardPool[i].Visible = false
         end
     end)
+    print("[Emote] Rendering:", #filtered, "emotes")
 end
 _G.renderEmotesRefresh = renderEmotes
 
@@ -527,28 +569,8 @@ local function createHeader(parent)
     header.BackgroundTransparency = 1
     header.LayoutOrder = 1
 
-    local backBtn = Instance.new("TextButton", header)
-    backBtn.Size = UDim2.new(0, 36, 0, 36)
-    backBtn.Position = UDim2.new(0, 0, 0.5, 0)
-    backBtn.AnchorPoint = Vector2.new(0, 0.5)
-    backBtn.BackgroundTransparency = 1
-    backBtn.Text = "←"
-    backBtn.Font = Enum.Font.GothamBold
-    backBtn.TextSize = 22
-    backBtn.TextColor3 = C.black
-    backBtn.AutoButtonColor = false
-    backBtn.ZIndex = 2
-    backBtn.MouseButton1Click:Connect(function()
-        local parentGui = appContent.Parent
-        if parentGui and parentGui:IsA("GuiObject") then
-            parentGui.Visible = false
-        else
-            appContent.Visible = false
-        end
-    end)
-
     local title = Instance.new("TextLabel", header)
-    title.Size = UDim2.new(1, -80, 1, 0)
+    title.Size = UDim2.new(1, 0, 1, 0)
     title.Position = UDim2.new(0.5, 0, 0.5, 0)
     title.AnchorPoint = Vector2.new(0.5, 0.5)
     title.BackgroundTransparency = 1
@@ -585,7 +607,6 @@ local function createSearchBar(parent)
     local searchStroke = stroke(searchFrame, C.purple, 1, 0)
     searchStroke.Name = "SearchStroke"
 
-    -- Glow frame behind search
     local glow = Instance.new("Frame", searchFrame.Parent)
     glow.Name = "SearchGlow"
     glow.Size = UDim2.new(1, 4, 1, 4)
@@ -598,17 +619,19 @@ local function createSearchBar(parent)
     glow.Visible = false
 
     local searchIcon = Instance.new("TextLabel", searchFrame)
-    searchIcon.Size = UDim2.new(0, 34, 1, 0)
-    searchIcon.Position = UDim2.new(0, 6, 0, 0)
+    searchIcon.Size = UDim2.new(0, 30, 1, 0)
+    searchIcon.Position = UDim2.new(0, 4, 0, 0)
     searchIcon.BackgroundTransparency = 1
     searchIcon.Text = "🔍"
     searchIcon.TextSize = 14
     searchIcon.Font = Enum.Font.Gotham
     searchIcon.TextColor3 = C.gray
+    searchIcon.TextXAlignment = Enum.TextXAlignment.Center
+    searchIcon.TextYAlignment = Enum.TextYAlignment.Center
     searchIcon.ZIndex = 2
 
     local searchBox = Instance.new("TextBox", searchFrame)
-    searchBox.Size = UDim2.new(1, -46, 1, 0)
+    searchBox.Size = UDim2.new(1, -70, 1, 0)
     searchBox.Position = UDim2.new(0, 34, 0, 0)
     searchBox.BackgroundTransparency = 1
     searchBox.PlaceholderText = "Cari emote..."
@@ -619,6 +642,7 @@ local function createSearchBar(parent)
     searchBox.TextSize = 13
     searchBox.ClearTextOnFocus = false
     searchBox.TextXAlignment = Enum.TextXAlignment.Left
+    searchBox.TextYAlignment = Enum.TextYAlignment.Center
     searchBox.ZIndex = 2
 
     local clearBtn = Instance.new("TextButton", searchFrame)
@@ -728,7 +752,6 @@ local function createTabBar(parent)
         local allActive = currentTab == "all"
         local favActive = currentTab == "favorites"
 
-        -- All tab
         if allActive then
             allGradient.Enabled = true
             allBg.BackgroundColor3 = C.purple
@@ -741,7 +764,6 @@ local function createTabBar(parent)
             smoothTween(allStroke, {Color = C.black, Thickness = 1}, 0.15)
         end
 
-        -- Fav tab
         if favActive then
             favGradient.Enabled = true
             favBg.BackgroundColor3 = C.purple
@@ -768,7 +790,6 @@ local function createTabBar(parent)
         renderEmotes()
     end)
 
-    -- Initial update
     updateTabs()
 
     return tabWrap
@@ -807,7 +828,6 @@ local function createLoadingState(parent)
     text.TextXAlignment = Enum.TextXAlignment.Center
     text.ZIndex = 1
 
-    -- Spinning animation
     task.spawn(function()
         while frame and frame.Visible do
             local tw = TweenService:Create(spinner, TweenInfo.new(1, Enum.EasingStyle.Linear), {Rotation = spinner.Rotation + 360})
@@ -919,7 +939,7 @@ local function buildEmoteApp()
     padding.PaddingLeft = UDim.new(0, 12)
     padding.PaddingRight = UDim.new(0, 12)
 
-    -- Header
+    -- Header (no back button)
     local header = createHeader(mainPanel)
     header.LayoutOrder = 1
 
@@ -962,17 +982,36 @@ local function buildEmoteApp()
         resultsContainer.CanvasSize = UDim2.new(0, 0, 0, grid.AbsoluteContentSize.Y + 20)
     end)
 
-    -- Loading & Empty states overlay
-    loadingState = createLoadingState(resultsContainer)
-    emptyState = createEmptyState(resultsContainer)
+    -- Create overlay for loading/empty states (covers grid area)
+    contentOverlay = Instance.new("Frame", mainPanel)
+    contentOverlay.Name = "ContentOverlay"
+    contentOverlay.Size = UDim2.new(1, 0, 1, -120)
+    contentOverlay.Position = UDim2.new(0, 0, 0, 0)
+    contentOverlay.BackgroundTransparency = 1
+    contentOverlay.BorderSizePixel = 0
+    contentOverlay.ZIndex = 5
+    contentOverlay.Visible = false
+
+    loadingState = createLoadingState(contentOverlay)
+    emptyState = createEmptyState(contentOverlay)
 
     -- Initial render
-    renderEmotes()
-    if #Emotes == 0 then
+    print("[Emote] Cache:", #Emotes)
+    if #Emotes > 0 then
+        -- Cache exists, render immediately
+        renderEmotes()
+        -- Optionally fetch in background if not loaded
+        if not _G.EmoteCache.loading and not _G.EmoteCache.loaded then
+            fetchAllEmotes(30)
+        end
+    else
+        -- No cache, show loading and start fetch
+        loadingState.Visible = true
+        contentOverlay.Visible = true
         fetchAllEmotes(30)
     end
     return true
 end
 
 function _G.openEmoteApp() pcall(buildEmoteApp) end
-print("[Emote] Premium Futuristic UI Applied!")
+print("[Emote] Premium Futuristic UI with Fixed Loading Applied!")
