@@ -119,7 +119,7 @@ end
 local function fetchAllEmotes(maxPages)
     if _G.EmoteCache.loading then return end
     _G.EmoteCache.loading = true
-    maxPages = maxPages or 30 -- Meload hingga ~900 emote (Limit aman biar tidak lag)
+    maxPages = maxPages or 50 -- Meload hingga ~900 emote (Limit aman biar tidak lag)
 
     task.spawn(function()
         local cursor = ""
