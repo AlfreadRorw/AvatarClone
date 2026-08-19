@@ -1,6 +1,5 @@
 -- ================================================
--- EMOTE.LUA — Neon Purple Premium Theme (UI V4)
--- Feature: Load ALL Emotes, Smart Play, Gradient UI
+-- EMOTE.LUA — Neon Purple Premium Theme (Exact Match V5)
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -27,16 +26,16 @@ local CACHE_FILE_NAME = "PhoneIDViewer_EmoteCache.json"
 -- ==================== PALETTE (NEON PURPLE) ====================
 local C = {
     white       = Color3.fromRGB(255, 255, 255),
-    searchBg    = Color3.fromRGB(248, 245, 255), -- Light purpleish white
+    searchBg    = Color3.fromRGB(245, 240, 255),
     textPurple  = Color3.fromRGB(80, 50, 120),
     
-    cardBg      = Color3.fromRGB(30, 25, 45),    -- Dark violet background
-    cardStroke  = Color3.fromRGB(110, 80, 150),  -- Purple glow stroke
+    cardBg      = Color3.fromRGB(28, 22, 42),
+    cardStroke  = Color3.fromRGB(110, 80, 150),
     
-    purpleLight = Color3.fromRGB(138, 43, 226),  -- Gradient Top
-    purpleDark  = Color3.fromRGB(75, 0, 130),    -- Gradient Bottom
+    purpleLight = Color3.fromRGB(150, 60, 240),  -- Gradient Top
+    purpleDark  = Color3.fromRGB(80, 15, 150),    -- Gradient Bottom
     
-    blackTab    = Color3.fromRGB(20, 15, 25),    -- Inactive Tab Dark
+    tabBgDark   = Color3.fromRGB(20, 15, 28),
 }
 
 -- ==================== CACHE GLOBAL ====================
@@ -99,7 +98,7 @@ local function saveFavorites()
 end
 loadFavorites()
 
--- ==================== FETCH API (LOAD ALL EMOTES) ====================
+-- ==================== FETCH API ====================
 local function fetchEmotePage(cursor)
     local url = "https://catalog.roblox.com/v1/search/items/details?Category=12&Subcategory=39&SortType=1&SortAggregation=&limit=30&IncludeNotForSale=true"
     if cursor and cursor ~= "" then url = url .. "&cursor=" .. HttpService:UrlEncode(cursor) end
@@ -123,7 +122,6 @@ local function fetchAllEmotes()
         local cursor = ""
         local newItemsAdded = false
 
-        -- Infinite loop until cursor is nil (Loads ALL Roblox Emotes)
         while true do
             local page = fetchEmotePage(cursor)
             if not page or not page.data or #page.data == 0 then break end
@@ -143,7 +141,7 @@ local function fetchAllEmotes()
             
             cursor = page.nextPageCursor or ""
             if cursor == "" then break end
-            task.wait(0.3) -- Jeda aman agar tidak kena rate limit (Error 429)
+            task.wait(0.3)
         end
 
         _G.EmoteCache.loaded = true
@@ -162,18 +160,15 @@ local function updateAllPlayButtons()
             local eId = cardWrapper:GetAttribute("EmoteId")
             
             if playBtn and eId then
-                local btnGradient = playBtn:FindFirstChildOfClass("UIGradient")
+                local btnGrad = playBtn:FindFirstChildOfClass("UIGradient")
                 if eId == activeEmoteId then
                     playBtn.Text = "■ Playing"
-                    if btnGradient then btnGradient.Enabled = false end
-                    smoothTween(playBtn, {BackgroundColor3 = C.cardBg, TextColor3 = C.purpleLight}, 0.1)
-                    stroke(playBtn, C.purpleLight, 1, 0) -- Glowing outline active
+                    if btnGrad then btnGrad.Enabled = false end
+                    smoothTween(playBtn, {BackgroundColor3 = C.cardBg, TextColor3 = Color3.fromRGB(255, 100, 150)}, 0.1)
                 else
                     playBtn.Text = "▶ Play"
-                    if btnGradient then btnGradient.Enabled = true end
+                    if btnGrad then btnGrad.Enabled = true end
                     smoothTween(playBtn, {BackgroundColor3 = C.white, TextColor3 = C.white}, 0.1)
-                    local s = playBtn:FindFirstChildOfClass("UIStroke")
-                    if s then s:Destroy() end
                 end
             end
         end
@@ -247,9 +242,8 @@ local function createPooledCard(parent)
     card.BackgroundColor3 = C.cardBg
     card.BorderSizePixel = 0
     corner(card, 12)
-    stroke(card, C.cardStroke, 1.5, 0) -- Neon Purple Outline
+    stroke(card, C.cardStroke, 1.2, 0)
 
-    -- Thumbnail langsung di atas kartu (tidak ada box terpisah)
     local thumb = Instance.new("ImageLabel", card)
     thumb.Name = "Thumb"
     thumb.Size = UDim2.new(1, -12, 0, 80)
@@ -294,7 +288,7 @@ local function createPooledCard(parent)
     playBtn.Font = Enum.Font.GothamBold
     playBtn.TextSize = 11
     playBtn.AutoButtonColor = false
-    corner(playBtn, 12)
+    corner(playBtn, 11)
     
     local btnGrad = Instance.new("UIGradient", playBtn)
     btnGrad.Color = ColorSequence.new{
@@ -327,16 +321,12 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
         playBtn.Text = "■ Playing"
         if btnGrad then btnGrad.Enabled = false end
         playBtn.BackgroundColor3 = C.cardBg
-        playBtn.TextColor3 = C.purpleLight
-        local s = playBtn:FindFirstChildOfClass("UIStroke")
-        if not s then stroke(playBtn, C.purpleLight, 1, 0) end
+        playBtn.TextColor3 = Color3.fromRGB(255, 100, 150)
     else
         playBtn.Text = "▶ Play"
         if btnGrad then btnGrad.Enabled = true end
         playBtn.BackgroundColor3 = C.white
         playBtn.TextColor3 = C.white
-        local s = playBtn:FindFirstChildOfClass("UIStroke")
-        if s then s:Destroy() end
     end
 
     local conns = cardConnections[cardWrapper]
@@ -410,11 +400,36 @@ local function buildEmoteApp()
     local existingLayout = appContent:FindFirstChildOfClass("UIListLayout")
     if not existingLayout then
         local appLayout = Instance.new("UIListLayout", appContent)
-        appLayout.Padding = UDim.new(0, 12)
+        appLayout.Padding = UDim.new(0, 10)
         appLayout.SortOrder = Enum.SortOrder.LayoutOrder
     end
 
-    -- Search Bar Neon
+    -- FIX 1: Header Title "Emote ✨" persis seperti di gambar
+    local headerRow = Instance.new("Frame", appContent)
+    headerRow.Size = UDim2.new(1, 0, 0, 30)
+    headerRow.BackgroundTransparency = 1
+    headerRow.LayoutOrder = 0
+
+    local backBtn = Instance.new("TextButton", headerRow)
+    backBtn.Size = UDim2.new(0, 65, 1, 0)
+    backBtn.BackgroundColor3 = Color3.fromRGB(235, 230, 245)
+    backBtn.Text = "< Back"
+    backBtn.TextColor3 = C.textPurple
+    backBtn.Font = Enum.Font.GothamBold
+    backBtn.TextSize = 12
+    corner(backBtn, 8)
+
+    local titleLbl = Instance.new("TextLabel", headerRow)
+    titleLbl.Size = UDim2.new(1, -75, 1, 0)
+    titleLbl.Position = UDim2.new(0, 75, 0, 0)
+    titleLbl.BackgroundTransparency = 1
+    titleLbl.Text = "Emote ✨"
+    titleLbl.TextColor3 = C.textPurple
+    titleLbl.Font = Enum.Font.GothamBold
+    titleLbl.TextSize = 18
+    titleLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    -- Search Bar
     local searchFrame = Instance.new("Frame", appContent)
     searchFrame.Size = UDim2.new(1, 0, 0, 36)
     searchFrame.BackgroundColor3 = C.searchBg
@@ -460,14 +475,12 @@ local function buildEmoteApp()
         renderEmotes()
     end)
     
-    clearBtn.MouseButton1Click:Connect(function()
-        searchBox.Text = ""
-    end)
+    clearBtn.MouseButton1Click:Connect(function() searchBox.Text = "" end)
 
-    -- Segmented Tab Bar (Gradient)
+    -- FIX 2: Tab Bar with correct Text ("Semua" & "Favorit")
     local tabWrap = Instance.new("Frame", appContent)
     tabWrap.Size = UDim2.new(1, 0, 0, 38)
-    tabWrap.BackgroundColor3 = C.blackTab
+    tabWrap.BackgroundColor3 = C.tabBgDark
     tabWrap.LayoutOrder = 2
     corner(tabWrap, 10)
     stroke(tabWrap, C.cardStroke, 1.5, 0)
@@ -479,7 +492,6 @@ local function buildEmoteApp()
     local btnAll = Instance.new("TextButton", tabWrap)
     btnAll.Size = UDim2.new(0.5, 0, 1, 0)
     btnAll.BackgroundColor3 = C.white
-    btnAll.BackgroundTransparency = currentTab == "all" and 0 or 1
     btnAll.Text = "Semua ✨"
     btnAll.TextColor3 = C.white
     btnAll.Font = Enum.Font.GothamBold
@@ -488,12 +500,11 @@ local function buildEmoteApp()
     
     local allGrad = Instance.new("UIGradient", btnAll)
     allGrad.Color = ColorSequence.new{ ColorSequenceKeypoint.new(0, C.purpleLight), ColorSequenceKeypoint.new(1, C.purpleDark) }
-    allGrad.Enabled = (currentTab == "all")
+    allGrad.Rotation = 45
 
     local btnFav = Instance.new("TextButton", tabWrap)
     btnFav.Size = UDim2.new(0.5, 0, 1, 0)
     btnFav.BackgroundColor3 = C.white
-    btnFav.BackgroundTransparency = currentTab == "favorites" and 0 or 1
     btnFav.Text = "Favorit ★"
     btnFav.TextColor3 = C.white
     btnFav.Font = Enum.Font.GothamBold
@@ -502,15 +513,25 @@ local function buildEmoteApp()
     
     local favGrad = Instance.new("UIGradient", btnFav)
     favGrad.Color = ColorSequence.new{ ColorSequenceKeypoint.new(0, C.purpleLight), ColorSequenceKeypoint.new(1, C.purpleDark) }
-    favGrad.Enabled = (currentTab == "favorites")
+    favGrad.Rotation = 45
 
     local function updateTabs()
-        btnAll.BackgroundTransparency = currentTab == "all" and 0 or 1
         allGrad.Enabled = (currentTab == "all")
-        
-        btnFav.BackgroundTransparency = currentTab == "favorites" and 0 or 1
         favGrad.Enabled = (currentTab == "favorites")
+        
+        if currentTab == "all" then
+            smoothTween(btnAll, {BackgroundTransparency = 0}, 0.15)
+            smoothTween(btnFav, {BackgroundTransparency = 1}, 0.15)
+            btnAll.TextColor3 = C.white
+            btnFav.TextColor3 = Color3.fromRGB(160, 150, 180)
+        else
+            smoothTween(btnAll, {BackgroundTransparency = 1}, 0.15)
+            smoothTween(btnFav, {BackgroundTransparency = 0}, 0.15)
+            btnAll.TextColor3 = Color3.fromRGB(160, 150, 180)
+            btnFav.TextColor3 = C.white
+        end
     end
+    updateTabs()
 
     btnAll.MouseButton1Click:Connect(function()
         if currentTab == "all" then return end
@@ -523,7 +544,7 @@ local function buildEmoteApp()
 
     -- Scroll Grid Container
     resultsContainer = Instance.new("ScrollingFrame", appContent)
-    resultsContainer.Size = UDim2.new(1, 0, 1, -95) 
+    resultsContainer.Size = UDim2.new(1, 0, 1, -125) 
     resultsContainer.BackgroundTransparency = 1
     resultsContainer.BorderSizePixel = 0
     resultsContainer.ScrollBarThickness = 2
@@ -545,10 +566,9 @@ local function buildEmoteApp()
 
     renderEmotes()
     
-    -- Load ALL Emotes logic
     if not _G.EmoteCache.loaded or #Emotes < 100 then fetchAllEmotes() end
     return true
 end
 
 function _G.openEmoteApp() pcall(buildEmoteApp) end
-print("[Emote] V4 Neon Purple Gradient (All Emotes) Loaded!")
+print("[Emote] V5 Exact Match Applied Successfully!")
