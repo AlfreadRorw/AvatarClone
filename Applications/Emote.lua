@@ -9,21 +9,30 @@
 -- Fix: Consistent BackgroundTransparency/Color on every frame
 -- ================================================
 
-local Services    = _G.Services
+local Services    = _G.Services or {}
 local LocalPlayer = _G.LocalPlayer
 local Helpers     = _G.Helpers or {}
 local Storage     = _G.Storage or {}
 local appContent  = _G.appContent
 local appTitle    = _G.appTitle
 
-local HttpService = Services.HttpService
+-- FIX #4: fallback ke game:GetService supaya top-level tidak pernah error
+-- "attempt to index nil" kalau _G.Services belum sempat ke-set (race
+-- condition urutan load). Kalau top-level error, seluruh sisa file (termasuk
+-- deklarasi function _G.openEmoteApp) tidak pernah dieksekusi, sehingga
+-- _G.openApp("Emote", _G.openEmoteApp) di BuildIcons.lua akan crash
+-- memanggil nil() saat ikon Emote diklik -> layar putih kosong.
+local HttpService = Services.HttpService or game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ContextActionService = game:GetService("ContextActionService")
 
-local corner  = Helpers.corner
-local stroke  = Helpers.stroke
-local tween   = Helpers.tween
-local pressFX = Helpers.pressFX
+-- FIX #5: fallback polos untuk corner/stroke/tween/pressFX kalau Helpers
+-- gagal load, supaya app tetap tampil (walau tanpa rounded corner/animasi)
+-- daripada error "attempt to call a nil value" di tengah pembuatan UI.
+local corner  = Helpers.corner  or function(o, r) local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r or 10); c.Parent = o; return c end
+local stroke  = Helpers.stroke  or function(o, c, t, tr) local s = Instance.new("UIStroke"); s.Color = c or Color3.fromRGB(80,80,80); s.Thickness = t or 1; s.Transparency = tr or 0; s.Parent = o; return s end
+local tween   = Helpers.tween   or function(o, props) for k, v in pairs(props) do pcall(function() o[k] = v end) end end
+local pressFX = Helpers.pressFX or function() end
 
 -- ==================== PALETTE ====================
 local C = {
@@ -58,8 +67,18 @@ _G.EmoteCache = _G.EmoteCache or {
 
 local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
-local isLoaded = _G.EmoteCache.loaded
-local isLoading = _G.EmoteCache.loading
+
+-- FIX #1 (root cause layar putih): isLoaded/isLoading sebelumnya adalah
+-- snapshot boolean biasa (local isLoaded = _G.EmoteCache.loaded). Karena
+-- Loader.lua hanya menjalankan file ini SEKALI saat startup untuk
+-- mendefinisikan _G.openEmoteApp, closure fetchAllEmotes() yang meng-update
+-- "isLoaded = true" mengubah variabel lokal miliknya sendiri, BUKAN variabel
+-- module-level yang dibaca di openEmoteApp(). Akibatnya app selalu mengira
+-- data belum ready padahal race condition timing render vs fetch bikin
+-- resultsContainer sempat ke-render kosong tanpa refresh berikutnya.
+-- Sekarang selalu baca live dari _G.EmoteCache.
+local function isLoaded() return _G.EmoteCache.loaded end
+local function isLoading() return _G.EmoteCache.loading end
 
 -- ==================== STATE ====================
 local currentAnimTrack = nil
@@ -122,8 +141,7 @@ local function fetchEmotePage(cursor)
 end
 
 local function fetchAllEmotes(maxPages)
-    if isLoading or isLoaded then return end
-    isLoading = true
+    if isLoading() or isLoaded() then return end
     _G.EmoteCache.loading = true
 
     maxPages = maxPages or 4
@@ -188,12 +206,14 @@ local function fetchAllEmotes(maxPages)
             table.insert(Emotes, e)
         end
 
-        isLoaded = true
-        isLoading = false
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
 
-        if appTitle and appTitle.Text == "Emote" then
+        -- FIX #2: jangan syaratkan appTitle.Text == "Emote" saja (rawan
+        -- gagal cocok kalau app lain sempat dibuka lalu ditutup dan appTitle
+        -- belum ke-reset, atau kalau title berubah). Cek langsung apakah
+        -- resultsContainer app Emote ini masih ada di layar (masih ter-parent).
+        if resultsContainer and resultsContainer.Parent then
             if _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
         end
 
@@ -545,7 +565,11 @@ _G.renderEmotesRefresh = renderEmotes
 --      appScr yang lebih luas dan bisa menyisakan celah putih).
 -- Cukup isi appContent dengan frame-frame anak ber-LayoutOrder berurutan,
 -- persis seperti Settings.lua, Profile.lua, dsb.
-function _G.openEmoteApp()
+-- FIX #6: fungsi asli di-rename dan dibungkus pcall lewat _G.openEmoteApp
+-- di bawah. Kalau terjadi error runtime saat membangun UI (misal Helpers
+-- rusak, atau field yang berubah di tempat lain), user akan melihat pesan
+-- error jelas di appContent, bukan layar putih kosong tanpa petunjuk.
+local function buildEmoteApp()
     if not appContent then return end
 
     -- ===== HEADER =====
@@ -812,18 +836,41 @@ function _G.openEmoteApp()
     end)
 
     -- ===== RENDER =====
-    if not isLoaded and not isLoading then
+    -- FIX #3: render LANGSUNG (bukan nunggu task.wait(0.1) lalu baru render),
+    -- pakai apa pun yang sudah ada di cache saat ini (bisa 0 kalau baru
+    -- pertama kali dibuka). renderEmotes() sudah menangani kondisi kosong
+    -- dengan menampilkan teks "Tidak ada emote ditemukan", jadi user akan
+    -- selalu melihat SESUATU, bukan layar putih kosong tanpa teks apapun.
+    renderEmotes()
+    if hSub then hSub.Text = #Emotes .. " emotes available" end
+    if infoLbl then infoLbl.Text = #Emotes .. " emotes" end
+
+    if not isLoaded() and not isLoading() then
         fetchAllEmotes(4)
     end
 
-    task.spawn(function()
-        task.wait(0.1)
-        renderEmotes()
-        if hSub then hSub.Text = #Emotes .. " emotes available" end
-        if infoLbl then infoLbl.Text = #Emotes .. " emotes" end
-    end)
-
     return true
+end
+
+function _G.openEmoteApp()
+    local ok, err = pcall(buildEmoteApp)
+    if not ok then
+        warn("[Emote] Error building UI: " .. tostring(err))
+        if appContent then
+            local errLbl = Instance.new("TextLabel", appContent)
+            errLbl.Size = UDim2.new(1, 0, 0, 80)
+            errLbl.BackgroundTransparency = 1
+            errLbl.Text = "⚠️ Emote app gagal dimuat:\n" .. tostring(err)
+            errLbl.TextColor3 = C.red
+            errLbl.Font = Enum.Font.Gotham
+            errLbl.TextSize = 11
+            errLbl.TextWrapped = true
+            errLbl.LayoutOrder = 0
+        end
+        if _G.showDynamicNotification then
+            _G.showDynamicNotification("Emote gagal dimuat, cek console", C.red)
+        end
+    end
 end
 
 print("[Emote] App loaded! " .. #Emotes .. " emotes cached.")
