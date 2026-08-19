@@ -17,18 +17,11 @@ local appContent  = _G.appContent
 local appTitle    = _G.appTitle
 
 -- FIX #4: fallback ke game:GetService supaya top-level tidak pernah error
--- "attempt to index nil" kalau _G.Services belum sempat ke-set (race
--- condition urutan load). Kalau top-level error, seluruh sisa file (termasuk
--- deklarasi function _G.openEmoteApp) tidak pernah dieksekusi, sehingga
--- _G.openApp("Emote", _G.openEmoteApp) di BuildIcons.lua akan crash
--- memanggil nil() saat ikon Emote diklik -> layar putih kosong.
 local HttpService = Services.HttpService or game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ContextActionService = game:GetService("ContextActionService")
 
--- FIX #5: fallback polos untuk corner/stroke/tween/pressFX kalau Helpers
--- gagal load, supaya app tetap tampil (walau tanpa rounded corner/animasi)
--- daripada error "attempt to call a nil value" di tengah pembuatan UI.
+-- FIX #5: fallback polos untuk corner/stroke/tween/pressFX kalau Helpers gagal load
 local corner  = Helpers.corner  or function(o, r) local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r or 10); c.Parent = o; return c end
 local stroke  = Helpers.stroke  or function(o, c, t, tr) local s = Instance.new("UIStroke"); s.Color = c or Color3.fromRGB(80,80,80); s.Thickness = t or 1; s.Transparency = tr or 0; s.Parent = o; return s end
 local tween   = Helpers.tween   or function(o, props) for k, v in pairs(props) do pcall(function() o[k] = v end) end end
@@ -53,8 +46,6 @@ local C = {
     orange    = Color3.fromRGB(255, 150, 50),
 }
 
--- Placeholder icon yang valid (dipakai saat emote.icon kosong/nil)
--- Menggunakan gambar transparan bawaan Roblox agar tidak render kotak putih.
 local FALLBACK_ICON = "rbxasset://textures/ui/GuiImagePlaceholder.png"
 
 -- ==================== CACHE GLOBAL ====================
@@ -68,15 +59,6 @@ _G.EmoteCache = _G.EmoteCache or {
 local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
 
--- FIX #1 (root cause layar putih): isLoaded/isLoading sebelumnya adalah
--- snapshot boolean biasa (local isLoaded = _G.EmoteCache.loaded). Karena
--- Loader.lua hanya menjalankan file ini SEKALI saat startup untuk
--- mendefinisikan _G.openEmoteApp, closure fetchAllEmotes() yang meng-update
--- "isLoaded = true" mengubah variabel lokal miliknya sendiri, BUKAN variabel
--- module-level yang dibaca di openEmoteApp(). Akibatnya app selalu mengira
--- data belum ready padahal race condition timing render vs fetch bikin
--- resultsContainer sempat ke-render kosong tanpa refresh berikutnya.
--- Sekarang selalu baca live dari _G.EmoteCache.
 local function isLoaded() return _G.EmoteCache.loaded end
 local function isLoading() return _G.EmoteCache.loading end
 
@@ -209,10 +191,6 @@ local function fetchAllEmotes(maxPages)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
 
-        -- FIX #2: jangan syaratkan appTitle.Text == "Emote" saja (rawan
-        -- gagal cocok kalau app lain sempat dibuka lalu ditutup dan appTitle
-        -- belum ke-reset, atau kalau title berubah). Cek langsung apakah
-        -- resultsContainer app Emote ini masih ada di layar (masih ter-parent).
         if resultsContainer and resultsContainer.Parent then
             if _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
         end
@@ -325,34 +303,28 @@ end
 
 -- ==================== RENDER CARD (GRID 3 KOLOM) ====================
 local function renderEmoteCard(parent, emote, order, isFavorite)
-    -- Kartu berukuran 1/3 lebar baris, tinggi penuh baris
     local card = Instance.new("Frame", parent)
-    card.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 kartu per baris dengan jarak 4px
+    card.Size = UDim2.new(0.333, -4, 1, 0)
     card.BackgroundColor3 = C.card
     card.LayoutOrder = order
-    card.BackgroundTransparency = 0  -- mulai terlihat, animasi fade-in mengubah dari sini
+    card.BackgroundTransparency = 1
     card.BorderSizePixel = 0
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    -- Untuk animasi fade-in, mulai dari transparan lalu tween ke 0
-    card.BackgroundTransparency = 1
-
-    -- Gambar emote (atas)
     local hasIcon = type(emote.icon) == "string" and emote.icon ~= "" and emote.icon ~= "rbxassetid://0"
 
     local thumb = Instance.new("ImageLabel", card)
-    thumb.Size = UDim2.new(1, 0, 0, 100)  -- Tinggi gambar tetap 100px
+    thumb.Size = UDim2.new(1, 0, 0, 100)
     thumb.Position = UDim2.new(0, 0, 0, 0)
     thumb.BackgroundColor3 = C.card2
     thumb.BackgroundTransparency = 0
     thumb.Image = hasIcon and emote.icon or ""
-    thumb.ScaleType = Enum.ScaleType.Crop  -- Crop agar memenuhi frame
+    thumb.ScaleType = Enum.ScaleType.Crop
     thumb.BorderSizePixel = 0
     corner(thumb, 12)
     stroke(thumb, C.border, 1, 0.2)
 
-    -- Jika tidak ada gambar valid, tampilkan ikon placeholder teks (bukan kotak putih)
     if not hasIcon then
         local placeholder = Instance.new("TextLabel", thumb)
         placeholder.Size = UDim2.new(1, 0, 1, 0)
@@ -364,15 +336,15 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
         placeholder.ZIndex = 2
     end
 
-    -- Jika gambar gagal dimuat (broken asset), fallback ke placeholder juga
-    thumb:GetPropertyChangedSignal("IsLoaded"):Connect(function()
-        -- no-op guard: beberapa executor tidak expose IsLoaded, dibungkus pcall di caller
+    pcall(function()
+        thumb:GetPropertyChangedSignal("IsLoaded"):Connect(function()
+            -- Guarded fallback
+        end)
     end)
 
-    -- Bintang favorit (overlay di pojok kanan atas gambar)
     local favBtn = Instance.new("TextButton", card)
     favBtn.Size = UDim2.new(0, 24, 0, 24)
-    favBtn.Position = UDim2.new(1, -28, 0, 4)  -- Pojok kanan atas
+    favBtn.Position = UDim2.new(1, -28, 0, 4)
     favBtn.BackgroundTransparency = 1
     favBtn.Text = isFavorite and "★" or "☆"
     favBtn.TextColor3 = isFavorite and C.gold or C.text3
@@ -399,7 +371,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
         end
     end)
 
-    -- Nama emote (di bawah gambar)
     local nameLbl = Instance.new("TextLabel", card)
     nameLbl.Size = UDim2.new(1, -8, 0, 18)
     nameLbl.Position = UDim2.new(0, 4, 0, 104)
@@ -411,7 +382,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     nameLbl.TextXAlignment = Enum.TextXAlignment.Center
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
-    -- Tombol Play (di bawah nama)
     local playBtn = Instance.new("TextButton", card)
     playBtn.Size = UDim2.new(1, -8, 0, 28)
     playBtn.Position = UDim2.new(0, 4, 0, 124)
@@ -427,7 +397,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
         playEmote(emote.id)
     end)
 
-    -- Animasi muncul bertahap
     task.spawn(function()
         task.wait(order * 0.02)
         if card.Parent then
@@ -459,27 +428,22 @@ local function renderEmotes()
     local q = searchQuery:lower()
 
     for _, e in ipairs(Emotes) do
-        -- Filter berdasarkan tab
         if currentTab == "favorites" then
             local isFav = table.find(Favorites, e.id) ~= nil
             if not isFav then
-                -- Lewati jika bukan favorit (gunakan continue dalam Luau)
-                goto continue
+                continue
             end
         elseif currentTab == "search" then
-            -- Tab Search hanya menampilkan hasil pencarian
             if q ~= "" and not e.name:lower():find(q, 1, true) then
-                goto continue
+                continue
             end
-        else -- Tab All
-            -- Tab All juga bisa difilter oleh searchQuery
+        else
             if q ~= "" and not e.name:lower():find(q, 1, true) then
-                goto continue
+                continue
             end
         end
 
         table.insert(filtered, e)
-        ::continue::
     end
 
     local sorted = sortEmotes(filtered, currentSort)
@@ -501,7 +465,7 @@ local function renderEmotes()
         return
     end
 
-    local BATCH_SIZE = 6  -- Sekarang 6 item = 2 baris, biar lebih responsif
+    local BATCH_SIZE = 6
     local total = #sorted
 
     task.spawn(function()
@@ -514,21 +478,18 @@ local function renderEmotes()
                 local emote = sorted[idx]
                 local isFav = table.find(Favorites, emote.id) ~= nil
 
-                -- Buat baris baru setiap 3 item (indeks relatif)
                 local rowIndex = math.floor((idx - 1) / 3) + 1
                 local posInRow = ((idx - 1) % 3) + 1
 
-                -- Cari atau buat baris yang sesuai
                 local row = resultsContainer:FindFirstChild("Row_" .. rowIndex)
                 if not row then
                     row = Instance.new("Frame", resultsContainer)
                     row.Name = "Row_" .. rowIndex
-                    row.Size = UDim2.new(1, 0, 0, 150)  -- Tinggi baris tetap 150px
+                    row.Size = UDim2.new(1, 0, 0, 150)
                     row.BackgroundTransparency = 1
                     row.LayoutOrder = rowIndex
                     corner(row, 8)
 
-                    -- Layout horizontal untuk 3 kartu
                     local rowLayout = Instance.new("UIListLayout", row)
                     rowLayout.FillDirection = Enum.FillDirection.Horizontal
                     rowLayout.Padding = UDim.new(0, 6)
@@ -549,30 +510,9 @@ end
 _G.renderEmotesRefresh = renderEmotes
 
 -- ==================== BUKA APP ====================
--- CATATAN PENTING:
--- appContent (dari Core/BuildIcons.lua) SUDAH memiliki UIListLayout sendiri
--- ("acl") dan dikendalikan oleh _G.openApp():
---   - _G.openApp() yang membersihkan appContent (clearAppContent, tetap
---     mempertahankan UIListLayout aslinya) SEBELUM memanggil fungsi ini.
---   - _G.openApp() juga yang mengatur appScr.BackgroundColor3 = T.BG.
--- Maka fungsi ini TIDAK BOLEH:
---   1. Membuat UIListLayout baru di appContent (akan bentrok/duplikat
---      dengan layout bawaan dan menyebabkan anak-anak salah posisi).
---   2. Memanggil appContent:ClearAllChildren() (akan ikut menghapus
---      UIListLayout bawaan milik sistem inti).
---   3. Mengubah appContent.BackgroundColor3 (dikendalikan oleh
---      _G.openApp/appScr, mengubahnya di sini tidak berefek pada area
---      appScr yang lebih luas dan bisa menyisakan celah putih).
--- Cukup isi appContent dengan frame-frame anak ber-LayoutOrder berurutan,
--- persis seperti Settings.lua, Profile.lua, dsb.
--- FIX #6: fungsi asli di-rename dan dibungkus pcall lewat _G.openEmoteApp
--- di bawah. Kalau terjadi error runtime saat membangun UI (misal Helpers
--- rusak, atau field yang berubah di tempat lain), user akan melihat pesan
--- error jelas di appContent, bukan layar putih kosong tanpa petunjuk.
 local function buildEmoteApp()
     if not appContent then return end
 
-    -- ===== HEADER =====
     local header = Instance.new("Frame", appContent)
     header.Size = UDim2.new(1, 0, 0, 44)
     header.BackgroundColor3 = C.card
@@ -602,7 +542,6 @@ local function buildEmoteApp()
     hSub.TextSize = 9
     hSub.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- ===== SEARCH BAR =====
     local searchFrame = Instance.new("Frame", appContent)
     searchFrame.Size = UDim2.new(1, 0, 0, 36)
     searchFrame.BackgroundColor3 = C.card2
@@ -628,7 +567,6 @@ local function buildEmoteApp()
         renderEmotes()
     end)
 
-    -- ===== TAB SYSTEM (3 TAB) =====
     local tabBar = Instance.new("Frame", appContent)
     tabBar.Size = UDim2.new(1, 0, 0, 36)
     tabBar.BackgroundColor3 = C.card2
@@ -652,7 +590,7 @@ local function buildEmoteApp()
     local tabBtns = {}
     for i, tab in ipairs(tabs) do
         local btn = Instance.new("TextButton", tabBar)
-        btn.Size = UDim2.new(0.333, -4, 1, 0)  -- 3 tab sama besar
+        btn.Size = UDim2.new(0.333, -4, 1, 0)
         btn.BackgroundColor3 = (currentTab == tab.id) and C.accent or C.card
         btn.BackgroundTransparency = 0
         btn.BorderSizePixel = 0
@@ -679,7 +617,6 @@ local function buildEmoteApp()
         tabBtns[i] = btn
     end
 
-    -- ===== INFO BAR =====
     local infoBar = Instance.new("Frame", appContent)
     infoBar.Size = UDim2.new(1, 0, 0, 22)
     infoBar.BackgroundTransparency = 1
@@ -694,7 +631,6 @@ local function buildEmoteApp()
     infoLbl.TextSize = 9
     infoLbl.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- ===== RESULTS (SCROLLING FRAME DENGAN GRID) =====
     resultsContainer = Instance.new("ScrollingFrame", appContent)
     resultsContainer.Size = UDim2.new(1, 0, 0, 280)
     resultsContainer.BackgroundColor3 = C.bg
@@ -718,7 +654,6 @@ local function buildEmoteApp()
     resLayout.Padding = UDim.new(0, 6)
     resLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- ===== PLAYBACK CONTROLS =====
     local controls = Instance.new("Frame", appContent)
     controls.Size = UDim2.new(1, 0, 0, 44)
     controls.BackgroundColor3 = C.card2
@@ -835,12 +770,6 @@ local function buildEmoteApp()
         if _G.showDynamicNotification then _G.showDynamicNotification("Emote dihentikan", C.text3) end
     end)
 
-    -- ===== RENDER =====
-    -- FIX #3: render LANGSUNG (bukan nunggu task.wait(0.1) lalu baru render),
-    -- pakai apa pun yang sudah ada di cache saat ini (bisa 0 kalau baru
-    -- pertama kali dibuka). renderEmotes() sudah menangani kondisi kosong
-    -- dengan menampilkan teks "Tidak ada emote ditemukan", jadi user akan
-    -- selalu melihat SESUATU, bukan layar putih kosong tanpa teks apapun.
     renderEmotes()
     if hSub then hSub.Text = #Emotes .. " emotes available" end
     if infoLbl then infoLbl.Text = #Emotes .. " emotes" end
