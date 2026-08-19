@@ -1,8 +1,8 @@
 -- ================================================
--- EMOTE.LUA — Performance Optimized
--- Fix: Emotes appear as they load (no lag spike)
--- Fix: Render in small batches to prevent frame drop
--- Fix: Fetch limited to 20 pages for stability
+-- EMOTE.LUA — Performance Optimized Final
+-- Fix: Tab All shows only 20 emotes (top recent)
+-- Fix: Search tab shows full results (limit 50)
+-- Fix: Fetch completes then renders once (no lag)
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -39,8 +39,6 @@ local C = {
     orange    = Color3.fromRGB(255, 150, 50),
 }
 
-local FALLBACK_ICON = "rbxasset://textures/ui/GuiImagePlaceholder.png"
-
 _G.EmoteCache = _G.EmoteCache or {
     emotes = {},
     favorites = {},
@@ -63,6 +61,8 @@ local currentTab = "all"
 local searchQuery = ""
 local currentSort = "recentfirst"
 local renderToken = 0
+local tabBtns = {}  -- referensi tombol tab
+local searchBoxRef = nil
 
 local function loadFavorites()
     if Storage and Storage.appSettings then
@@ -111,23 +111,21 @@ local function fetchEmotePage(cursor)
     return dok and data or nil
 end
 
--- FETCH: Sekarang setiap halaman langsung ditambahkan dan dirender
+-- Fetch semua emote tanpa render per halaman
 local function fetchAllEmotes(maxPages)
     if isLoading() or isLoaded() then return end
     _G.EmoteCache.loading = true
 
-    maxPages = maxPages or 20  -- batasi 20 halaman (≈600 emote)
+    maxPages = maxPages or 20  -- 20 halaman = ~600 emote
 
     task.spawn(function()
         local cursor = ""
         local pages = 0
-        local totalAdded = 0
 
         while pages < maxPages do
             local page = fetchEmotePage(cursor)
             if not page or not page.data or #page.data == 0 then break end
 
-            local newThisPage = {}
             for _, item in ipairs(page.data) do
                 if item.id and item.name then
                     local exists = false
@@ -135,29 +133,21 @@ local function fetchAllEmotes(maxPages)
                         if e.id == item.id then exists = true; break end
                     end
                     if not exists then
-                        local emoteData = {
+                        table.insert(Emotes, {
                             id    = item.id,
                             name  = item.name,
                             price = item.price or 0,
                             icon  = "rbxthumb://type=Asset&id=" .. item.id .. "&w=150&h=150",
                             updated = item.updated or "",
-                        }
-                        table.insert(Emotes, emoteData)
-                        table.insert(newThisPage, emoteData)
-                        totalAdded = totalAdded + 1
+                        })
                     end
                 end
-            end
-
-            -- Update UI setelah setiap halaman (jika app sudah terbuka)
-            if resultsContainer and resultsContainer.Parent then
-                renderEmotes()
             end
 
             cursor = page.nextPageCursor or ""
             pages = pages + 1
             if cursor == "" then break end
-            task.wait(0.5)  -- jeda antar request
+            task.wait(0.5)
         end
 
         -- Tambahkan emote populer jika belum ada
@@ -187,6 +177,7 @@ local function fetchAllEmotes(maxPages)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
 
+        -- Render sekali setelah semua data selesai
         if resultsContainer and resultsContainer.Parent then
             renderEmotes()
         end
@@ -305,14 +296,6 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    -- Gradient card
-    local cardGradient = Instance.new("UIGradient", card)
-    cardGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 40)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 26)),
-    })
-    cardGradient.Rotation = 45
-
     local hasIcon = type(emote.icon) == "string" and emote.icon ~= "" and emote.icon ~= "rbxassetid://0"
 
     local thumb = Instance.new("ImageLabel", card)
@@ -416,7 +399,7 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
     return card
 end
 
--- ==================== RENDER UTAMA (dengan batch) ====================
+-- ==================== RENDER UTAMA ====================
 local resultsContainer = nil
 local infoLbl = nil
 
@@ -426,7 +409,7 @@ local function renderEmotes()
 
     if not resultsContainer then return end
 
-    -- Hapus semua row yang ada (kecuali layout & padding)
+    -- Hapus semua child kecuali layout & padding
     for _, c in ipairs(resultsContainer:GetChildren()) do
         if c:IsA("Frame") or c:IsA("ImageLabel") or c:IsA("TextLabel") or c:IsA("TextButton") then
             if c.Name ~= "UIListLayout" and c.Name ~= "UIPadding" then
@@ -438,30 +421,52 @@ local function renderEmotes()
     local filtered = {}
     local q = searchQuery:lower()
 
-    for _, e in ipairs(Emotes) do
-        local include = true
-        if currentTab == "favorites" then
-            include = table.find(Favorites, e.id) ~= nil
-        elseif currentTab == "search" then
-            if q ~= "" and not e.name:lower():find(q, 1, true) then
-                include = false
-            end
-        else
-            if q ~= "" and not e.name:lower():find(q, 1, true) then
-                include = false
+    if currentTab == "all" then
+        -- Tab All: tampilkan 20 emote terbaru tanpa filter
+        filtered = Emotes
+    elseif currentTab == "favorites" then
+        for _, e in ipairs(Emotes) do
+            if table.find(Favorites, e.id) ~= nil then
+                table.insert(filtered, e)
             end
         end
-
-        if include then
-            table.insert(filtered, e)
+    elseif currentTab == "search" then
+        if q ~= "" then
+            for _, e in ipairs(Emotes) do
+                if e.name:lower():find(q, 1, true) then
+                    table.insert(filtered, e)
+                end
+            end
+        else
+            filtered = {}
         end
     end
 
     local sorted = sortEmotes(filtered, currentSort)
 
+    -- Batasi jumlah tampilan berdasarkan tab
+    local maxDisplay = 0
+    if currentTab == "all" then
+        maxDisplay = 20
+    elseif currentTab == "search" then
+        maxDisplay = 50
+    else
+        maxDisplay = #sorted
+    end
+
+    if #sorted > maxDisplay then
+        local limited = {}
+        for i = 1, maxDisplay do
+            table.insert(limited, sorted[i])
+        end
+        sorted = limited
+    end
+
     if infoLbl then
-        if not isLoaded() and isLoading() then
+        if isLoading() then
             infoLbl.Text = "Memuat... (" .. #Emotes .. " emotes)"
+        elseif currentTab == "search" then
+            infoLbl.Text = #sorted .. " hasil" .. (#sorted ~= 1 and "s" or "") .. " (dari " .. #filtered .. " total)"
         else
             infoLbl.Text = #sorted .. " emote" .. (#sorted ~= 1 and "s" or "")
         end
@@ -471,7 +476,7 @@ local function renderEmotes()
         local empty = Instance.new("TextLabel", resultsContainer)
         empty.Size = UDim2.new(1, 0, 0, 60)
         empty.BackgroundTransparency = 1
-        empty.Text = currentTab == "favorites" and "Belum ada emote favorit\n★ Tambahkan dengan tap bintang!" or (isLoading() and "Memuat emote..." or "😢 Tidak ada emote ditemukan")
+        empty.Text = currentTab == "favorites" and "Belum ada emote favorit\n★ Tambahkan dengan tap bintang!" or (isLoading() and "Memuat emote..." or (currentTab == "search" and "Ketik kata kunci untuk mencari" or "😢 Tidak ada emote"))
         empty.TextColor3 = C.text3
         empty.Font = Enum.Font.Gotham
         empty.TextSize = 12
@@ -480,7 +485,7 @@ local function renderEmotes()
         return
     end
 
-    -- Render dengan batch kecil untuk menghindari frame drop
+    -- Render dengan batch kecil
     local BATCH_SIZE = 6
     local total = #sorted
     local currentIndex = 1
@@ -518,17 +523,36 @@ local function renderEmotes()
 
             currentIndex = batchEnd + 1
             if currentIndex <= total then
-                task.wait(0.03) -- jeda kecil antar batch
+                task.wait(0.05) -- jeda lebih besar agar smooth
             end
         end
 
-        -- Update CanvasSize setelah render selesai
         if renderToken == token then
             resultsContainer.CanvasSize = UDim2.new(0, 0, 0, math.ceil(total / 3) * 170 + 12)
         end
     end)
 end
 _G.renderEmotesRefresh = renderEmotes
+
+-- ==================== SET ACTIVE TAB ====================
+local function setActiveTab(tabId)
+    currentTab = tabId
+    for _, btn in ipairs(tabBtns) do
+        btn.BackgroundColor3 = C.card
+        btn.TextColor3 = C.text2
+    end
+    if tabId == "all" then
+        tabBtns[1].BackgroundColor3 = C.accent
+        tabBtns[1].TextColor3 = Color3.new(1, 1, 1)
+    elseif tabId == "favorites" then
+        tabBtns[2].BackgroundColor3 = C.accent
+        tabBtns[2].TextColor3 = Color3.new(1, 1, 1)
+    elseif tabId == "search" then
+        tabBtns[3].BackgroundColor3 = C.accent
+        tabBtns[3].TextColor3 = Color3.new(1, 1, 1)
+    end
+    renderEmotes()
+end
 
 -- ==================== BUKA APP ====================
 local function buildEmoteApp()
@@ -552,13 +576,6 @@ local function buildEmoteApp()
     header.LayoutOrder = 0
     corner(header, 14)
     stroke(header, C.accent, 1, 0.5)
-
-    local headerGradient = Instance.new("UIGradient", header)
-    headerGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 45)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(18, 18, 28)),
-    })
-    headerGradient.Rotation = 90
 
     local hTitle = Instance.new("TextLabel", header)
     hTitle.Size = UDim2.new(1, -70, 0, 22)
@@ -589,20 +606,24 @@ local function buildEmoteApp()
     corner(searchFrame, 12)
     stroke(searchFrame, C.border, 1, 0.3)
 
-    local searchBox = Instance.new("TextBox", searchFrame)
-    searchBox.Size = UDim2.new(1, -46, 1, 0)
-    searchBox.Position = UDim2.new(0, 10, 0, 0)
-    searchBox.BackgroundTransparency = 1
-    searchBox.PlaceholderText = "🔍 Cari emote..."
-    searchBox.PlaceholderColor3 = C.text3
-    searchBox.Text = searchQuery
-    searchBox.TextColor3 = C.text
-    searchBox.Font = Enum.Font.Gotham
-    searchBox.TextSize = 11
-    searchBox.ClearTextOnFocus = false
-    searchBox:GetPropertyChangedSignal("Text"):Connect(function()
-        searchQuery = searchBox.Text
-        renderEmotes()
+    searchBoxRef = Instance.new("TextBox", searchFrame)
+    searchBoxRef.Size = UDim2.new(1, -46, 1, 0)
+    searchBoxRef.Position = UDim2.new(0, 10, 0, 0)
+    searchBoxRef.BackgroundTransparency = 1
+    searchBoxRef.PlaceholderText = "🔍 Cari emote..."
+    searchBoxRef.PlaceholderColor3 = C.text3
+    searchBoxRef.Text = searchQuery
+    searchBoxRef.TextColor3 = C.text
+    searchBoxRef.Font = Enum.Font.Gotham
+    searchBoxRef.TextSize = 11
+    searchBoxRef.ClearTextOnFocus = false
+    searchBoxRef:GetPropertyChangedSignal("Text"):Connect(function()
+        searchQuery = searchBoxRef.Text
+        if searchQuery ~= "" and currentTab ~= "search" then
+            setActiveTab("search")
+        else
+            renderEmotes()
+        end
     end)
 
     local tabBar = Instance.new("Frame", appContent)
@@ -625,7 +646,6 @@ local function buildEmoteApp()
         {id = "search", label = "🔍 Cari"},
     }
 
-    local tabBtns = {}
     for i, tab in ipairs(tabs) do
         local btn = Instance.new("TextButton", tabBar)
         btn.Size = UDim2.new(0.333, -4, 1, 0)
@@ -641,17 +661,10 @@ local function buildEmoteApp()
         pressFX(btn)
 
         btn.MouseButton1Click:Connect(function()
-            currentTab = tab.id
-            for _, b in ipairs(tabBtns) do
-                b.BackgroundColor3 = C.card
-                b.TextColor3 = C.text2
+            setActiveTab(tab.id)
+            if tab.id == "search" then
+                searchBoxRef:CaptureFocus()
             end
-            btn.BackgroundColor3 = C.accent
-            btn.TextColor3 = Color3.new(1, 1, 1)
-            if currentTab == "search" then
-                searchBox:CaptureFocus()
-            end
-            renderEmotes()
         end)
         tabBtns[i] = btn
     end
