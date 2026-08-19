@@ -1,8 +1,12 @@
 -- ================================================
--- EMOTE.LUA — Performance Optimized Final
--- Fix: Tab All shows only 20 emotes (top recent)
--- Fix: Search tab shows full results (limit 50)
--- Fix: Fetch completes then renders once (no lag)
+-- EMOTE.LUA — Optimized for 60 FPS (No Frame Drops)
+-- Changes:
+--   - UIGridLayout replaces manual row creation
+--   - Object pooling for UI cards (no repeated Instance.new)
+--   - ContentProvider:PreloadAsync for thumbnails (background)
+--   - Debounced search (no render on every keystroke)
+--   - Fetch loop with proper task.wait (non-blocking)
+--   - No RunService.Heartbeat/RenderStepped (none needed)
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -16,11 +20,13 @@ local HttpService = Services.HttpService or game:GetService("HttpService")
 local MarketplaceService = game:GetService("MarketplaceService")
 local ContextActionService = game:GetService("ContextActionService")
 
+-- Helper fallback
 local corner  = Helpers.corner  or function(o, r) local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r or 10); c.Parent = o; return c end
 local stroke  = Helpers.stroke  or function(o, c, t, tr) local s = Instance.new("UIStroke"); s.Color = c or Color3.fromRGB(80,80,80); s.Thickness = t or 1; s.Transparency = tr or 0; s.Parent = o; return s end
 local tween   = Helpers.tween   or function(o, props) for k, v in pairs(props) do pcall(function() o[k] = v end) end end
 local pressFX = Helpers.pressFX or function() end
 
+-- Palette
 local C = {
     bg        = Color3.fromRGB(12, 12, 18),
     card      = Color3.fromRGB(20, 20, 28),
@@ -39,19 +45,19 @@ local C = {
     orange    = Color3.fromRGB(255, 150, 50),
 }
 
+-- Global cache
 _G.EmoteCache = _G.EmoteCache or {
     emotes = {},
     favorites = {},
     loaded = false,
     loading = false,
 }
-
 local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
-
 local function isLoaded() return _G.EmoteCache.loaded end
 local function isLoading() return _G.EmoteCache.loading end
 
+-- State
 local currentAnimTrack = nil
 local currentAnimId = nil
 local isPaused = false
@@ -61,9 +67,19 @@ local currentTab = "all"
 local searchQuery = ""
 local currentSort = "recentfirst"
 local renderToken = 0
-local tabBtns = {}  -- referensi tombol tab
-local searchBoxRef = nil
+local searchDebounceToken = 0
 
+-- UI References
+local resultsContainer = nil
+local infoLbl = nil
+local tabBtns = {}
+local searchBoxRef = nil
+local emptyLabel = nil
+local cardElements = {}       -- [card] = {thumb, favBtn, nameLbl, priceLbl, playBtn, placeholder}
+local cardPool = {}           -- pool of unused cards
+local activeCards = {}        -- cards currently visible in grid
+
+-- ==================== FAVORITES ====================
 local function loadFavorites()
     if Storage and Storage.appSettings then
         Storage.appSettings.emoteFavorites = Storage.appSettings.emoteFavorites or {}
@@ -84,9 +100,9 @@ local function saveFavorites()
         end)
     end
 end
-
 loadFavorites()
 
+-- ==================== FETCH EMOTES ====================
 local function fetchEmotePage(cursor)
     local url = "https://catalog.roblox.com/v1/search/items/details?"
         .. "Category=12&Subcategory=39&SortType=1&SortAggregation=&limit=30"
@@ -111,12 +127,12 @@ local function fetchEmotePage(cursor)
     return dok and data or nil
 end
 
--- Fetch semua emote tanpa render per halaman
+-- Fetch all emotes with non-blocking loop, no rendering per page
 local function fetchAllEmotes(maxPages)
     if isLoading() or isLoaded() then return end
     _G.EmoteCache.loading = true
 
-    maxPages = maxPages or 20  -- 20 halaman = ~600 emote
+    maxPages = maxPages or 15 -- 15 halaman ≈ 450 emote, cukup banyak dan ringan
 
     task.spawn(function()
         local cursor = ""
@@ -147,10 +163,10 @@ local function fetchAllEmotes(maxPages)
             cursor = page.nextPageCursor or ""
             pages = pages + 1
             if cursor == "" then break end
-            task.wait(0.5)
+            task.wait(0.3) -- memberi jeda agar tidak membanjiri request
         end
 
-        -- Tambahkan emote populer jika belum ada
+        -- Tambah emote populer jika belum ada
         local popular = {
             {id = 5915773155, name = "Arm Wave"},
             {id = 5915779725, name = "Head Banging"},
@@ -177,7 +193,6 @@ local function fetchAllEmotes(maxPages)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
 
-        -- Render sekali setelah semua data selesai
         if resultsContainer and resultsContainer.Parent then
             renderEmotes()
         end
@@ -188,6 +203,7 @@ local function fetchAllEmotes(maxPages)
     end)
 end
 
+-- ==================== SORTING ====================
 local function sortEmotes(list, sortType)
     local sorted = {}
     for _, e in ipairs(list) do table.insert(sorted, e) end
@@ -209,6 +225,7 @@ local function sortEmotes(list, sortType)
     return sorted
 end
 
+-- ==================== ANIMATION ====================
 local function stopAnimation()
     if currentAnimTrack then
         pcall(function() currentAnimTrack:Stop() end)
@@ -285,60 +302,111 @@ local function playEmote(assetId)
     end
 end
 
--- ==================== RENDER CARD ====================
-local function renderEmoteCard(parent, emote, order, isFavorite)
-    local card = Instance.new("Frame", parent)
-    card.Size = UDim2.new(0.333, -4, 1, 0)
+-- ==================== CARD POOLING & RENDER ====================
+local function createCard()
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(0.33, -8, 0, 170)
     card.BackgroundColor3 = C.card
-    card.LayoutOrder = order
     card.BackgroundTransparency = 0
     card.BorderSizePixel = 0
+    card.ClipsDescendants = false
     corner(card, 12)
     stroke(card, C.border, 1, 0.3)
 
-    local hasIcon = type(emote.icon) == "string" and emote.icon ~= "" and emote.icon ~= "rbxassetid://0"
-
-    local thumb = Instance.new("ImageLabel", card)
+    local thumb = Instance.new("ImageLabel")
     thumb.Size = UDim2.new(1, 0, 0, 100)
     thumb.Position = UDim2.new(0, 0, 0, 0)
     thumb.BackgroundColor3 = C.card2
     thumb.BackgroundTransparency = 0
-    thumb.Image = hasIcon and emote.icon or ""
+    thumb.Image = ""
     thumb.ScaleType = Enum.ScaleType.Crop
     thumb.BorderSizePixel = 0
+    thumb.Parent = card
     corner(thumb, 12)
     stroke(thumb, C.border, 1, 0.2)
 
-    if not hasIcon then
-        local placeholder = Instance.new("TextLabel", thumb)
-        placeholder.Size = UDim2.new(1, 0, 1, 0)
-        placeholder.BackgroundTransparency = 1
-        placeholder.Text = "💃"
-        placeholder.TextColor3 = C.text3
-        placeholder.Font = Enum.Font.GothamBold
-        placeholder.TextSize = 28
-        placeholder.ZIndex = 2
-    end
+    local placeholder = Instance.new("TextLabel")
+    placeholder.Size = UDim2.new(1, 0, 1, 0)
+    placeholder.BackgroundTransparency = 1
+    placeholder.Text = "💃"
+    placeholder.TextColor3 = C.text3
+    placeholder.Font = Enum.Font.GothamBold
+    placeholder.TextSize = 28
+    placeholder.ZIndex = 2
+    placeholder.Parent = thumb
 
-    local favBtn = Instance.new("TextButton", card)
+    local favBtn = Instance.new("TextButton")
     favBtn.Size = UDim2.new(0, 26, 0, 26)
     favBtn.Position = UDim2.new(1, -30, 0, 4)
     favBtn.BackgroundTransparency = 1
-    favBtn.Text = isFavorite and "★" or "☆"
-    favBtn.TextColor3 = isFavorite and C.gold or C.text3
+    favBtn.Text = "☆"
+    favBtn.TextColor3 = C.text3
     favBtn.Font = Enum.Font.GothamBold
     favBtn.TextSize = 18
     favBtn.AutoButtonColor = false
     favBtn.ZIndex = 5
+    favBtn.Parent = card
+
+    local nameLbl = Instance.new("TextLabel")
+    nameLbl.Size = UDim2.new(1, -8, 0, 20)
+    nameLbl.Position = UDim2.new(0, 4, 0, 104)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = ""
+    nameLbl.TextColor3 = C.text
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 11
+    nameLbl.TextXAlignment = Enum.TextXAlignment.Center
+    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+    nameLbl.ZIndex = 5
+    nameLbl.Parent = card
+
+    local priceLbl = Instance.new("TextLabel")
+    priceLbl.Size = UDim2.new(1, -8, 0, 14)
+    priceLbl.Position = UDim2.new(0, 4, 0, 124)
+    priceLbl.BackgroundTransparency = 1
+    priceLbl.Text = "Free"
+    priceLbl.TextColor3 = C.green
+    priceLbl.Font = Enum.Font.Gotham
+    priceLbl.TextSize = 9
+    priceLbl.TextXAlignment = Enum.TextXAlignment.Center
+    priceLbl.ZIndex = 5
+    priceLbl.Parent = card
+
+    local playBtn = Instance.new("TextButton")
+    playBtn.Size = UDim2.new(1, -8, 0, 28)
+    playBtn.Position = UDim2.new(0, 4, 0, 138)
+    playBtn.BackgroundColor3 = C.accent2
+    playBtn.Text = "▶ Play"
+    playBtn.TextColor3 = Color3.new(1, 1, 1)
+    playBtn.Font = Enum.Font.GothamBlack
+    playBtn.TextSize = 12
+    playBtn.AutoButtonColor = false
+    playBtn.Parent = card
+    corner(playBtn, 8)
+    pressFX(playBtn)
+
+    -- Simpan referensi elemen untuk update cepat
+    cardElements[card] = {
+        thumb = thumb,
+        placeholder = placeholder,
+        favBtn = favBtn,
+        nameLbl = nameLbl,
+        priceLbl = priceLbl,
+        playBtn = playBtn,
+    }
+
+    -- Event listener (sekali, gunakan attribute)
     favBtn.MouseButton1Click:Connect(function()
-        local idx = table.find(Favorites, emote.id)
+        local emoteId = tonumber(card:GetAttribute("EmoteId"))
+        if not emoteId then return end
+        local idx = table.find(Favorites, emoteId)
         if idx then
             table.remove(Favorites, idx)
             favBtn.Text = "☆"
             favBtn.TextColor3 = C.text3
             if _G.showDynamicNotification then _G.showDynamicNotification("Dihapus dari favorit", C.text3) end
         else
-            table.insert(Favorites, emote.id)
+            table.insert(Favorites, emoteId)
             favBtn.Text = "★"
             favBtn.TextColor3 = C.gold
             if _G.showDynamicNotification then _G.showDynamicNotification("Ditambahkan ke favorit!", C.gold) end
@@ -349,80 +417,53 @@ local function renderEmoteCard(parent, emote, order, isFavorite)
         end
     end)
 
-    local nameLbl = Instance.new("TextLabel", card)
-    nameLbl.Size = UDim2.new(1, -8, 0, 20)
-    nameLbl.Position = UDim2.new(0, 4, 0, 104)
-    nameLbl.BackgroundTransparency = 1
-    nameLbl.Text = emote.name or "Emote"
-    nameLbl.TextColor3 = C.text
-    nameLbl.Font = Enum.Font.GothamBold
-    nameLbl.TextSize = 11
-    nameLbl.TextXAlignment = Enum.TextXAlignment.Center
-    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-    nameLbl.ZIndex = 5
-
-    local priceLbl = Instance.new("TextLabel", card)
-    priceLbl.Size = UDim2.new(1, -8, 0, 14)
-    priceLbl.Position = UDim2.new(0, 4, 0, 124)
-    priceLbl.BackgroundTransparency = 1
-    priceLbl.Text = (emote.price and emote.price > 0) and ("💰 " .. tostring(emote.price)) or "Free"
-    priceLbl.TextColor3 = (emote.price and emote.price > 0) and C.gold or C.green
-    priceLbl.Font = Enum.Font.Gotham
-    priceLbl.TextSize = 9
-    priceLbl.TextXAlignment = Enum.TextXAlignment.Center
-    priceLbl.ZIndex = 5
-
-    local playBtn = Instance.new("TextButton", card)
-    playBtn.Size = UDim2.new(1, -8, 0, 28)
-    playBtn.Position = UDim2.new(0, 4, 0, 138)
-    playBtn.BackgroundColor3 = C.accent2
-    playBtn.Text = "▶ Play"
-    playBtn.TextColor3 = Color3.new(1, 1, 1)
-    playBtn.Font = Enum.Font.GothamBlack
-    playBtn.TextSize = 12
-    playBtn.AutoButtonColor = false
-    corner(playBtn, 8)
-    pressFX(playBtn)
-    playBtn.ZIndex = 5
-
-    local playGradient = Instance.new("UIGradient", playBtn)
-    playGradient.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 200, 255)),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(60, 140, 255)),
-    })
-    playGradient.Rotation = 90
-
     playBtn.MouseButton1Click:Connect(function()
-        playEmote(emote.id)
+        local emoteId = tonumber(card:GetAttribute("EmoteId"))
+        if emoteId then
+            playEmote(emoteId)
+        end
     end)
 
     return card
 end
 
--- ==================== RENDER UTAMA ====================
-local resultsContainer = nil
-local infoLbl = nil
+local function getCardFromPool()
+    if #cardPool > 0 then
+        return table.remove(cardPool)
+    else
+        return createCard()
+    end
+end
 
+local function releaseCardToPool(card)
+    card.Parent = nil
+    card:SetAttribute("EmoteId", nil)
+    table.insert(cardPool, card)
+end
+
+-- ==================== RENDER MAIN ====================
 local function renderEmotes()
     local token = renderToken + 1
     renderToken = token
 
     if not resultsContainer then return end
 
-    -- Hapus semua child kecuali layout & padding
-    for _, c in ipairs(resultsContainer:GetChildren()) do
-        if c:IsA("Frame") or c:IsA("ImageLabel") or c:IsA("TextLabel") or c:IsA("TextButton") then
-            if c.Name ~= "UIListLayout" and c.Name ~= "UIPadding" then
-                c:Destroy()
-            end
-        end
+    -- Kembalikan semua card aktif ke pool
+    for _, card in ipairs(activeCards) do
+        releaseCardToPool(card)
+    end
+    activeCards = {}
+
+    -- Hapus empty label jika ada
+    if emptyLabel then
+        emptyLabel:Destroy()
+        emptyLabel = nil
     end
 
     local filtered = {}
     local q = searchQuery:lower()
 
     if currentTab == "all" then
-        -- Tab All: tampilkan 20 emote terbaru tanpa filter
         filtered = Emotes
     elseif currentTab == "favorites" then
         for _, e in ipairs(Emotes) do
@@ -444,7 +485,7 @@ local function renderEmotes()
 
     local sorted = sortEmotes(filtered, currentSort)
 
-    -- Batasi jumlah tampilan berdasarkan tab
+    -- Batasi jumlah tampilan
     local maxDisplay = 0
     if currentTab == "all" then
         maxDisplay = 20
@@ -462,6 +503,7 @@ local function renderEmotes()
         sorted = limited
     end
 
+    -- Update info label
     if infoLbl then
         if isLoading() then
             infoLbl.Text = "Memuat... (" .. #Emotes .. " emotes)"
@@ -472,103 +514,111 @@ local function renderEmotes()
         end
     end
 
+    -- Tampilkan pesan kosong jika diperlukan
     if #sorted == 0 then
-        local empty = Instance.new("TextLabel", resultsContainer)
-        empty.Size = UDim2.new(1, 0, 0, 60)
-        empty.BackgroundTransparency = 1
-        empty.Text = currentTab == "favorites" and "Belum ada emote favorit\n★ Tambahkan dengan tap bintang!" or (isLoading() and "Memuat emote..." or (currentTab == "search" and "Ketik kata kunci untuk mencari" or "😢 Tidak ada emote"))
-        empty.TextColor3 = C.text3
-        empty.Font = Enum.Font.Gotham
-        empty.TextSize = 12
-        empty.TextWrapped = true
-        empty.LayoutOrder = 0
+        emptyLabel = Instance.new("TextLabel")
+        emptyLabel.Size = UDim2.new(1, 0, 0, 60)
+        emptyLabel.BackgroundTransparency = 1
+        emptyLabel.Text = currentTab == "favorites" and "Belum ada emote favorit\n★ Tambahkan dengan tap bintang!" or (isLoading() and "Memuat emote..." or (currentTab == "search" and "Ketik kata kunci untuk mencari" or "😢 Tidak ada emote"))
+        emptyLabel.TextColor3 = C.text3
+        emptyLabel.Font = Enum.Font.Gotham
+        emptyLabel.TextSize = 12
+        emptyLabel.TextWrapped = true
+        emptyLabel.Parent = resultsContainer
         return
     end
 
-    -- Render dengan batch kecil
-    local BATCH_SIZE = 6
-    local total = #sorted
-    local currentIndex = 1
+    -- Render kartu
+    local count = #sorted
+    for i = 1, count do
+        if renderToken ~= token then return end
 
-    task.spawn(function()
-        while currentIndex <= total do
-            if renderToken ~= token then return end
+        local emote = sorted[i]
+        local isFav = table.find(Favorites, emote.id) ~= nil
 
-            local batchEnd = math.min(currentIndex + BATCH_SIZE - 1, total)
-            for idx = currentIndex, batchEnd do
-                local emote = sorted[idx]
-                local isFav = table.find(Favorites, emote.id) ~= nil
+        local card = getCardFromPool()
+        card.Parent = resultsContainer
+        card:SetAttribute("EmoteId", emote.id)
 
-                local rowIndex = math.floor((idx - 1) / 3) + 1
-                local posInRow = ((idx - 1) % 3) + 1
+        local elems = cardElements[card]
+        if elems then
+            local hasIcon = (type(emote.icon) == "string" and emote.icon ~= "" and emote.icon ~= "rbxassetid://0")
+            elems.thumb.Image = hasIcon and emote.icon or ""
+            elems.placeholder.Visible = not hasIcon
+            elems.nameLbl.Text = emote.name or "Emote"
+            elems.priceLbl.Text = (emote.price and emote.price > 0) and ("💰 " .. tostring(emote.price)) or "Free"
+            elems.priceLbl.TextColor3 = (emote.price and emote.price > 0) and C.gold or C.green
+            elems.favBtn.Text = isFav and "★" or "☆"
+            elems.favBtn.TextColor3 = isFav and C.gold or C.text3
+        end
 
-                local row = resultsContainer:FindFirstChild("Row_" .. rowIndex)
-                if not row then
-                    row = Instance.new("Frame", resultsContainer)
-                    row.Name = "Row_" .. rowIndex
-                    row.Size = UDim2.new(1, 0, 0, 170)
-                    row.BackgroundTransparency = 1
-                    row.LayoutOrder = rowIndex
-                    corner(row, 8)
+        table.insert(activeCards, card)
+    end
 
-                    local rowLayout = Instance.new("UIListLayout", row)
-                    rowLayout.FillDirection = Enum.FillDirection.Horizontal
-                    rowLayout.Padding = UDim.new(0, 6)
-                    rowLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-                    rowLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    -- Preload thumbnail yang sedang tampil (async)
+    if #activeCards > 0 then
+        task.spawn(function()
+            local toPreload = {}
+            for _, c in ipairs(activeCards) do
+                local elems = cardElements[c]
+                if elems and elems.thumb.Image ~= "" then
+                    table.insert(toPreload, elems.thumb)
                 end
-
-                renderEmoteCard(row, emote, posInRow, isFav)
             end
-
-            currentIndex = batchEnd + 1
-            if currentIndex <= total then
-                task.wait(0.05) -- jeda lebih besar agar smooth
+            if #toPreload > 0 then
+                pcall(function()
+                    game:GetService("ContentProvider"):PreloadAsync(toPreload)
+                end)
             end
-        end
+        end)
+    end
 
-        if renderToken == token then
-            resultsContainer.CanvasSize = UDim2.new(0, 0, 0, math.ceil(total / 3) * 170 + 12)
-        end
-    end)
+    -- Perbarui CanvasSize
+    local rows = math.ceil(count / 3)
+    resultsContainer.CanvasSize = UDim2.new(0, 0, 0, rows * 170 + (rows - 1) * 6 + 12)
 end
 _G.renderEmotesRefresh = renderEmotes
 
 -- ==================== SET ACTIVE TAB ====================
 local function setActiveTab(tabId)
     currentTab = tabId
-    for _, btn in ipairs(tabBtns) do
-        btn.BackgroundColor3 = C.card
-        btn.TextColor3 = C.text2
-    end
-    if tabId == "all" then
-        tabBtns[1].BackgroundColor3 = C.accent
-        tabBtns[1].TextColor3 = Color3.new(1, 1, 1)
-    elseif tabId == "favorites" then
-        tabBtns[2].BackgroundColor3 = C.accent
-        tabBtns[2].TextColor3 = Color3.new(1, 1, 1)
-    elseif tabId == "search" then
-        tabBtns[3].BackgroundColor3 = C.accent
-        tabBtns[3].TextColor3 = Color3.new(1, 1, 1)
+    for i, btn in ipairs(tabBtns) do
+        if i == 1 and tabId == "all" then
+            btn.BackgroundColor3 = C.accent
+            btn.TextColor3 = Color3.new(1, 1, 1)
+        elseif i == 2 and tabId == "favorites" then
+            btn.BackgroundColor3 = C.accent
+            btn.TextColor3 = Color3.new(1, 1, 1)
+        elseif i == 3 and tabId == "search" then
+            btn.BackgroundColor3 = C.accent
+            btn.TextColor3 = Color3.new(1, 1, 1)
+        else
+            btn.BackgroundColor3 = C.card
+            btn.TextColor3 = C.text2
+        end
     end
     renderEmotes()
 end
 
--- ==================== BUKA APP ====================
+-- ==================== BUILD APP ====================
 local function buildEmoteApp()
     if not appContent then return end
 
-    -- Pastikan appContent punya UIListLayout
-    local existingLayout = appContent:FindFirstChildOfClass("UIListLayout")
-    if not existingLayout then
-        local appLayout = Instance.new("UIListLayout", appContent)
-        appLayout.Padding = UDim.new(0, 8)
-        appLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    else
-        existingLayout.Padding = UDim.new(0, 8)
+    -- Bersihkan konten lama jika ada
+    for _, child in ipairs(appContent:GetChildren()) do
+        if child:IsA("GuiObject") then
+            child:Destroy()
+        end
     end
 
-    local header = Instance.new("Frame", appContent)
+    -- Pastikan ada UIListLayout utama
+    local appLayout = Instance.new("UIListLayout")
+    appLayout.Padding = UDim.new(0, 8)
+    appLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    appLayout.Parent = appContent
+
+    -- Header
+    local header = Instance.new("Frame")
     header.Size = UDim2.new(1, 0, 0, 44)
     header.BackgroundColor3 = C.card
     header.BackgroundTransparency = 0
@@ -576,8 +626,9 @@ local function buildEmoteApp()
     header.LayoutOrder = 0
     corner(header, 14)
     stroke(header, C.accent, 1, 0.5)
+    header.Parent = appContent
 
-    local hTitle = Instance.new("TextLabel", header)
+    local hTitle = Instance.new("TextLabel")
     hTitle.Size = UDim2.new(1, -70, 0, 22)
     hTitle.Position = UDim2.new(0, 14, 0, 4)
     hTitle.BackgroundTransparency = 1
@@ -586,8 +637,9 @@ local function buildEmoteApp()
     hTitle.Font = Enum.Font.GothamBlack
     hTitle.TextSize = 15
     hTitle.TextXAlignment = Enum.TextXAlignment.Left
+    hTitle.Parent = header
 
-    local hSub = Instance.new("TextLabel", header)
+    local hSub = Instance.new("TextLabel")
     hSub.Size = UDim2.new(1, -70, 0, 14)
     hSub.Position = UDim2.new(0, 14, 0, 26)
     hSub.BackgroundTransparency = 1
@@ -596,8 +648,10 @@ local function buildEmoteApp()
     hSub.Font = Enum.Font.Gotham
     hSub.TextSize = 9
     hSub.TextXAlignment = Enum.TextXAlignment.Left
+    hSub.Parent = header
 
-    local searchFrame = Instance.new("Frame", appContent)
+    -- Search bar
+    local searchFrame = Instance.new("Frame")
     searchFrame.Size = UDim2.new(1, 0, 0, 36)
     searchFrame.BackgroundColor3 = C.card2
     searchFrame.BackgroundTransparency = 0
@@ -605,8 +659,9 @@ local function buildEmoteApp()
     searchFrame.LayoutOrder = 1
     corner(searchFrame, 12)
     stroke(searchFrame, C.border, 1, 0.3)
+    searchFrame.Parent = appContent
 
-    searchBoxRef = Instance.new("TextBox", searchFrame)
+    searchBoxRef = Instance.new("TextBox")
     searchBoxRef.Size = UDim2.new(1, -46, 1, 0)
     searchBoxRef.Position = UDim2.new(0, 10, 0, 0)
     searchBoxRef.BackgroundTransparency = 1
@@ -617,28 +672,41 @@ local function buildEmoteApp()
     searchBoxRef.Font = Enum.Font.Gotham
     searchBoxRef.TextSize = 11
     searchBoxRef.ClearTextOnFocus = false
+    searchBoxRef.Parent = searchFrame
+
+    -- Debounce pencarian
     searchBoxRef:GetPropertyChangedSignal("Text"):Connect(function()
         searchQuery = searchBoxRef.Text
-        if searchQuery ~= "" and currentTab ~= "search" then
-            setActiveTab("search")
-        else
-            renderEmotes()
-        end
+        local currentToken = searchDebounceToken + 1
+        searchDebounceToken = currentToken
+        task.spawn(function()
+            task.wait(0.25)
+            if currentToken == searchDebounceToken then
+                if searchQuery ~= "" and currentTab ~= "search" then
+                    setActiveTab("search")
+                else
+                    renderEmotes()
+                end
+            end
+        end)
     end)
 
-    local tabBar = Instance.new("Frame", appContent)
+    -- Tab bar
+    local tabBar = Instance.new("Frame")
     tabBar.Size = UDim2.new(1, 0, 0, 36)
     tabBar.BackgroundColor3 = C.card2
     tabBar.BackgroundTransparency = 0
     tabBar.BorderSizePixel = 0
     tabBar.LayoutOrder = 2
     corner(tabBar, 12)
+    tabBar.Parent = appContent
 
-    local tabLayout = Instance.new("UIListLayout", tabBar)
+    local tabLayout = Instance.new("UIListLayout")
     tabLayout.FillDirection = Enum.FillDirection.Horizontal
     tabLayout.Padding = UDim.new(0, 4)
     tabLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     tabLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    tabLayout.Parent = tabBar
 
     local tabs = {
         {id = "all", label = "📋 Semua"},
@@ -647,7 +715,7 @@ local function buildEmoteApp()
     }
 
     for i, tab in ipairs(tabs) do
-        local btn = Instance.new("TextButton", tabBar)
+        local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0.333, -4, 1, 0)
         btn.BackgroundColor3 = (currentTab == tab.id) and C.accent or C.card
         btn.BackgroundTransparency = 0
@@ -659,6 +727,7 @@ local function buildEmoteApp()
         btn.AutoButtonColor = false
         corner(btn, 8)
         pressFX(btn)
+        btn.Parent = tabBar
 
         btn.MouseButton1Click:Connect(function()
             setActiveTab(tab.id)
@@ -669,12 +738,14 @@ local function buildEmoteApp()
         tabBtns[i] = btn
     end
 
-    local infoBar = Instance.new("Frame", appContent)
+    -- Info label
+    local infoBar = Instance.new("Frame")
     infoBar.Size = UDim2.new(1, 0, 0, 22)
     infoBar.BackgroundTransparency = 1
     infoBar.LayoutOrder = 3
+    infoBar.Parent = appContent
 
-    infoLbl = Instance.new("TextLabel", infoBar)
+    infoLbl = Instance.new("TextLabel")
     infoLbl.Size = UDim2.new(1, 0, 1, 0)
     infoLbl.BackgroundTransparency = 1
     infoLbl.Text = "Memuat..."
@@ -682,8 +753,10 @@ local function buildEmoteApp()
     infoLbl.Font = Enum.Font.Gotham
     infoLbl.TextSize = 9
     infoLbl.TextXAlignment = Enum.TextXAlignment.Left
+    infoLbl.Parent = infoBar
 
-    resultsContainer = Instance.new("ScrollingFrame", appContent)
+    -- Results ScrollingFrame with UIGridLayout
+    resultsContainer = Instance.new("ScrollingFrame")
     resultsContainer.Size = UDim2.new(1, 0, 0, 280)
     resultsContainer.BackgroundColor3 = C.bg
     resultsContainer.BackgroundTransparency = 0
@@ -695,18 +768,24 @@ local function buildEmoteApp()
     resultsContainer.LayoutOrder = 4
     corner(resultsContainer, 12)
     stroke(resultsContainer, C.border, 1, 0.3)
+    resultsContainer.Parent = appContent
 
-    local resPad = Instance.new("UIPadding", resultsContainer)
-    resPad.PaddingTop = UDim.new(0, 6)
-    resPad.PaddingBottom = UDim.new(0, 6)
-    resPad.PaddingLeft = UDim.new(0, 6)
-    resPad.PaddingRight = UDim.new(0, 6)
+    local resPadding = Instance.new("UIPadding")
+    resPadding.PaddingTop = UDim.new(0, 6)
+    resPadding.PaddingBottom = UDim.new(0, 6)
+    resPadding.PaddingLeft = UDim.new(0, 6)
+    resPadding.PaddingRight = UDim.new(0, 6)
+    resPadding.Parent = resultsContainer
 
-    local resLayout = Instance.new("UIListLayout", resultsContainer)
-    resLayout.Padding = UDim.new(0, 6)
-    resLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    local gridLayout = Instance.new("UIGridLayout")
+    gridLayout.CellSize = UDim2.new(0.33, -8, 0, 170)
+    gridLayout.CellPadding = UDim2.new(0, 8, 0, 6)
+    gridLayout.FillDirectionMaxCells = 3
+    gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    gridLayout.Parent = resultsContainer
 
-    local controls = Instance.new("Frame", appContent)
+    -- Controls
+    local controls = Instance.new("Frame")
     controls.Size = UDim2.new(1, 0, 0, 44)
     controls.BackgroundColor3 = C.card2
     controls.BackgroundTransparency = 0
@@ -714,24 +793,27 @@ local function buildEmoteApp()
     controls.LayoutOrder = 5
     corner(controls, 12)
     stroke(controls, C.border, 1, 0.3)
+    controls.Parent = appContent
 
-    local cLayout = Instance.new("UIListLayout", controls)
+    local cLayout = Instance.new("UIListLayout")
     cLayout.FillDirection = Enum.FillDirection.Horizontal
     cLayout.Padding = UDim.new(0, 4)
     cLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     cLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+    cLayout.Parent = controls
 
-    local speedLbl = Instance.new("TextLabel", controls)
+    local speedLbl = Instance.new("TextLabel")
     speedLbl.Size = UDim2.new(0, 36, 1, 0)
     speedLbl.BackgroundTransparency = 1
     speedLbl.Text = "Speed"
     speedLbl.TextColor3 = C.text2
     speedLbl.Font = Enum.Font.GothamBold
     speedLbl.TextSize = 8
+    speedLbl.Parent = controls
 
     local speedOptions = {0.5, 0.75, 1.0, 1.25, 1.5, 2.0}
     for _, spd in ipairs(speedOptions) do
-        local btn = Instance.new("TextButton", controls)
+        local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 28, 0, 24)
         btn.BackgroundColor3 = (spd == currentSpeed) and C.accent or C.card
         btn.BackgroundTransparency = 0
@@ -743,6 +825,8 @@ local function buildEmoteApp()
         btn.AutoButtonColor = false
         corner(btn, 6)
         pressFX(btn)
+        btn.Parent = controls
+
         btn.MouseButton1Click:Connect(function()
             currentSpeed = spd
             if currentAnimTrack then currentAnimTrack:AdjustSpeed(spd) end
@@ -757,7 +841,7 @@ local function buildEmoteApp()
         end)
     end
 
-    local loopBtn = Instance.new("TextButton", controls)
+    local loopBtn = Instance.new("TextButton")
     loopBtn.Size = UDim2.new(0, 42, 0, 24)
     loopBtn.BackgroundColor3 = loopEnabled and C.accent or C.card
     loopBtn.BackgroundTransparency = 0
@@ -769,6 +853,8 @@ local function buildEmoteApp()
     loopBtn.AutoButtonColor = false
     corner(loopBtn, 6)
     pressFX(loopBtn)
+    loopBtn.Parent = controls
+
     loopBtn.MouseButton1Click:Connect(function()
         loopEnabled = not loopEnabled
         if currentAnimTrack then currentAnimTrack.Looped = loopEnabled end
@@ -776,7 +862,7 @@ local function buildEmoteApp()
         loopBtn.TextColor3 = loopEnabled and Color3.new(1, 1, 1) or C.text2
     end)
 
-    local pauseBtn = Instance.new("TextButton", controls)
+    local pauseBtn = Instance.new("TextButton")
     pauseBtn.Size = UDim2.new(0, 36, 0, 24)
     pauseBtn.BackgroundColor3 = C.card
     pauseBtn.BackgroundTransparency = 0
@@ -788,6 +874,8 @@ local function buildEmoteApp()
     pauseBtn.AutoButtonColor = false
     corner(pauseBtn, 6)
     pressFX(pauseBtn)
+    pauseBtn.Parent = controls
+
     pauseBtn.MouseButton1Click:Connect(function()
         if not currentAnimTrack then
             if _G.showDynamicNotification then _G.showDynamicNotification("Tidak ada emote yang diputar", C.text3) end
@@ -804,7 +892,7 @@ local function buildEmoteApp()
         end
     end)
 
-    local stopBtn = Instance.new("TextButton", controls)
+    local stopBtn = Instance.new("TextButton")
     stopBtn.Size = UDim2.new(0, 36, 0, 24)
     stopBtn.BackgroundColor3 = C.red
     stopBtn.BackgroundTransparency = 0
@@ -816,31 +904,33 @@ local function buildEmoteApp()
     stopBtn.AutoButtonColor = false
     corner(stopBtn, 6)
     pressFX(stopBtn)
+    stopBtn.Parent = controls
+
     stopBtn.MouseButton1Click:Connect(function()
         stopAnimation()
         pauseBtn.Text = "⏸"
         if _G.showDynamicNotification then _G.showDynamicNotification("Emote dihentikan", C.text3) end
     end)
 
-    -- Render awal
+    -- Initial render
     renderEmotes()
-    if hSub then hSub.Text = #Emotes .. " emotes available" end
-    if infoLbl then infoLbl.Text = #Emotes .. " emotes" end
+    hSub.Text = #Emotes .. " emotes available"
 
-    -- Fetch jika belum dimuat
+    -- Fetch if needed
     if not isLoaded() and not isLoading() then
-        fetchAllEmotes(20)
+        fetchAllEmotes(15)
     end
 
     return true
 end
 
+-- ==================== OPEN APP ====================
 function _G.openEmoteApp()
     local ok, err = pcall(buildEmoteApp)
     if not ok then
         warn("[Emote] Error building UI: " .. tostring(err))
         if appContent then
-            local errLbl = Instance.new("TextLabel", appContent)
+            local errLbl = Instance.new("TextLabel")
             errLbl.Size = UDim2.new(1, 0, 0, 80)
             errLbl.BackgroundTransparency = 1
             errLbl.Text = "⚠️ Emote app gagal dimuat:\n" .. tostring(err)
@@ -849,6 +939,7 @@ function _G.openEmoteApp()
             errLbl.TextSize = 11
             errLbl.TextWrapped = true
             errLbl.LayoutOrder = 0
+            errLbl.Parent = appContent
         end
         if _G.showDynamicNotification then
             _G.showDynamicNotification("Emote gagal dimuat, cek console", C.red)
