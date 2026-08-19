@@ -1,5 +1,5 @@
 -- ================================================
--- EMOTE.LUA — Premium Futuristic Mobile UI (Fixed Loading & Search)
+-- EMOTE.LUA — Premium Futuristic Mobile UI (FIXED LOADING & SEARCH)
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -44,7 +44,7 @@ local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
 local IdSet = _G.EmoteCache.idSet
 
--- NEW: LoadedEmotes tracking per emote ID
+-- NEW: LoadedEmotes tracking per emote ID (from reference)
 local LoadedEmotes = {} -- [emoteId] = true/false
 
 local currentAnimTrack = nil
@@ -107,7 +107,7 @@ local function saveFavorites()
 end
 loadFavorites()
 
--- ==================== EMOTE LOADED CHECK ====================
+-- ==================== EMOTE LOADED CHECK (reference concept) ====================
 local function EmotesLoaded()
     for _, loaded in pairs(LoadedEmotes) do
         if not loaded then
@@ -171,11 +171,11 @@ local function fetchAllEmotes(maxPages)
                     }
                     table.insert(Emotes, emoteObj)
                     table.insert(newBatch, emoteObj.icon)
-                    -- Mark as not loaded initially, will become true after preload
+                    -- Mark as not loaded initially, will become true after processing
                     LoadedEmotes[item.id] = false
                 end
             end
-            -- Preload icons asynchronously
+            -- Preload icons asynchronously (non-blocking)
             if #newBatch > 0 then
                 task.spawn(function()
                     pcall(function() ContentProvider:PreloadAsync(newBatch) end)
@@ -197,12 +197,21 @@ local function fetchAllEmotes(maxPages)
         _G.EmoteCache.loaded = true
         _G.EmoteCache.loading = false
         if newItemsAdded then saveEmotesToDisk() end
-        -- Ensure all loaded flags are true (if any missed)
+
+        -- Ensure all loaded flags are true (in case some missed)
         for _, emote in ipairs(Emotes) do
             LoadedEmotes[emote.id] = true
         end
+
+        -- Wait for all emotes to be fully processed (like reference)
+        -- (But we've already set them true, so this is just a safety check)
+        while not EmotesLoaded() do
+            task.wait()
+        end
+
+        -- Render and hide loading
+        print("[Emote] All emotes loaded, rendering")
         if _G.renderEmotesRefresh then
-            print("[Emote] Calling renderEmotesRefresh")
             _G.renderEmotesRefresh()
         end
     end)
@@ -978,10 +987,6 @@ local function buildEmoteApp()
     resPad.PaddingLeft = UDim2.new(0, 4)
     resPad.PaddingRight = UDim2.new(0, 4)
 
-    grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        resultsContainer.CanvasSize = UDim2.new(0, 0, 0, grid.AbsoluteContentSize.Y + 20)
-    end)
-
     -- Create overlay for loading/empty states (covers grid area)
     contentOverlay = Instance.new("Frame", mainPanel)
     contentOverlay.Name = "ContentOverlay"
@@ -995,7 +1000,7 @@ local function buildEmoteApp()
     loadingState = createLoadingState(contentOverlay)
     emptyState = createEmptyState(contentOverlay)
 
-    -- Initial render
+    -- Initial render decision
     print("[Emote] Cache:", #Emotes)
     if #Emotes > 0 then
         -- Cache exists, render immediately
