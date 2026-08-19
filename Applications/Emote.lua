@@ -1014,4 +1014,6 @@ local function buildEmoteApp()
 end
 
 function _G.openEmoteApp() pcall(buildEmoteApp) end
+
+print("[Emote] Premium Futuristic UI with Fixed Loading Applied!")
 print("[Emote] Premium Futuristic UI with Fixed Loading Applied!")
