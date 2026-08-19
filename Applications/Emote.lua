@@ -1,6 +1,6 @@
 -- ================================================
--- EMOTE.LUA — Monochrome B&W Theme
--- Fix: Grid Error, Black Outlines, Removed Stop Btn
+-- EMOTE.LUA — Purple Glass Theme (matches reference UI)
+-- Fix: isLoaded() nil call bug, favorites tab, search bar
 -- ================================================
 
 local Services    = _G.Services or {}
@@ -15,6 +15,13 @@ local ContentProvider = game:GetService("ContentProvider")
 
 local corner  = Helpers.corner  or function(o, r) local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0, r or 10); c.Parent = o; return c end
 local stroke  = Helpers.stroke  or function(o, c, t, tr) local s = Instance.new("UIStroke"); s.Color = c or Color3.fromRGB(0,0,0); s.Thickness = t or 1; s.Transparency = tr or 0; s.Parent = o; return s end
+local gradient = function(o, colorSeq, rotation)
+    local g = Instance.new("UIGradient")
+    g.Color = colorSeq
+    g.Rotation = rotation or 90
+    g.Parent = o
+    return g
+end
 
 local function smoothTween(object, properties, duration)
     local tw = TweenService:Create(object, TweenInfo.new(duration or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), properties)
@@ -24,12 +31,19 @@ end
 
 local CACHE_FILE_NAME = "PhoneIDViewer_EmoteCache.json"
 
--- ==================== PALETTE (MONOCHROME) ====================
+-- ==================== PALETTE (PURPLE GLASS) ====================
 local C = {
-    white    = Color3.fromRGB(255, 255, 255),
-    black    = Color3.fromRGB(0, 0, 0),
-    gray     = Color3.fromRGB(235, 235, 235),
-    darkGray = Color3.fromRGB(150, 150, 150)
+    white       = Color3.fromRGB(255, 255, 255),
+    black       = Color3.fromRGB(0, 0, 0),
+    bg          = Color3.fromRGB(247, 244, 253),   -- background phone lavender-putih
+    cardBg      = Color3.fromRGB(38, 20, 58),      -- ungu gelap kartu
+    cardBg2     = Color3.fromRGB(58, 32, 90),
+    purple      = Color3.fromRGB(124, 58, 237),    -- ungu utama (tab aktif, judul)
+    purpleLight = Color3.fromRGB(167, 120, 244),
+    purpleDeep  = Color3.fromRGB(88, 40, 170),
+    textDark    = Color3.fromRGB(30, 20, 45),
+    textGray    = Color3.fromRGB(140, 130, 155),
+    star        = Color3.fromRGB(255, 255, 255),
 }
 
 -- ==================== CACHE GLOBAL ====================
@@ -41,6 +55,12 @@ local Emotes = _G.EmoteCache.emotes
 local Favorites = _G.EmoteCache.favorites
 local IdSet = _G.EmoteCache.idSet
 
+-- FIX: isLoaded/isLoading harus baca langsung dari _G.EmoteCache (bukan
+-- variabel lokal yang di-snapshot), supaya status fetch selalu akurat
+-- walau script di-load ulang atau closure async lain yang mengubahnya.
+local function isLoaded() return _G.EmoteCache.loaded end
+local function isLoading() return _G.EmoteCache.loading end
+
 local currentAnimTrack = nil
 local currentSpeed = 1.0
 local loopEnabled = false
@@ -48,7 +68,7 @@ local currentTab = "all"
 local searchQuery = ""
 local renderToken = 0
 
-local cardPool = {} 
+local cardPool = {}
 local cardConnections = {}
 
 -- ==================== JSON & FAVORITES ====================
@@ -108,7 +128,7 @@ local function fetchEmotePage(cursor)
 end
 
 local function fetchAllEmotes(maxPages)
-    if _G.EmoteCache.loading then return end
+    if isLoading() then return end
     _G.EmoteCache.loading = true
     maxPages = maxPages or 50
 
@@ -187,71 +207,77 @@ end
 local function createPooledCard(parent)
     local cardWrapper = Instance.new("Frame", parent)
     cardWrapper.BackgroundTransparency = 1
-    
+
     local card = Instance.new("Frame", cardWrapper)
+    card.Name = "Card"
     card.Size = UDim2.new(1, 0, 1, 0)
     card.Position = UDim2.new(0.5, 0, 0.5, 0)
     card.AnchorPoint = Vector2.new(0.5, 0.5)
-    card.BackgroundColor3 = C.white
+    card.BackgroundColor3 = C.cardBg
     card.BorderSizePixel = 0
-    corner(card, 10)
-    stroke(card, C.black, 1, 0) -- OUTLINE HITAM PADA KARTU
+    corner(card, 14)
+    gradient(card, ColorSequence.new{
+        ColorSequenceKeypoint.new(0, C.cardBg2),
+        ColorSequenceKeypoint.new(1, C.cardBg)
+    }, 60)
 
     local thumbWrap = Instance.new("Frame", card)
-    thumbWrap.Name = "ThumbWrap" -- Fixed Name for pathing
-    thumbWrap.Size = UDim2.new(1, -12, 0, 80)
+    thumbWrap.Name = "ThumbWrap"
+    thumbWrap.Size = UDim2.new(1, -12, 0, 82)
     thumbWrap.Position = UDim2.new(0, 6, 0, 6)
-    thumbWrap.BackgroundColor3 = C.gray
-    corner(thumbWrap, 8)
-    stroke(thumbWrap, C.black, 1, 0) -- OUTLINE HITAM PADA GAMBAR
+    thumbWrap.BackgroundColor3 = C.purpleDeep
+    thumbWrap.BackgroundTransparency = 0.35
+    corner(thumbWrap, 10)
 
     local thumb = Instance.new("ImageLabel", thumbWrap)
     thumb.Name = "Thumb"
     thumb.Size = UDim2.new(1, 0, 1, 0)
     thumb.BackgroundTransparency = 1
     thumb.ScaleType = Enum.ScaleType.Crop
-    corner(thumb, 8)
+    thumb.ImageColor3 = C.white
+    corner(thumb, 10)
 
     local favBtn = Instance.new("TextButton", card)
     favBtn.Name = "FavBtn"
     favBtn.Size = UDim2.new(0, 24, 0, 24)
-    favBtn.Position = UDim2.new(1, -30, 0, 8)
-    favBtn.BackgroundTransparency = 1
-    favBtn.Text = "" -- Menghapus tulisan default "Button"
+    favBtn.Position = UDim2.new(1, -30, 0, 10)
+    favBtn.BackgroundColor3 = C.white
+    favBtn.BackgroundTransparency = 0.15
+    favBtn.Text = "★"
+    favBtn.TextColor3 = C.purpleDeep
     favBtn.Font = Enum.Font.GothamBold
-    favBtn.TextSize = 16
+    favBtn.TextSize = 14
     favBtn.AutoButtonColor = false
     favBtn.ZIndex = 2
-    
-    local favStroke = Instance.new("UIStroke", favBtn)
-    favStroke.Color = C.black
-    favStroke.Thickness = 1
-    favStroke.Enabled = true -- Outline di teks bintang
+    corner(favBtn, 12)
 
     local nameLbl = Instance.new("TextLabel", card)
     nameLbl.Name = "NameLbl"
     nameLbl.Size = UDim2.new(1, -12, 0, 16)
-    nameLbl.Position = UDim2.new(0, 6, 0, 92)
+    nameLbl.Position = UDim2.new(0, 6, 0, 94)
     nameLbl.BackgroundTransparency = 1
-    nameLbl.TextColor3 = C.black
-    nameLbl.Text = "" -- Menghapus tulisan default "Label"
+    nameLbl.TextColor3 = C.white
+    nameLbl.Text = ""
     nameLbl.Font = Enum.Font.GothamBold
-    nameLbl.TextSize = 10
+    nameLbl.TextSize = 11
     nameLbl.TextXAlignment = Enum.TextXAlignment.Center
     nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
 
     local playBtn = Instance.new("TextButton", card)
     playBtn.Name = "PlayBtn"
-    playBtn.Size = UDim2.new(1, -12, 0, 24)
+    playBtn.Size = UDim2.new(1, -12, 0, 26)
     playBtn.Position = UDim2.new(0, 6, 0, 114)
-    playBtn.BackgroundColor3 = C.white
+    playBtn.BackgroundColor3 = C.purpleLight
     playBtn.Text = "▶ Play"
-    playBtn.TextColor3 = C.black
+    playBtn.TextColor3 = C.white
     playBtn.Font = Enum.Font.GothamBold
-    playBtn.TextSize = 11
+    playBtn.TextSize = 12
     playBtn.AutoButtonColor = false
-    corner(playBtn, 6)
-    stroke(playBtn, C.black, 1, 0) -- OUTLINE HITAM TOMBOL PLAY
+    corner(playBtn, 13)
+    gradient(playBtn, ColorSequence.new{
+        ColorSequenceKeypoint.new(0, C.purple),
+        ColorSequenceKeypoint.new(1, C.purpleDeep)
+    }, 0)
 
     return cardWrapper
 end
@@ -261,16 +287,14 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
     cardWrapper.LayoutOrder = order
     cardWrapper.Visible = true
 
-    local card = cardWrapper:FindFirstChildOfClass("Frame")
-    -- FIXED PATHING BUGS (Inilah alasan error cuman 1 kartu di versi sblmnya)
+    local card = cardWrapper.Card
     card.ThumbWrap.Thumb.Image = emote.icon or ""
     card.NameLbl.Text = emote.name or "Emote"
-    
+
     local favBtn = card.FavBtn
     local playBtn = card.PlayBtn
 
     favBtn.Text = isFavorite and "★" or "☆"
-    favBtn.TextColor3 = isFavorite and C.black or C.black
 
     local conns = cardConnections[cardWrapper]
 
@@ -291,20 +315,20 @@ local function updateCardData(cardWrapper, emote, order, isFavorite)
         if currentTab == "favorites" and _G.renderEmotesRefresh then _G.renderEmotesRefresh() end
     end))
 
-    -- Animasi monokrom untuk tombol Play (Putih jadi Hitam)
-    table.insert(conns, playBtn.MouseButton1Down:Connect(function() 
-        smoothTween(playBtn, {BackgroundColor3 = C.black, TextColor3 = C.white}, 0.1) 
+    table.insert(conns, playBtn.MouseButton1Down:Connect(function()
+        smoothTween(playBtn, {BackgroundColor3 = C.purpleDeep}, 0.1)
     end))
-    table.insert(conns, playBtn.MouseButton1Up:Connect(function() 
-        smoothTween(playBtn, {BackgroundColor3 = C.white, TextColor3 = C.black}, 0.1); playEmote(emote.id) 
+    table.insert(conns, playBtn.MouseButton1Up:Connect(function()
+        smoothTween(playBtn, {BackgroundColor3 = C.purpleLight}, 0.1); playEmote(emote.id)
     end))
-    table.insert(conns, playBtn.MouseLeave:Connect(function() 
-        smoothTween(playBtn, {BackgroundColor3 = C.white, TextColor3 = C.black}, 0.1) 
+    table.insert(conns, playBtn.MouseLeave:Connect(function()
+        smoothTween(playBtn, {BackgroundColor3 = C.purpleLight}, 0.1)
     end))
 end
 
 -- ==================== RENDER ENGINE ====================
 local resultsContainer = nil
+local emptyLabel = nil
 
 local function renderEmotes()
     local token = renderToken + 1
@@ -316,13 +340,20 @@ local function renderEmotes()
     local q = searchQuery:lower()
     for _, e in ipairs(Emotes) do
         local include = true
-        if currentTab == "favorites" then include = table.find(Favorites, e.id) ~= nil
-        elseif q ~= "" then include = e.name:lower():find(q, 1, true) ~= nil end
+        if currentTab == "favorites" then include = table.find(Favorites, e.id) ~= nil end
+        if include and q ~= "" then include = e.name:lower():find(q, 1, true) ~= nil end
         if include then table.insert(filtered, e) end
     end
 
     table.sort(filtered, function(a, b) return (a.updated or "") > (b.updated or "") end)
     for _, card in ipairs(cardPool) do card.Visible = false end
+
+    if emptyLabel then
+        emptyLabel.Visible = (#filtered == 0)
+        if #filtered == 0 then
+            emptyLabel.Text = isLoading() and "Memuat emote..." or "Tidak ada emote ditemukan"
+        end
+    end
 
     task.spawn(function()
         local batchSize = 15
@@ -354,78 +385,118 @@ local function buildEmoteApp()
         appLayout.SortOrder = Enum.SortOrder.LayoutOrder
     end
 
-    -- Search Bar B&W
+    -- Search Bar (bulat, putih, ikon kaca pembesar + tombol clear)
     local searchFrame = Instance.new("Frame", appContent)
-    searchFrame.Size = UDim2.new(1, 0, 0, 36)
+    searchFrame.Size = UDim2.new(1, 0, 0, 40)
     searchFrame.BackgroundColor3 = C.white
     searchFrame.BorderSizePixel = 0
     searchFrame.LayoutOrder = 1
-    corner(searchFrame, 18)
-    stroke(searchFrame, C.black, 1, 0) -- OUTLINE HITAM
+    corner(searchFrame, 20)
+    stroke(searchFrame, Color3.fromRGB(225, 215, 245), 1, 0.3)
 
     local searchIcon = Instance.new("TextLabel", searchFrame)
     searchIcon.Size = UDim2.new(0, 34, 1, 0)
-    searchIcon.Position = UDim2.new(0, 4, 0, 0)
+    searchIcon.Position = UDim2.new(0, 8, 0, 0)
     searchIcon.BackgroundTransparency = 1
     searchIcon.Text = "🔍"
     searchIcon.TextSize = 14
+    searchIcon.TextColor3 = C.purple
 
     local searchBox = Instance.new("TextBox", searchFrame)
-    searchBox.Size = UDim2.new(1, -40, 1, 0)
-    searchBox.Position = UDim2.new(0, 34, 0, 0)
+    searchBox.Name = "SearchBox"
+    searchBox.Size = UDim2.new(1, -76, 1, 0)
+    searchBox.Position = UDim2.new(0, 40, 0, 0)
     searchBox.BackgroundTransparency = 1
     searchBox.PlaceholderText = "Cari gaya emote..."
-    searchBox.PlaceholderColor3 = C.darkGray
+    searchBox.PlaceholderColor3 = C.textGray
     searchBox.Text = searchQuery
-    searchBox.TextColor3 = C.black
+    searchBox.TextColor3 = C.purpleDeep
     searchBox.Font = Enum.Font.GothamBold
-    searchBox.TextSize = 12
+    searchBox.TextSize = 13
     searchBox.ClearTextOnFocus = false
     searchBox.TextXAlignment = Enum.TextXAlignment.Left
+
+    local clearBtn = Instance.new("TextButton", searchFrame)
+    clearBtn.Size = UDim2.new(0, 32, 1, 0)
+    clearBtn.Position = UDim2.new(1, -36, 0, 0)
+    clearBtn.BackgroundTransparency = 1
+    clearBtn.Text = "✕"
+    clearBtn.TextColor3 = C.textGray
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 14
+    clearBtn.Visible = searchQuery ~= ""
+
     searchBox:GetPropertyChangedSignal("Text"):Connect(function()
         searchQuery = searchBox.Text
+        clearBtn.Visible = searchQuery ~= ""
         renderEmotes()
     end)
+    clearBtn.MouseButton1Click:Connect(function()
+        searchBox.Text = ""
+    end)
 
-    -- Tab Bar B&W
+    -- Tab Bar (pill ungu untuk tab aktif)
     local tabWrap = Instance.new("Frame", appContent)
-    tabWrap.Size = UDim2.new(1, 0, 0, 34)
-    tabWrap.BackgroundColor3 = C.white
+    tabWrap.Size = UDim2.new(1, 0, 0, 40)
+    tabWrap.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
     tabWrap.LayoutOrder = 2
-    corner(tabWrap, 8)
-    stroke(tabWrap, C.black, 1, 0) -- OUTLINE HITAM
+    corner(tabWrap, 20)
+
+    local tabPad = Instance.new("UIPadding", tabWrap)
+    tabPad.PaddingLeft = UDim.new(0, 4)
+    tabPad.PaddingRight = UDim.new(0, 4)
+    tabPad.PaddingTop = UDim.new(0, 4)
+    tabPad.PaddingBottom = UDim.new(0, 4)
 
     local tabLayout = Instance.new("UIListLayout", tabWrap)
     tabLayout.FillDirection = Enum.FillDirection.Horizontal
     tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    tabLayout.Padding = UDim.new(0, 4)
 
     local btnAll = Instance.new("TextButton", tabWrap)
-    btnAll.Size = UDim2.new(0.5, 0, 1, 0)
-    btnAll.BackgroundColor3 = currentTab == "all" and C.black or C.white
-    btnAll.Text = "Semua"
-    btnAll.TextColor3 = currentTab == "all" and C.white or C.black
+    btnAll.Size = UDim2.new(0.5, -2, 1, 0)
+    btnAll.BackgroundColor3 = currentTab == "all" and C.purple or Color3.fromRGB(25, 15, 40)
+    btnAll.Text = "Semua ✨"
+    btnAll.TextColor3 = C.white
     btnAll.Font = Enum.Font.GothamBold
-    btnAll.TextSize = 12
-    corner(btnAll, 8)
+    btnAll.TextSize = 13
+    btnAll.AutoButtonColor = false
+    corner(btnAll, 16)
+    gradient(btnAll, ColorSequence.new{
+        ColorSequenceKeypoint.new(0, C.purpleLight),
+        ColorSequenceKeypoint.new(1, C.purple)
+    }, 0)
 
     local btnFav = Instance.new("TextButton", tabWrap)
-    btnFav.Size = UDim2.new(0.5, 0, 1, 0)
-    btnFav.BackgroundColor3 = currentTab == "favorites" and C.black or C.white
+    btnFav.Size = UDim2.new(0.5, -2, 1, 0)
+    btnFav.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
     btnFav.Text = "Favorit ★"
-    btnFav.TextColor3 = currentTab == "favorites" and C.white or C.black
+    btnFav.TextColor3 = C.white
     btnFav.Font = Enum.Font.GothamBold
-    btnFav.TextSize = 12
-    corner(btnFav, 8)
+    btnFav.TextSize = 13
+    btnFav.AutoButtonColor = false
+    corner(btnFav, 16)
 
     local function updateTabs()
-        smoothTween(btnAll, {
-            BackgroundColor3 = currentTab == "all" and C.black or C.white,
-            TextColor3 = currentTab == "all" and C.white or C.black
-        }, 0.15)
-        smoothTween(btnFav, {
-            BackgroundColor3 = currentTab == "favorites" and C.black or C.white,
-            TextColor3 = currentTab == "favorites" and C.white or C.black
-        }, 0.15)
+        btnAll.BackgroundTransparency = 1
+        for _, ch in ipairs(btnAll:GetChildren()) do if ch:IsA("UIGradient") then ch:Destroy() end end
+        for _, ch in ipairs(btnFav:GetChildren()) do if ch:IsA("UIGradient") then ch:Destroy() end end
+
+        if currentTab == "all" then
+            btnAll.BackgroundColor3 = C.purple
+            gradient(btnAll, ColorSequence.new{
+                ColorSequenceKeypoint.new(0, C.purpleLight),
+                ColorSequenceKeypoint.new(1, C.purple)
+            }, 0)
+            btnFav.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
+        else
+            btnFav.BackgroundColor3 = C.purple
+            gradient(btnFav, ColorSequence.new{
+                ColorSequenceKeypoint.new(0, C.purpleLight),
+                ColorSequenceKeypoint.new(1, C.purple)
+            }, 0)
+            btnAll.BackgroundColor3 = Color3.fromRGB(25, 15, 40)
+        end
     end
 
     btnAll.MouseButton1Click:Connect(function()
@@ -437,32 +508,44 @@ local function buildEmoteApp()
         currentTab = "favorites"; updateTabs(); renderEmotes()
     end)
 
-    -- Scroll Grid Container (Memanjang ke bawah karena tombol Hentikan dihapus)
+    -- Scroll Grid Container
     resultsContainer = Instance.new("ScrollingFrame", appContent)
-    resultsContainer.Size = UDim2.new(1, 0, 1, -95) -- Otomatis mengisi layar bawah
+    resultsContainer.Size = UDim2.new(1, 0, 1, -100)
     resultsContainer.BackgroundTransparency = 1
     resultsContainer.BorderSizePixel = 0
     resultsContainer.ScrollBarThickness = 2
-    resultsContainer.ScrollBarImageColor3 = C.black
+    resultsContainer.ScrollBarImageColor3 = C.purple
     resultsContainer.LayoutOrder = 3
 
     local grid = Instance.new("UIGridLayout", resultsContainer)
     grid.CellSize = UDim2.new(0.31, 0, 0, 144)
-    grid.CellPadding = UDim2.new(0.035, 0, 0, 8)
+    grid.CellPadding = UDim2.new(0.035, 0, 0, 10)
     grid.SortOrder = Enum.SortOrder.LayoutOrder
 
     local resPad = Instance.new("UIPadding", resultsContainer)
-    resPad.PaddingTop = UDim.new(0, 2)
+    resPad.PaddingTop = UDim.new(0, 4)
     resPad.PaddingBottom = UDim.new(0, 10)
 
     grid:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         resultsContainer.CanvasSize = UDim2.new(0, 0, 0, grid.AbsoluteContentSize.Y + 20)
     end)
 
+    emptyLabel = Instance.new("TextLabel", resultsContainer)
+    emptyLabel.Size = UDim2.new(1, 0, 0, 60)
+    emptyLabel.BackgroundTransparency = 1
+    emptyLabel.Text = "Memuat emote..."
+    emptyLabel.TextColor3 = C.textGray
+    emptyLabel.Font = Enum.Font.GothamBold
+    emptyLabel.TextSize = 13
+    emptyLabel.Visible = (#Emotes == 0)
+    emptyLabel.ZIndex = 0
+
     renderEmotes()
+    -- FIX: bug asli — isLoaded() dipanggil sebagai fungsi tapi tidak pernah
+    -- didefinisikan, jadi app selalu error/gagal build saat dibuka.
     if #Emotes == 0 or not isLoaded() then fetchAllEmotes(30) end
     return true
 end
 
 function _G.openEmoteApp() pcall(buildEmoteApp) end
-print("[Emote] B&W Monochrome Theme Applied Successfully!")
+print("[Emote] Purple Glass Theme Applied Successfully!")
