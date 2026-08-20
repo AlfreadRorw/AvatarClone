@@ -433,24 +433,4 @@ iconBuilders.Emote = function(p, c)
     -- Tambahkan juga outline di bagian bawah? Sudah cukup.
 end
 
-iconBuilders.CloneDiri = function(p, c)
-    local tile = baseTile(p)
-    
-    -- Siluet Pertama (Clone di belakang, lebih transparan/kecil)
-    local headBack = glyphRect(tile, 8, 8, -4, -6, 100)
-    headBack.BackgroundTransparency = 0.5 -- Transparan
-    
-    local bodyBack = glyphRect(tile, 14, 7, -4, 4, 4)
-    bodyBack.BackgroundTransparency = 0.5 -- Transparan
-
-    -- Siluet Kedua (Pemain utama di depan, solid)
-    local headFront = glyphRect(tile, 9, 9, 4, -4, 100)
-    
-    -- Tambahkan border hitam sedikit untuk memisahkan siluet depan dan belakang
-    local bodyFront = glyphRect(tile, 16, 8, 4, 6, 4)
-    Helpers.stroke(headFront, Color3.new(0, 0, 0), 1.5, 0)
-    Helpers.stroke(bodyFront, Color3.new(0, 0, 0), 1.5, 0)
-end
-
-
 return iconBuilders

@@ -111,7 +111,6 @@ local AppList = {
     {path = "Applications/Shader.lua", name = "Shader"},
     {path = "Applications/Games.lua", name = "Games"},
     {path = "Applications/Emote.lua", name = "Emote"},
-    {path = "Applications/CloneDiri.lua", name = "CloneDiri"},
     
 }
 
