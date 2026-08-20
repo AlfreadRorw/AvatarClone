@@ -1,9 +1,19 @@
 -- ================================================
--- MyClone.lua - MyClone App (Rewritten for Phone UI)
--- Fixed: SetGizmoVisibility, EditMode toggle, gizmo drag handlers
+-- MyClone.lua - MyClone App (Phone UI Enhanced & Fixed)
+-- Fixed: State persistence on close, UI Overflow, App Reload Memory
 -- ================================================
 
-local Services = _G.Services
+local Services = _G.Services or {
+    Players = game:GetService("Players"),
+    Workspace = game:GetService("Workspace"),
+    TweenService = game:GetService("TweenService"),
+    UserInputService = game:GetService("UserInputService"),
+    HttpService = game:GetService("HttpService"),
+    RunService = game:GetService("RunService"),
+    CoreGui = game:GetService("CoreGui"),
+    TextChatService = game:GetService("TextChatService"),
+}
+
 local Players = Services.Players
 local Workspace = Services.Workspace
 local TweenService = Services.TweenService
@@ -12,21 +22,37 @@ local HttpService = Services.HttpService
 local RunService = Services.RunService
 local CoreGui = Services.CoreGui
 local TextChatService = Services.TextChatService
-local ChatService = Services.Chat
 
 local LocalPlayer = Players.LocalPlayer
 local T = _G.T or {}
 local Helpers = _G.Helpers or {}
 local Storage = _G.Storage or {}
 
--- Alias helpers
-local corner = Helpers.corner
-local stroke = Helpers.stroke
-local tween = Helpers.tween
-local pressFX = Helpers.pressFX
+-- Alias helpers with safe fallbacks
+local corner = Helpers.corner or function(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 8)
+    c.Parent = parent
+end
+
+local stroke = Helpers.stroke or function(parent, color, thickness)
+    local s = Instance.new("UIStroke")
+    s.Color = color or Color3.fromRGB(60, 60, 80)
+    s.Thickness = thickness or 1
+    s.Parent = parent
+end
+
+local pressFX = Helpers.pressFX or function(btn)
+    btn.MouseButton1Down:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.08), {Size = UDim2.new(btn.Size.X.Scale, btn.Size.X.Offset - 2, btn.Size.Y.Scale, btn.Size.Y.Offset - 2)}):Play()
+    end)
+    btn.MouseButton1Up:Connect(function()
+        TweenService:Create(btn, TweenInfo.new(0.08), {Size = UDim2.new(btn.Size.X.Scale, btn.Size.X.Offset, btn.Size.Y.Scale, btn.Size.Y.Offset)}):Play()
+    end)
+end
 
 -- ================================================
--- CONSTANTS & STATE
+-- CONSTANTS & GLOBAL PERSISTENT STATE
 -- ================================================
 local FOLDER_NAME = "MyCloneFolder_V15"
 local CONFIG_FILE = "MyClone_Config.json"
@@ -54,41 +80,37 @@ local COLORS = {
     DeleteActive = Color3.fromRGB(160, 35, 50),
 }
 
-local CloneData = {}
-local SelectedClone = nil
-local CloneCounter = 0
+-- Persistent Variables across UI close/reopen
+_G.MyCloneState = _G.MyCloneState or {
+    CloneData = {},
+    SelectedClone = nil,
+    CloneCounter = 0,
+    EditMode = false,
+    PositionMode = false,
+    RotationMode = false,
+    DanceMode = false,
+    SyncTargetMode = false,
+    SyncTargetPlayer = nil,
+    CurrentTab = "Clones",
+    HistoryList = {},
+    FavoritesList = {},
+    GroqApiKey = nil,
+    HideAllNames = false,
+    AIChatEnabled = false,
+    AIChatCooldown = 10,
+    AIChatLastTime = 0,
+}
 
-local EditMode = false
-local PositionMode = false
-local RotationMode = false
-local DanceMode = false
-local SyncTargetMode = false
-local SyncTargetPlayer = nil
+local State = _G.MyCloneState
 
 local CurrentAnimatorConnection = nil
 local SyncLoop = nil
+local AIChatLoop = nil
 local GizmoDragging = false
 local CameraRestoreType = nil
 local CameraRestoreSubject = nil
 local DeleteAllArmed = false
 
-local CurrentEmoteTrack = nil
-local EmoteSpeed = 1
-local EmoteLoop = true
-
-local HistoryList = {}
-local FavoritesList = {}
-
-local HideAllNames = false
-local AIChatEnabled = false
-local AIChatLoop = nil
-local AIChatCooldown = 10
-local AIChatLastTime = 0
-
--- Groq API key (user-provided)
-local GroqApiKey = nil
-
--- Models fallback
 local GROQ_MODELS = {
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
@@ -101,15 +123,16 @@ local GROQ_MODELS = {
     "mistral-saba-24b",
 }
 
--- UI references for active tab
-local currentTab = "Clones"
-local tabBar = nil
+-- References UI
+local tabBarFrame = nil
 local tabContentFrame = nil
-local mainContainer = nil
 
--- Gizmos
-local PositionGizmo = nil
-local RotationGizmo = nil
+-- Gizmos Persistent
+_G.MyCloneGizmos = _G.MyCloneGizmos or {}
+local Gizmos = _G.MyCloneGizmos
+
+-- Forward Declarations
+local rebuildCurrentTab, rebuildEditorTab, rebuildClonesTab, rebuildHistoryTab, rebuildSyncTab, rebuildAIChatTab
 
 -- ================================================
 -- UTILITY FUNCTIONS
@@ -173,7 +196,7 @@ local function GetNextSpawnCFrame()
     if not character then return CFrame.new(0, 3, -5) end
     local root = character:FindFirstChild("HumanoidRootPart")
     if not root then return CFrame.new(0, 3, -5) end
-    return root.CFrame
+    return root.CFrame * CFrame.new(0, 0, -5)
 end
 
 local function IsSyncTrack(track)
@@ -192,14 +215,7 @@ local function IsSyncTrack(track)
         string.find(name, "sleep") then
         return false
     end
-    if string.find(name, "dance") or string.find(name, "emote") or
-        string.find(name, "wave") or string.find(name, "laugh") or
-        string.find(name, "cheer") or string.find(name, "point") or
-        string.find(name, "salute") or string.find(name, "shrug") or
-        string.find(name, "talk") then
-        return true
-    end
-    return false
+    return true
 end
 
 local function GetAnimator(character)
@@ -249,7 +265,7 @@ local function PlayTrackOnClone(clone, sourceTrack)
 end
 
 local function ApplyDanceToSelected(callback)
-    if SelectedClone and SelectedClone.Parent then callback(SelectedClone) end
+    if State.SelectedClone and State.SelectedClone.Parent then callback(State.SelectedClone) end
 end
 
 local function ApplySyncToAll(callback)
@@ -262,11 +278,11 @@ end
 
 local function StartSyncLoop()
     if SyncLoop then SyncLoop:Disconnect(); SyncLoop = nil end
-    if not (DanceMode or SyncTargetMode) then return end
+    if not (State.DanceMode or State.SyncTargetMode) then return end
 
     SyncLoop = RunService.Heartbeat:Connect(function()
-        if not (DanceMode or SyncTargetMode) then return end
-        local sourcePlayer = SyncTargetMode and SyncTargetPlayer or (DanceMode and LocalPlayer or nil)
+        if not (State.DanceMode or State.SyncTargetMode) then return end
+        local sourcePlayer = State.SyncTargetMode and State.SyncTargetPlayer or (State.DanceMode and LocalPlayer or nil)
         if not sourcePlayer then return end
         local character = sourcePlayer.Character
         if not character then return end
@@ -280,7 +296,7 @@ local function StartSyncLoop()
             end
         end
 
-        local applyFunc = DanceMode and ApplyDanceToSelected or ApplySyncToAll
+        local applyFunc = State.DanceMode and ApplyDanceToSelected or ApplySyncToAll
         applyFunc(function(clone)
             local cloneAnimator = GetAnimator(clone)
             if not cloneAnimator then return end
@@ -304,20 +320,20 @@ end
 
 local function SetupDanceSync()
     StopSyncSystem()
-    if not (DanceMode or SyncTargetMode) then return end
-    local sourcePlayer = SyncTargetMode and SyncTargetPlayer or (DanceMode and LocalPlayer or nil)
+    if not (State.DanceMode or State.SyncTargetMode) then return end
+    local sourcePlayer = State.SyncTargetMode and State.SyncTargetPlayer or (State.DanceMode and LocalPlayer or nil)
     if not sourcePlayer then return end
     local character = sourcePlayer.Character
     if not character then return end
     local animator = GetAnimator(character)
     if not animator then return end
     CurrentAnimatorConnection = animator.AnimationPlayed:Connect(function(track)
-        if not (DanceMode or SyncTargetMode) then return end
+        if not (State.DanceMode or State.SyncTargetMode) then return end
         if not IsSyncTrack(track) then return end
         task.wait(0.05)
-        if DanceMode then
+        if State.DanceMode then
             ApplyDanceToSelected(function(clone) PlayTrackOnClone(clone, track) end)
-        elseif SyncTargetMode then
+        elseif State.SyncTargetMode then
             ApplySyncToAll(function(clone) PlayTrackOnClone(clone, track) end)
         end
     end)
@@ -327,7 +343,7 @@ end
 local function CreateNameTag(clone, nameText, hide)
     local oldTag = clone:FindFirstChild("NameTag")
     if oldTag then oldTag:Destroy() end
-    if hide or HideAllNames then return end
+    if hide or State.HideAllNames then return end
 
     local head = clone:FindFirstChild("Head") or clone.PrimaryPart
     if not head then return end
@@ -356,28 +372,28 @@ local function CreateNameTag(clone, nameText, hide)
 end
 
 local function SetGizmoVisibility()
-    if not PositionGizmo or not RotationGizmo then return end
-    PositionGizmo.Adornee = nil
-    RotationGizmo.Adornee = nil
-    if not SelectedClone or not EditMode then return end
-    local root = SelectedClone.PrimaryPart
+    if not Gizmos.Position or not Gizmos.Rotation then return end
+    Gizmos.Position.Adornee = nil
+    Gizmos.Rotation.Adornee = nil
+    if not State.SelectedClone or not State.EditMode then return end
+    local root = State.SelectedClone.PrimaryPart
     if not root then return end
-    if PositionMode then PositionGizmo.Adornee = root end
-    if RotationMode then RotationGizmo.Adornee = root end
+    if State.PositionMode then Gizmos.Position.Adornee = root end
+    if State.RotationMode then Gizmos.Rotation.Adornee = root end
 end
 
 local function SelectClone(clone)
     if not clone or not clone:IsDescendantOf(Workspace:FindFirstChild(FOLDER_NAME)) then return end
-    SelectedClone = clone
-    -- Update UI if in Editor tab
-    if currentTab == "Editor" and tabContentFrame then
+    State.SelectedClone = clone
+    SetGizmoVisibility()
+    if State.CurrentTab == "Editor" and tabContentFrame then
         rebuildEditorTab()
     end
 end
 
 local function SaveHistory()
     pcall(function()
-        if writefile then writefile(HISTORY_FILE, HttpService:JSONEncode(HistoryList)) end
+        if writefile then writefile(HISTORY_FILE, HttpService:JSONEncode(State.HistoryList)) end
     end)
 end
 
@@ -385,14 +401,14 @@ local function LoadHistory()
     pcall(function()
         if isfile and readfile and isfile(HISTORY_FILE) then
             local data = HttpService:JSONDecode(readfile(HISTORY_FILE))
-            if type(data) == "table" then HistoryList = data end
+            if type(data) == "table" then State.HistoryList = data end
         end
     end)
 end
 
 local function SaveFavorites()
     pcall(function()
-        if writefile then writefile(FAVORITES_FILE, HttpService:JSONEncode(FavoritesList)) end
+        if writefile then writefile(FAVORITES_FILE, HttpService:JSONEncode(State.FavoritesList)) end
     end)
 end
 
@@ -400,17 +416,17 @@ local function LoadFavorites()
     pcall(function()
         if isfile and readfile and isfile(FAVORITES_FILE) then
             local data = HttpService:JSONDecode(readfile(FAVORITES_FILE))
-            if type(data) == "table" then FavoritesList = data end
+            if type(data) == "table" then State.FavoritesList = data end
         end
     end)
 end
 
 local function SaveApiKey()
     pcall(function()
-        if writefile and GroqApiKey then writefile(API_KEY_FILE, GroqApiKey) end
+        if writefile and State.GroqApiKey then writefile(API_KEY_FILE, State.GroqApiKey) end
     end)
     if Storage and Storage.appSettings then
-        Storage.appSettings.groqApiKey = GroqApiKey
+        Storage.appSettings.groqApiKey = State.GroqApiKey
         if Storage.persistSettings then pcall(Storage.persistSettings) end
     end
 end
@@ -418,11 +434,11 @@ end
 local function LoadApiKey()
     pcall(function()
         if isfile and readfile and isfile(API_KEY_FILE) then
-            GroqApiKey = readfile(API_KEY_FILE)
+            State.GroqApiKey = readfile(API_KEY_FILE)
         end
     end)
-    if not GroqApiKey and Storage and Storage.appSettings and Storage.appSettings.groqApiKey then
-        GroqApiKey = Storage.appSettings.groqApiKey
+    if not State.GroqApiKey and Storage and Storage.appSettings and Storage.appSettings.groqApiKey then
+        State.GroqApiKey = Storage.appSettings.groqApiKey
     end
 end
 
@@ -453,8 +469,8 @@ local function CreateCloneFromUserId(userId, displayName, username)
     if not dispName then dispName = GetDisplayName(userId) or uname end
     if not model then return end
 
-    CloneCounter += 1
-    local cloneName = "Clone_" .. tostring(CloneCounter)
+    State.CloneCounter = State.CloneCounter + 1
+    local cloneName = "Clone_" .. tostring(State.CloneCounter)
     model.Name = cloneName
     PrepareCloneModel(model)
 
@@ -469,7 +485,7 @@ local function CreateCloneFromUserId(userId, displayName, username)
     end
 
     local cloneData = {
-        Index = CloneCounter,
+        Index = State.CloneCounter,
         UserId = userId,
         Username = uname,
         DisplayName = dispName,
@@ -477,7 +493,7 @@ local function CreateCloneFromUserId(userId, displayName, username)
         OriginalRotation = spawnCFrame - spawnCFrame.Position,
         HideName = false,
     }
-    CloneData[model] = cloneData
+    State.CloneData[model] = cloneData
     model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
 
     CreateNameTag(model, dispName, false)
@@ -485,19 +501,18 @@ local function CreateCloneFromUserId(userId, displayName, username)
 
     -- Add to history
     local alreadyInHistory = false
-    for _, entry in ipairs(HistoryList) do
+    for _, entry in ipairs(State.HistoryList) do
         if entry.userId == userId then alreadyInHistory = true break end
     end
     if not alreadyInHistory then
-        table.insert(HistoryList, {userId = userId, displayName = dispName, username = uname})
+        table.insert(State.HistoryList, {userId = userId, displayName = dispName, username = uname})
         SaveHistory()
     end
 
-    if DanceMode or SyncTargetMode then SetupDanceSync() end
+    if State.DanceMode or State.SyncTargetMode then SetupDanceSync() end
 
-    -- Refresh UI if in Clones or History tab
-    if currentTab == "Clones" then rebuildClonesTab() end
-    if currentTab == "History" then rebuildHistoryTab() end
+    if State.CurrentTab == "Clones" then rebuildClonesTab() end
+    if State.CurrentTab == "History" then rebuildHistoryTab() end
 end
 
 local function CreateCloneFromInput(inputText)
@@ -518,7 +533,7 @@ local function CreateCloneFromInput(inputText)
 end
 
 -- ================================================
--- HTTP & AI
+-- HTTP & AI CHAT
 -- ================================================
 local function performHttpPost(url, headers, body)
     local success, response = pcall(function()
@@ -555,12 +570,12 @@ local function performHttpPost(url, headers, body)
 end
 
 local function SendGroqMessage(prompt, systemPrompt)
-    if not GroqApiKey or GroqApiKey == "" then
+    if not State.GroqApiKey or State.GroqApiKey == "" then
         return nil, "API key belum diisi"
     end
     local url = "https://api.groq.com/openai/v1/chat/completions"
     local headers = {
-        ["Authorization"] = "Bearer " .. GroqApiKey,
+        ["Authorization"] = "Bearer " .. State.GroqApiKey,
         ["Content-Type"] = "application/json",
     }
     local lastError = nil
@@ -581,13 +596,10 @@ local function SendGroqMessage(prompt, systemPrompt)
             local success, decoded = pcall(function() return HttpService:JSONDecode(responseBody) end)
             if success and decoded and not decoded.error then
                 if decoded.choices and decoded.choices[1] and decoded.choices[1].message then
-                    local content = decoded.choices[1].message.content
-                    print("[AI Chat] Berhasil dengan model:", model, "->", content)
-                    return content
+                    return decoded.choices[1].message.content
                 end
             elseif decoded and decoded.error then
                 lastError = decoded.error.message or "unknown"
-                warn("[AI Chat] Model", model, "error:", lastError)
             end
         end
     end
@@ -631,7 +643,7 @@ local function DisplayCloneBubble(clone, message)
     label.Parent = bg
 
     task.delay(5, function()
-        if bubble.Parent then bubble:Destroy() end
+        if bubble and bubble.Parent then bubble:Destroy() end
     end)
 end
 
@@ -653,10 +665,9 @@ local function DoAIChatOnce()
     if response then
         local lines = {}
         for line in response:gmatch("[^\n]+") do table.insert(lines, line) end
-        local msg1, msg2
         if #lines >= 2 then
-            msg1 = lines[1]:gsub("^%s*A%s*:%s*", "")
-            msg2 = lines[2]:gsub("^%s*B%s*:%s*", "")
+            local msg1 = lines[1]:gsub("^%s*A%s*:%s*", "")
+            local msg2 = lines[2]:gsub("^%s*B%s*:%s*", "")
             if #msg1 > 0 and #msg2 > 0 then
                 DisplayCloneBubble(clone1, msg1)
                 task.wait(2)
@@ -664,17 +675,17 @@ local function DoAIChatOnce()
                 return true
             end
         end
-    else
-        return false, err or "Gagal AI"
     end
+    return false, err or "Gagal AI Chat"
 end
 
 local function StartAIChat()
     if AIChatLoop then return end
+    State.AIChatEnabled = true
     AIChatLoop = task.spawn(function()
-        while AIChatEnabled do
-            if os.clock() - AIChatLastTime >= AIChatCooldown then
-                AIChatLastTime = os.clock()
+        while State.AIChatEnabled do
+            if os.clock() - State.AIChatLastTime >= State.AIChatCooldown then
+                State.AIChatLastTime = os.clock()
                 DoAIChatOnce()
             end
             task.wait(2)
@@ -683,53 +694,57 @@ local function StartAIChat()
 end
 
 local function StopAIChat()
-    AIChatEnabled = false
+    State.AIChatEnabled = false
     AIChatLoop = nil
 end
 
 -- ================================================
--- UI HELPERS
+-- UI BUILDERS & HELPERS
 -- ================================================
 local function makeLabel(text, size, color, font, parent)
     local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.new(1, 0, 0, size + 8)
     lbl.BackgroundTransparency = 1
     lbl.Text = text
-    lbl.TextColor3 = color or T.Text or Color3.fromRGB(30,30,30)
+    lbl.TextColor3 = color or COLORS.SoftWhite
     lbl.Font = font or Enum.Font.GothamMedium
     lbl.TextSize = size or 11
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
     lbl.Parent = parent
     return lbl
 end
 
 local function makeButton(text, color, parent, size)
     local btn = Instance.new("TextButton")
-    btn.Size = size or UDim2.new(1, 0, 0, 34)
-    btn.BackgroundColor3 = color or T.Card or Color3.fromRGB(245,245,245)
+    btn.Size = size or UDim2.new(1, 0, 0, 36)
+    btn.BackgroundColor3 = color or COLORS.Panel2
     btn.Text = text
-    btn.TextColor3 = T.Text or Color3.fromRGB(30,30,30)
+    btn.TextColor3 = COLORS.White
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 10
     btn.AutoButtonColor = false
     btn.Parent = parent
     corner(btn, 8)
+    stroke(btn, Color3.fromRGB(255, 255, 255), 0.05)
     pressFX(btn)
     return btn
 end
 
 local function makeInput(placeholder, parent)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 36)
-    frame.BackgroundColor3 = T.Card or Color3.fromRGB(245,245,245)
+    frame.Size = UDim2.new(1, 0, 0, 38)
+    frame.BackgroundColor3 = COLORS.Panel2
     frame.Parent = parent
     corner(frame, 8)
+    stroke(frame, COLORS.Panel3, 1)
 
     local tb = Instance.new("TextBox")
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
     tb.PlaceholderText = placeholder or ""
-    tb.PlaceholderColor3 = Color3.fromRGB(150,150,150)
-    tb.TextColor3 = T.Text or Color3.fromRGB(30,30,30)
+    tb.PlaceholderColor3 = COLORS.Gray
+    tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
     tb.TextSize = 11
     tb.ClearTextOnFocus = false
@@ -738,29 +753,27 @@ local function makeInput(placeholder, parent)
     return tb, frame
 end
 
--- ================================================
--- TAB BUILDERS (fixed with proper clearing)
--- ================================================
 local function clearTabContent()
+    if not tabContentFrame then return end
     for _, child in ipairs(tabContentFrame:GetChildren()) do
-        child:Destroy()
+        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
     end
-    local list = Instance.new("UIListLayout")
-    list.Padding = UDim.new(0, 6)
-    list.SortOrder = Enum.SortOrder.LayoutOrder
-    list.Parent = tabContentFrame
 end
 
-local function rebuildClonesTab()
+-- ================================================
+-- TAB REBUILDERS
+-- ================================================
+rebuildClonesTab = function()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
-    local inputLabel = makeLabel("Username / User ID:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    local inputLabel = makeLabel("MASUKKAN USERNAME / USER ID:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     inputLabel.LayoutOrder = 1
-    local inputBox, inputFrame = makeInput("Masukkan target...", tabContentFrame)
+    local inputBox, inputFrame = makeInput("Ketik target avatar...", tabContentFrame)
     inputFrame.LayoutOrder = 2
 
-    local cloneBtn = makeButton("CLONE", COLORS.Red, tabContentFrame)
+    local cloneBtn = makeButton("CLONE TARGET", COLORS.Red, tabContentFrame)
     cloneBtn.LayoutOrder = 3
     cloneBtn.MouseButton1Click:Connect(function()
         CreateCloneFromInput(inputBox.Text)
@@ -777,207 +790,212 @@ local function rebuildClonesTab()
         end
     end)
 
-    local clonesLabel = makeLabel("Active Clones:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    local clonesLabel = makeLabel("DAFTAR CLONE AKTIF:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     clonesLabel.LayoutOrder = 5
 
     local folder = Workspace:FindFirstChild(FOLDER_NAME)
     if folder then
         local index = 6
-        for _, clone in ipairs(folder:GetChildren()) do
-            if clone:IsA("Model") then
-                local cloneButton = makeButton(clone.Name, COLORS.Panel, tabContentFrame)
-                cloneButton.LayoutOrder = index
-                cloneButton.MouseButton1Click:Connect(function()
-                    SelectClone(clone)
-                end)
-                index = index + 1
+        local cloneList = folder:GetChildren()
+        if #cloneList == 0 then
+            local emptyInfo = makeLabel("Belum ada clone yang dibuat.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyInfo.LayoutOrder = index
+        else
+            for _, clone in ipairs(cloneList) do
+                if clone:IsA("Model") then
+                    local isSelected = (State.SelectedClone == clone)
+                    local btnColor = isSelected and COLORS.PurpleDark or COLORS.Panel
+                    local cloneButton = makeButton((isSelected and "▶ " or "") .. clone.Name, btnColor, tabContentFrame)
+                    cloneButton.LayoutOrder = index
+                    cloneButton.MouseButton1Click:Connect(function()
+                        SelectClone(clone)
+                        rebuildClonesTab()
+                    end)
+                    index = index + 1
+                end
             end
         end
     end
 end
 
-local function rebuildEditorTab()
+rebuildEditorTab = function()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
     -- Edit Mode toggle
-    local editModeBtn = makeButton(EditMode and "EDIT MODE: ON" or "EDIT MODE: OFF", EditMode and COLORS.Green or COLORS.Panel, tabContentFrame)
+    local editModeBtn = makeButton(State.EditMode and "EDIT MODE: ACTIVE" or "EDIT MODE: OFF", State.EditMode and COLORS.Green or COLORS.Panel, tabContentFrame)
     editModeBtn.LayoutOrder = 1
     editModeBtn.MouseButton1Click:Connect(function()
-        EditMode = not EditMode
-        if not EditMode then
-            PositionMode = false
-            RotationMode = false
+        State.EditMode = not State.EditMode
+        if not State.EditMode then
+            State.PositionMode = false
+            State.RotationMode = false
             SetGizmoVisibility()
         end
         rebuildEditorTab()
     end)
 
-    -- Selected clone info
+    -- Selected clone card
     local selectedFrame = Instance.new("Frame")
-    selectedFrame.Size = UDim2.new(1, 0, 0, 80)
+    selectedFrame.Size = UDim2.new(1, 0, 0, 85)
     selectedFrame.BackgroundColor3 = COLORS.Panel
     selectedFrame.LayoutOrder = 2
     selectedFrame.Parent = tabContentFrame
     corner(selectedFrame, 10)
+    stroke(selectedFrame, COLORS.Panel3, 1)
 
-    local selName = makeLabel(SelectedClone and SelectedClone.Name or "Tidak ada clone terpilih", 12, COLORS.White, Enum.Font.GothamBold, selectedFrame)
-    selName.Position = UDim2.new(0, 10, 0, 5)
-    selName.Size = UDim2.new(1, -20, 0, 20)
-    selName.TextXAlignment = Enum.TextXAlignment.Left
+    local selName = makeLabel(State.SelectedClone and State.SelectedClone.Name or "Tidak ada clone terpilih", 11, COLORS.White, Enum.Font.GothamBold, selectedFrame)
+    selName.Position = UDim2.new(0, 10, 0, 4)
+    selName.Size = UDim2.new(1, -20, 0, 18)
 
-    local selInfo = makeLabel(SelectedClone and "Clone #"..(CloneData[SelectedClone] and CloneData[SelectedClone].Index or "?") or "Klik clone untuk memilih", 9, COLORS.Gray, nil, selectedFrame)
-    selInfo.Position = UDim2.new(0, 10, 0, 28)
+    local data = State.SelectedClone and State.CloneData[State.SelectedClone]
+    local selInfo = makeLabel(State.SelectedClone and ("ID: " .. (data and data.UserId or "?") .. " | Display: " .. (data and data.DisplayName or "?")) or "Klik clone di daftar untuk mengedit", 9, COLORS.Gray, nil, selectedFrame)
+    selInfo.Position = UDim2.new(0, 10, 0, 24)
     selInfo.Size = UDim2.new(1, -20, 0, 16)
-    selInfo.TextXAlignment = Enum.TextXAlignment.Left
 
     local renameBox = Instance.new("TextBox")
-    renameBox.Size = UDim2.new(1, -60, 0, 24)
+    renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
-    renameBox.PlaceholderText = "Rename..."
+    renameBox.PlaceholderText = "Ubah nama clone..."
     renameBox.PlaceholderColor3 = COLORS.DarkGray
     renameBox.TextColor3 = COLORS.White
     renameBox.Font = Enum.Font.Gotham
     renameBox.TextSize = 10
     renameBox.ClearTextOnFocus = false
     renameBox.Parent = selectedFrame
-    corner(renameBox, 4)
+    corner(renameBox, 6)
 
-    local renameBtn = makeButton("SIMPAN", COLORS.Orange, selectedFrame, UDim2.new(0, 50, 0, 24))
-    renameBtn.Position = UDim2.new(1, -55, 0, 48)
+    local renameBtn = makeButton("SIMPAN", COLORS.Orange, selectedFrame, UDim2.new(0, 55, 0, 28))
+    renameBtn.Position = UDim2.new(1, -58, 0, 48)
     renameBtn.TextColor3 = COLORS.Background
     renameBtn.MouseButton1Click:Connect(function()
-        if not SelectedClone then return end
+        if not State.SelectedClone then return end
         local newName = renameBox.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if newName == "" then return end
-        SelectedClone.Name = newName
-        if CloneData[SelectedClone] then CloneData[SelectedClone].Name = newName end
-        local data = CloneData[SelectedClone]
-        if data then CreateNameTag(SelectedClone, data.DisplayName or newName, data.HideName) end
+        State.SelectedClone.Name = newName
+        if State.CloneData[State.SelectedClone] then State.CloneData[State.SelectedClone].Name = newName end
+        local cData = State.CloneData[State.SelectedClone]
+        if cData then CreateNameTag(State.SelectedClone, cData.DisplayName or newName, cData.HideName) end
         rebuildEditorTab()
     end)
 
-    -- Hide name button
-    local hideBtn = makeButton(SelectedClone and (CloneData[SelectedClone] and CloneData[SelectedClone].HideName and "SHOW NAME" or "HIDE NAME") or "HIDE NAME", COLORS.Panel2, tabContentFrame)
+    -- Hide name toggle
+    local isHidden = State.SelectedClone and State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].HideName
+    local hideBtn = makeButton(isHidden and "TAMPILKAN NAMA" or "SEMBUNYIKAN NAMA", COLORS.Panel2, tabContentFrame)
     hideBtn.LayoutOrder = 3
     hideBtn.MouseButton1Click:Connect(function()
-        if not SelectedClone or not CloneData[SelectedClone] then return end
-        local data = CloneData[SelectedClone]
-        data.HideName = not data.HideName
-        if data.HideName or HideAllNames then
-            local tag = SelectedClone:FindFirstChild("NameTag")
+        if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
+        local cData = State.CloneData[State.SelectedClone]
+        cData.HideName = not cData.HideName
+        if cData.HideName or State.HideAllNames then
+            local tag = State.SelectedClone:FindFirstChild("NameTag")
             if tag then tag:Destroy() end
         else
-            CreateNameTag(SelectedClone, data.DisplayName or SelectedClone.Name, false)
+            CreateNameTag(State.SelectedClone, cData.DisplayName or State.SelectedClone.Name, false)
         end
         rebuildEditorTab()
     end)
 
-    -- Position toggle
-    local posBtn = makeButton(PositionMode and "POSISI: ON" or "POSISI: OFF", PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
+    -- Position Mode
+    local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
     posBtn.LayoutOrder = 4
     posBtn.MouseButton1Click:Connect(function()
-        if not EditMode then return end
-        PositionMode = not PositionMode
-        if PositionMode then RotationMode = false end
+        if not State.EditMode then return end
+        State.PositionMode = not State.PositionMode
+        if State.PositionMode then State.RotationMode = false end
         SetGizmoVisibility()
         rebuildEditorTab()
     end)
 
-    -- Rotation toggle
-    local rotBtn = makeButton(RotationMode and "ROTASI: ON" or "ROTASI: OFF", RotationMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    -- Rotation Mode
+    local rotBtn = makeButton(State.RotationMode and "GIZMO ROTASI: ON" or "GIZMO ROTASI: OFF", State.RotationMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
     rotBtn.LayoutOrder = 5
     rotBtn.MouseButton1Click:Connect(function()
-        if not EditMode then return end
-        RotationMode = not RotationMode
-        if RotationMode then PositionMode = false end
+        if not State.EditMode then return end
+        State.RotationMode = not State.RotationMode
+        if State.RotationMode then State.PositionMode = false end
         SetGizmoVisibility()
         rebuildEditorTab()
     end)
 
-    -- Dance mode
-    local danceBtn = makeButton(DanceMode and "DANCE: ON" or "DANCE: OFF", DanceMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    -- Dance Mode
+    local danceBtn = makeButton(State.DanceMode and "DANCE SYNC (SELECTED): ON" or "DANCE SYNC (SELECTED): OFF", State.DanceMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
     danceBtn.LayoutOrder = 6
     danceBtn.MouseButton1Click:Connect(function()
-        if not EditMode then return end
-        DanceMode = not DanceMode
-        SyncTargetMode = false
-        if DanceMode then
-            if not SelectedClone then DanceMode = false else SetupDanceSync() end
+        State.DanceMode = not State.DanceMode
+        State.SyncTargetMode = false
+        if State.DanceMode then
+            if not State.SelectedClone then State.DanceMode = false else SetupDanceSync() end
         else
             StopSyncSystem()
         end
         rebuildEditorTab()
     end)
 
-    -- Bring to player
-    local bringBtn = makeButton("BAWA KE PLAYER", COLORS.Blue, tabContentFrame)
+    -- Teleport to LocalPlayer
+    local bringBtn = makeButton("TELEPORT KE SAYA", COLORS.Blue, tabContentFrame)
     bringBtn.LayoutOrder = 7
     bringBtn.MouseButton1Click:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
         local root = character:FindFirstChild("HumanoidRootPart")
         if not root then return end
-        local targetCFrame = root.CFrame
-        local folder = Workspace:FindFirstChild(FOLDER_NAME)
-        if folder then
-            for _, clone in ipairs(folder:GetChildren()) do
-                if clone:IsA("Model") and clone.PrimaryPart then clone:PivotTo(targetCFrame) end
-            end
+        local targetCFrame = root.CFrame * CFrame.new(0, 0, -3)
+        if State.SelectedClone and State.SelectedClone.PrimaryPart then
+            State.SelectedClone:PivotTo(targetCFrame)
         end
     end)
 
-    -- Reset position
+    -- Reset position & rotation
     local resetPosBtn = makeButton("RESET POSISI", COLORS.Orange, tabContentFrame)
     resetPosBtn.LayoutOrder = 8
     resetPosBtn.MouseButton1Click:Connect(function()
-        if not SelectedClone or not CloneData[SelectedClone] then return end
-        local data = CloneData[SelectedClone]
-        local primary = SelectedClone.PrimaryPart
+        if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
+        local cData = State.CloneData[State.SelectedClone]
+        local primary = State.SelectedClone.PrimaryPart
         if not primary then return end
-        local currentRotation = primary.CFrame - primary.CFrame.Position
-        SelectedClone:PivotTo(CFrame.new(data.OriginalCFrame.Position) * currentRotation)
+        local currentRot = primary.CFrame - primary.CFrame.Position
+        State.SelectedClone:PivotTo(CFrame.new(cData.OriginalCFrame.Position) * currentRot)
     end)
 
-    -- Reset rotation
     local resetRotBtn = makeButton("RESET ROTASI", COLORS.Orange, tabContentFrame)
     resetRotBtn.LayoutOrder = 9
     resetRotBtn.MouseButton1Click:Connect(function()
-        if not SelectedClone or not CloneData[SelectedClone] then return end
-        local data = CloneData[SelectedClone]
-        local primary = SelectedClone.PrimaryPart
+        if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
+        local cData = State.CloneData[State.SelectedClone]
+        local primary = State.SelectedClone.PrimaryPart
         if not primary then return end
-        SelectedClone:PivotTo(CFrame.new(primary.CFrame.Position) * data.OriginalRotation)
+        State.SelectedClone:PivotTo(CFrame.new(primary.CFrame.Position) * cData.OriginalRotation)
     end)
 
-    -- Delete selected
-    local delBtn = makeButton("HAPUS SELECTED", COLORS.Delete, tabContentFrame)
+    -- Delete Selected
+    local delBtn = makeButton("HAPUS CLONE INI", COLORS.Delete, tabContentFrame)
     delBtn.LayoutOrder = 10
     delBtn.MouseButton1Click:Connect(function()
-        if not SelectedClone then return end
-        local target = SelectedClone
-        CloneData[target] = nil
-        SelectedClone = nil
+        if not State.SelectedClone then return end
+        local target = State.SelectedClone
+        State.CloneData[target] = nil
+        State.SelectedClone = nil
         SetGizmoVisibility()
         target:Destroy()
         rebuildEditorTab()
-        if currentTab == "Clones" then rebuildClonesTab() end
     end)
 
-    -- Delete all
-    local delAllBtn = makeButton("HAPUS SEMUA", COLORS.Delete, tabContentFrame)
+    -- Delete All
+    local delAllBtn = makeButton("HAPUS SEMUA CLONE", COLORS.Delete, tabContentFrame)
     delAllBtn.LayoutOrder = 11
     delAllBtn.MouseButton1Click:Connect(function()
         if not DeleteAllArmed then
             DeleteAllArmed = true
-            delAllBtn.Text = "KONFIRMASI?"
+            delAllBtn.Text = "KONFIRMASI HAPUS SEMUA?"
             delAllBtn.BackgroundColor3 = COLORS.DeleteActive
             task.delay(3, function()
                 if DeleteAllArmed then
                     DeleteAllArmed = false
-                    delAllBtn.Text = "HAPUS SEMUA"
-                    delAllBtn.BackgroundColor3 = COLORS.Delete
+                    if delAllBtn and delAllBtn.Parent then
+                        delAllBtn.Text = "HAPUS SEMUA CLONE"
+                        delAllBtn.BackgroundColor3 = COLORS.Delete
+                    end
                 end
             end)
             return
@@ -987,106 +1005,106 @@ local function rebuildEditorTab()
         if folder then
             for _, clone in ipairs(folder:GetChildren()) do clone:Destroy() end
         end
-        table.clear(CloneData)
-        SelectedClone = nil
+        table.clear(State.CloneData)
+        State.SelectedClone = nil
         SetGizmoVisibility()
-        delAllBtn.Text = "HAPUS SEMUA"
-        delAllBtn.BackgroundColor3 = COLORS.Delete
         rebuildEditorTab()
-        if currentTab == "Clones" then rebuildClonesTab() end
     end)
 end
 
-local function rebuildSyncTab()
+rebuildSyncTab = function()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
-    local targetInput, targetFrame = makeInput("Username target sync...", tabContentFrame)
-    targetFrame.LayoutOrder = 1
+    local infoLabel = makeLabel("SYNC ANIMASI KE PLAYER LAIN:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    infoLabel.LayoutOrder = 1
 
-    local activateBtn = makeButton("AKTIFKAN SYNC", COLORS.PurpleDark, tabContentFrame)
-    activateBtn.LayoutOrder = 2
+    local targetInput, targetFrame = makeInput("Username target player...", tabContentFrame)
+    targetFrame.LayoutOrder = 2
+
+    local activateBtn = makeButton("AKTIFKAN GLOBAL SYNC", COLORS.PurpleDark, tabContentFrame)
+    activateBtn.LayoutOrder = 3
     activateBtn.MouseButton1Click:Connect(function()
         local targetName = targetInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if targetName == "" then return end
         local targetPlayer = Players:FindFirstChild(targetName)
         if not targetPlayer then return end
-        SyncTargetPlayer = targetPlayer
-        SyncTargetMode = true
-        DanceMode = false
+        State.SyncTargetPlayer = targetPlayer
+        State.SyncTargetMode = true
+        State.DanceMode = false
         SetupDanceSync()
         rebuildSyncTab()
     end)
 
     local deactivateBtn = makeButton("NONAKTIFKAN SYNC", COLORS.Red, tabContentFrame)
-    deactivateBtn.LayoutOrder = 3
+    deactivateBtn.LayoutOrder = 4
     deactivateBtn.MouseButton1Click:Connect(function()
-        SyncTargetMode = false
-        SyncTargetPlayer = nil
+        State.SyncTargetMode = false
+        State.SyncTargetPlayer = nil
         StopSyncSystem()
         rebuildSyncTab()
     end)
 
-    if SyncTargetMode and SyncTargetPlayer then
-        local statusLabel = makeLabel("Sync aktif ke: " .. SyncTargetPlayer.Name, 10, COLORS.Green, Enum.Font.GothamBold, tabContentFrame)
-        statusLabel.LayoutOrder = 4
+    if State.SyncTargetMode and State.SyncTargetPlayer then
+        local statusLabel = makeLabel("✓ Sync Aktif ke: " .. State.SyncTargetPlayer.Name, 10, COLORS.Green, Enum.Font.GothamBold, tabContentFrame)
+        statusLabel.LayoutOrder = 5
     end
 end
 
-local function rebuildAIChatTab()
+rebuildAIChatTab = function()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
-    local apiLabel = makeLabel("Groq API Key:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    local apiLabel = makeLabel("GROQ API KEY:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     apiLabel.LayoutOrder = 1
 
-    local apiInput, apiFrame = makeInput("Masukkan API key Groq...", tabContentFrame)
+    local apiInput, apiFrame = makeInput("Masukkan Groq API Key...", tabContentFrame)
     apiFrame.LayoutOrder = 2
-    if GroqApiKey then apiInput.Text = GroqApiKey end
+    if State.GroqApiKey then apiInput.Text = State.GroqApiKey end
 
     local saveKeyBtn = makeButton("SIMPAN KEY", COLORS.Blue, tabContentFrame)
     saveKeyBtn.LayoutOrder = 3
     saveKeyBtn.MouseButton1Click:Connect(function()
-        GroqApiKey = apiInput.Text:gsub("%s+", "")
+        State.GroqApiKey = apiInput.Text:gsub("%s+", "")
         SaveApiKey()
         rebuildAIChatTab()
     end)
 
-    local aiToggleBtn = makeButton(AIChatEnabled and "AI CHAT: ON" or "AI CHAT: OFF", AIChatEnabled and COLORS.Green or COLORS.Panel, tabContentFrame)
+    local aiToggleBtn = makeButton(State.AIChatEnabled and "AUTO AI CHAT: ACTIVE" or "AUTO AI CHAT: OFF", State.AIChatEnabled and COLORS.Green or COLORS.Panel, tabContentFrame)
     aiToggleBtn.LayoutOrder = 4
     aiToggleBtn.MouseButton1Click:Connect(function()
-        AIChatEnabled = not AIChatEnabled
-        if AIChatEnabled then StartAIChat() else StopAIChat() end
+        if State.AIChatEnabled then
+            StopAIChat()
+        else
+            StartAIChat()
+        end
         rebuildAIChatTab()
     end)
 
-    local testBtn = makeButton("TEST SEKALI", COLORS.Orange, tabContentFrame)
+    local testBtn = makeButton("TES PERCAKAPAN SEKARANG", COLORS.Orange, tabContentFrame)
     testBtn.LayoutOrder = 5
     testBtn.MouseButton1Click:Connect(function()
         local ok, err = DoAIChatOnce()
         if not ok then
-            local errorLabel = makeLabel("Error: " .. (err or "unknown"), 9, COLORS.Red, nil, tabContentFrame)
+            local errorLabel = makeLabel("Error: " .. (err or "Gagal"), 9, COLORS.Red, nil, tabContentFrame)
             errorLabel.LayoutOrder = 6
         end
     end)
 
-    local infoLabel = makeLabel("Cooldown: " .. AIChatCooldown .. " detik", 9, COLORS.Gray, nil, tabContentFrame)
+    local infoLabel = makeLabel("Interval Chat: " .. State.AIChatCooldown .. " detik", 9, COLORS.Gray, nil, tabContentFrame)
     infoLabel.LayoutOrder = 7
 end
 
 local function rebuildConfigTab()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
-    local saveBtn = makeButton("SIMPAN CONFIG", COLORS.Green, tabContentFrame)
+    local saveBtn = makeButton("SIMPAN CONFIGURASI", COLORS.Green, tabContentFrame)
     saveBtn.LayoutOrder = 1
     saveBtn.MouseButton1Click:Connect(function()
         local data = {}
         local folder = Workspace:FindFirstChild(FOLDER_NAME)
         if folder then
             for _, clone in ipairs(folder:GetChildren()) do
-                if clone:IsA("Model") and CloneData[clone] then
-                    local info = CloneData[clone]
+                if clone:IsA("Model") and State.CloneData[clone] then
+                    local info = State.CloneData[clone]
                     local primary = clone.PrimaryPart
                     if primary then
                         local pos = primary.Position
@@ -1112,7 +1130,7 @@ local function rebuildConfigTab()
         end
     end)
 
-    local loadBtn = makeButton("MUAT CONFIG", COLORS.Blue, tabContentFrame)
+    local loadBtn = makeButton("MUAT CONFIGURASI", COLORS.Blue, tabContentFrame)
     loadBtn.LayoutOrder = 2
     loadBtn.MouseButton1Click:Connect(function()
         local data = nil
@@ -1130,8 +1148,8 @@ local function rebuildConfigTab()
                 local userId = info.userId
                 local model = CreateAvatarFromUserId(userId)
                 if model then
-                    CloneCounter += 1
-                    local cloneName = info.name or ("Clone_" .. tostring(CloneCounter))
+                    State.CloneCounter = State.CloneCounter + 1
+                    local cloneName = info.name or ("Clone_" .. tostring(State.CloneCounter))
                     model.Name = cloneName
                     PrepareCloneModel(model)
                     local position = info.position
@@ -1152,7 +1170,7 @@ local function rebuildConfigTab()
                         rootPart.Transparency = 1
                     end
                     local cloneData = {
-                        Index = CloneCounter,
+                        Index = State.CloneCounter,
                         UserId = userId,
                         Username = info.username or info.displayName,
                         DisplayName = info.displayName,
@@ -1160,80 +1178,68 @@ local function rebuildConfigTab()
                         OriginalRotation = cf - cf.Position,
                         HideName = info.hideName or false,
                     }
-                    CloneData[model] = cloneData
+                    State.CloneData[model] = cloneData
                     model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
                     CreateNameTag(model, info.displayName or info.username or cloneName, cloneData.HideName)
                 end
             end)
         end
     end)
-
-    local clearAllBtn = makeButton("HAPUS SEMUA CLONE", COLORS.Delete, tabContentFrame)
-    clearAllBtn.LayoutOrder = 3
-    clearAllBtn.MouseButton1Click:Connect(function()
-        local folder = Workspace:FindFirstChild(FOLDER_NAME)
-        if folder then
-            for _, clone in ipairs(folder:GetChildren()) do clone:Destroy() end
-        end
-        table.clear(CloneData)
-        SelectedClone = nil
-        SetGizmoVisibility()
-        if currentTab == "Clones" then rebuildClonesTab() end
-        if currentTab == "Editor" then rebuildEditorTab() end
-    end)
 end
 
-local function rebuildHistoryTab()
+rebuildHistoryTab = function()
     clearTabContent()
-    local list = tabContentFrame:FindFirstChildOfClass("UIListLayout")
 
-    if #HistoryList == 0 then
-        local emptyLbl = makeLabel("Belum ada riwayat clone", 11, COLORS.Gray, nil, tabContentFrame)
+    if #State.HistoryList == 0 then
+        local emptyLbl = makeLabel("Belum ada riwayat clone.", 10, COLORS.Gray, nil, tabContentFrame)
         emptyLbl.LayoutOrder = 1
     else
-        for i, entry in ipairs(HistoryList) do
+        for i, entry in ipairs(State.HistoryList) do
             local itemFrame = Instance.new("Frame")
-            itemFrame.Size = UDim2.new(1, 0, 0, 40)
+            itemFrame.Size = UDim2.new(1, 0, 0, 42)
             itemFrame.BackgroundColor3 = COLORS.Panel
             itemFrame.LayoutOrder = i
             itemFrame.Parent = tabContentFrame
             corner(itemFrame, 8)
+            stroke(itemFrame, COLORS.Panel3, 1)
 
             local nameLabel = makeLabel(entry.displayName or entry.username, 11, COLORS.White, Enum.Font.GothamBold, itemFrame)
-            nameLabel.Size = UDim2.new(1, -70, 0, 20)
-            nameLabel.Position = UDim2.new(0, 8, 0, 2)
-            nameLabel.TextXAlignment = Enum.TextXAlignment.Left
+            nameLabel.Size = UDim2.new(1, -75, 0, 20)
+            nameLabel.Position = UDim2.new(0, 10, 0, 3)
 
-            local cloneBtn = makeButton("CLONE", COLORS.Red, itemFrame, UDim2.new(0, 50, 0, 22))
-            cloneBtn.Position = UDim2.new(1, -58, 0, 9)
-            cloneBtn.TextColor3 = COLORS.White
+            local subLabel = makeLabel("@" .. (entry.username or "unknown"), 9, COLORS.Gray, nil, itemFrame)
+            subLabel.Size = UDim2.new(1, -75, 0, 14)
+            subLabel.Position = UDim2.new(0, 10, 0, 22)
+
+            local cloneBtn = makeButton("CLONE", COLORS.Red, itemFrame, UDim2.new(0, 58, 0, 26))
+            cloneBtn.Position = UDim2.new(1, -64, 0, 8)
             cloneBtn.MouseButton1Click:Connect(function()
                 CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
             end)
         end
 
-        local clearBtn = makeButton("CLEAR HISTORY", COLORS.Delete, tabContentFrame)
-        clearBtn.LayoutOrder = #HistoryList + 2
+        local clearBtn = makeButton("HAPUS RIWAYAT", COLORS.Delete, tabContentFrame)
+        clearBtn.LayoutOrder = #State.HistoryList + 1
         clearBtn.MouseButton1Click:Connect(function()
-            HistoryList = {}
+            State.HistoryList = {}
             SaveHistory()
             rebuildHistoryTab()
         end)
     end
 end
 
-local function rebuildCurrentTab()
-    if currentTab == "Clones" then
+rebuildCurrentTab = function()
+    if State.CurrentTab == "Clones" then
         rebuildClonesTab()
-    elseif currentTab == "Editor" then
+    elseif State.CurrentTab == "Editor" then
         rebuildEditorTab()
-    elseif currentTab == "Sync" then
+    elseif State.CurrentTab == "Sync" then
         rebuildSyncTab()
-    elseif currentTab == "AI Chat" then
+    elseif State.CurrentTab == "AI Chat" then
         rebuildAIChatTab()
-    elseif currentTab == "Config" then
+    elseif State.CurrentTab == "Config" then
         rebuildConfigTab()
-    elseif currentTab == "History" then
+    elseif State.CurrentTab == "History" then
         rebuildHistoryTab()
     end
 end
@@ -1242,6 +1248,8 @@ end
 -- MAIN APP OPEN FUNCTION
 -- ================================================
 function _G.openMyCloneApp()
+    _G.CurrentPhoneApp = "MyClone.lua"
+
     LoadApiKey()
     LoadHistory()
     LoadFavorites()
@@ -1253,42 +1261,49 @@ function _G.openMyCloneApp()
     end
 
     local appContent = _G.appContent
-    -- Clear any existing children (should already be cleared by _G.openApp, but just in case)
+    if not appContent then return end
+
     for _, child in ipairs(appContent:GetChildren()) do
-        if not child:IsA("UIListLayout") then child:Destroy() end
+        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
     end
 
-    -- Tab bar
-    tabBar = Instance.new("Frame")
-    tabBar.Size = UDim2.new(1, 0, 0, 32)
-    tabBar.BackgroundTransparency = 1
-    tabBar.Parent = appContent
+    -- Tab Bar (Horizontal Scrollable)
+    tabBarFrame = Instance.new("ScrollingFrame")
+    tabBarFrame.Size = UDim2.new(1, 0, 0, 34)
+    tabBarFrame.BackgroundTransparency = 1
+    tabBarFrame.BorderSizePixel = 0
+    tabBarFrame.ScrollBarThickness = 0
+    tabBarFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    tabBarFrame.AutomaticCanvasSize = Enum.AutomaticSize.X
+    tabBarFrame.Parent = appContent
 
     local tabLayout = Instance.new("UIListLayout")
     tabLayout.FillDirection = Enum.FillDirection.Horizontal
     tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    tabLayout.Padding = UDim.new(0, 4)
-    tabLayout.Parent = tabBar
+    tabLayout.Padding = UDim.new(0, 6)
+    tabLayout.Parent = tabBarFrame
 
     local tabs = {"Clones", "Editor", "Sync", "AI Chat", "Config", "History"}
     for i, tabName in ipairs(tabs) do
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0.16, -4, 0, 28)
-        btn.BackgroundColor3 = COLORS.Panel2
+        btn.Size = UDim2.new(0, 75, 1, 0)
+        btn.BackgroundColor3 = (State.CurrentTab == tabName) and COLORS.PurpleDark or COLORS.Panel2
         btn.Text = tabName
         btn.TextColor3 = COLORS.White
         btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 8
+        btn.TextSize = 9
         btn.AutoButtonColor = false
         btn.LayoutOrder = i
-        btn.Parent = tabBar
+        btn.Parent = tabBarFrame
         corner(btn, 6)
+        stroke(btn, COLORS.Panel3, 1)
         pressFX(btn)
 
         btn.MouseButton1Click:Connect(function()
-            currentTab = tabName
-            -- Update visual of all tab buttons
-            for _, child in ipairs(tabBar:GetChildren()) do
+            State.CurrentTab = tabName
+            for _, child in ipairs(tabBarFrame:GetChildren()) do
                 if child:IsA("TextButton") then
                     child.BackgroundColor3 = COLORS.Panel2
                 end
@@ -1296,55 +1311,55 @@ function _G.openMyCloneApp()
             btn.BackgroundColor3 = COLORS.PurpleDark
             rebuildCurrentTab()
         end)
-
-        if i == 1 then btn.BackgroundColor3 = COLORS.PurpleDark end
     end
 
-    -- Content frame
-    tabContentFrame = Instance.new("Frame")
-    tabContentFrame.Size = UDim2.new(1, 0, 0, 0)
-    tabContentFrame.Position = UDim2.new(0, 0, 0, 36)
+    -- Tab Content Container (Vertical Scrollable)
+    tabContentFrame = Instance.new("ScrollingFrame")
+    tabContentFrame.Size = UDim2.new(1, 0, 1, -40)
+    tabContentFrame.Position = UDim2.new(0, 0, 0, 40)
     tabContentFrame.BackgroundTransparency = 1
-    tabContentFrame.AutomaticSize = Enum.AutomaticSize.Y
+    tabContentFrame.BorderSizePixel = 0
+    tabContentFrame.ScrollBarThickness = 3
+    tabContentFrame.ScrollBarImageColor3 = COLORS.Purple
+    tabContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+    tabContentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
     tabContentFrame.Parent = appContent
 
     local contentLayout = Instance.new("UIListLayout")
-    contentLayout.Padding = UDim.new(0, 6)
+    contentLayout.Padding = UDim.new(0, 8)
     contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
     contentLayout.Parent = tabContentFrame
 
-    -- Initialize default tab
-    currentTab = "Clones"
-    rebuildCurrentTab()
+    local padding = Instance.new("UIPadding")
+    padding.PaddingRight = UDim.new(0, 4)
+    padding.PaddingLeft = UDim.new(0, 2)
+    padding.Parent = tabContentFrame
 
-    -- Reset modes
-    EditMode = false
-    PositionMode = false
-    RotationMode = false
-    DanceMode = false
-    SyncTargetMode = false
+    -- Initialize Gizmos safely
+    local parentTarget = CoreGui
+    pcall(function()
+        if not Gizmos.Position or not Gizmos.Position.Parent then
+            Gizmos.Position = Instance.new("Handles")
+            Gizmos.Position.Style = Enum.HandlesStyle.Movement
+            Gizmos.Position.Color3 = COLORS.Red
+            Gizmos.Position.Parent = parentTarget
+        end
+        if not Gizmos.Rotation or not Gizmos.Rotation.Parent then
+            Gizmos.Rotation = Instance.new("ArcHandles")
+            Gizmos.Rotation.Color3 = COLORS.Purple
+            Gizmos.Rotation.Parent = parentTarget
+        end
+    end)
 
-    -- Create gizmos if not exist
-    if not PositionGizmo then
-        PositionGizmo = Instance.new("Handles")
-        PositionGizmo.Style = Enum.HandlesStyle.Movement
-        PositionGizmo.Color3 = COLORS.Red
-        PositionGizmo.Parent = CoreGui
-    end
-    if not RotationGizmo then
-        RotationGizmo = Instance.new("ArcHandles")
-        RotationGizmo.Color3 = COLORS.Purple
-        RotationGizmo.Parent = CoreGui
-    end
     SetGizmoVisibility()
 
-    -- Connect gizmo drag handlers (only once)
-    if not PositionGizmo:GetAttribute("DragConnected") then
-        PositionGizmo:SetAttribute("DragConnected", true)
+    -- Connect Gizmo Handlers safely once
+    if Gizmos.Position and not Gizmos.Position:GetAttribute("DragConnected") then
+        Gizmos.Position:SetAttribute("DragConnected", true)
         local dragStartCFrame = nil
-        PositionGizmo.MouseButton1Down:Connect(function()
-            if not SelectedClone or not PositionMode or not SelectedClone.PrimaryPart then return end
-            dragStartCFrame = SelectedClone.PrimaryPart.CFrame
+        Gizmos.Position.MouseButton1Down:Connect(function()
+            if not State.SelectedClone or not State.PositionMode or not State.SelectedClone.PrimaryPart then return end
+            dragStartCFrame = State.SelectedClone.PrimaryPart.CFrame
             GizmoDragging = true
             local camera = Workspace.CurrentCamera
             if camera then
@@ -1354,12 +1369,12 @@ function _G.openMyCloneApp()
             end
             pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition end)
         end)
-        PositionGizmo.MouseDrag:Connect(function(face, distance)
-            if not SelectedClone or not dragStartCFrame then return end
+        Gizmos.Position.MouseDrag:Connect(function(face, distance)
+            if not State.SelectedClone or not dragStartCFrame then return end
             local delta = Vector3.FromNormalId(face) * distance
-            SelectedClone:PivotTo(dragStartCFrame * CFrame.new(delta))
+            State.SelectedClone:PivotTo(dragStartCFrame * CFrame.new(delta))
         end)
-        PositionGizmo.MouseButton1Up:Connect(function()
+        Gizmos.Position.MouseButton1Up:Connect(function()
             dragStartCFrame = nil
             GizmoDragging = false
             local camera = Workspace.CurrentCamera
@@ -1373,12 +1388,12 @@ function _G.openMyCloneApp()
         end)
     end
 
-    if not RotationGizmo:GetAttribute("DragConnected") then
-        RotationGizmo:SetAttribute("DragConnected", true)
+    if Gizmos.Rotation and not Gizmos.Rotation:GetAttribute("DragConnected") then
+        Gizmos.Rotation:SetAttribute("DragConnected", true)
         local rotStartCFrame = nil
-        RotationGizmo.MouseButton1Down:Connect(function()
-            if not SelectedClone or not RotationMode or not SelectedClone.PrimaryPart then return end
-            rotStartCFrame = SelectedClone.PrimaryPart.CFrame
+        Gizmos.Rotation.MouseButton1Down:Connect(function()
+            if not State.SelectedClone or not State.RotationMode or not State.SelectedClone.PrimaryPart then return end
+            rotStartCFrame = State.SelectedClone.PrimaryPart.CFrame
             GizmoDragging = true
             local camera = Workspace.CurrentCamera
             if camera then
@@ -1388,12 +1403,12 @@ function _G.openMyCloneApp()
             end
             pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition end)
         end)
-        RotationGizmo.MouseDrag:Connect(function(axis, relativeAngle)
-            if not SelectedClone or not rotStartCFrame then return end
+        Gizmos.Rotation.MouseDrag:Connect(function(axis, relativeAngle)
+            if not State.SelectedClone or not rotStartCFrame then return end
             local axisVector = Vector3.FromAxis(axis)
-            SelectedClone:PivotTo(rotStartCFrame * CFrame.fromAxisAngle(axisVector, relativeAngle))
+            State.SelectedClone:PivotTo(rotStartCFrame * CFrame.fromAxisAngle(axisVector, relativeAngle))
         end)
-        RotationGizmo.MouseButton1Up:Connect(function()
+        Gizmos.Rotation.MouseButton1Up:Connect(function()
             rotStartCFrame = nil
             GizmoDragging = false
             local camera = Workspace.CurrentCamera
@@ -1407,10 +1422,10 @@ function _G.openMyCloneApp()
         end)
     end
 
-    -- Mouse selection for Editor
+    -- Click Selection in World
     local inputConn
     inputConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed or not EditMode then return end
+        if gameProcessed or not State.EditMode then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             local mouse = LocalPlayer:GetMouse()
             local target = mouse.Target
@@ -1422,14 +1437,12 @@ function _G.openMyCloneApp()
         end
     end)
 
-    -- Cleanup when app closes or another app opens
     appContent.Destroying:Connect(function()
         if inputConn then inputConn:Disconnect() end
-        StopSyncSystem()
-        StopAIChat()
-        if PositionGizmo then PositionGizmo:Destroy(); PositionGizmo = nil end
-        if RotationGizmo then RotationGizmo:Destroy(); RotationGizmo = nil end
+        -- State and loops persist in background!
     end)
+
+    rebuildCurrentTab()
 end
 
 return _G.openMyCloneApp
