@@ -1,6 +1,8 @@
 -- ================================================
--- MyClone.lua - MyClone App (Luxury Edition)
--- Upgraded: Native Bubble Chat, Friends Sync, AI Fixed, New Features & UI
+-- MyClone.lua - MyClone App (Phone UI Enhanced & Fixed)
+-- Fixed: State persistence on close, UI Overflow, App Reload Memory
+-- Upgraded: Luxurious UI, AI Chat Fixed, Manual Chat uses Roblox Bubble,
+-- Friends Auto-Load, New Features: Scale, Transparency, Highlight, Teleport All, etc.
 -- ================================================
 
 local Services = _G.Services or {
@@ -12,7 +14,6 @@ local Services = _G.Services or {
     RunService = game:GetService("RunService"),
     CoreGui = game:GetService("CoreGui"),
     TextChatService = game:GetService("TextChatService"),
-    Chat = game:GetService("Chat")
 }
 
 local Players = Services.Players
@@ -23,7 +24,6 @@ local HttpService = Services.HttpService
 local RunService = Services.RunService
 local CoreGui = Services.CoreGui
 local TextChatService = Services.TextChatService
-local ChatService = Services.Chat
 
 local LocalPlayer = Players.LocalPlayer
 local T = _G.T or {}
@@ -33,7 +33,7 @@ local Storage = _G.Storage or {}
 -- Alias helpers with safe fallbacks
 local corner = Helpers.corner or function(parent, radius)
     local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, radius or 10) -- Smoother, elegant corners
+    c.CornerRadius = UDim.new(0, radius or 8)
     c.Parent = parent
 end
 
@@ -54,35 +54,35 @@ local pressFX = Helpers.pressFX or function(btn)
 end
 
 -- ================================================
--- CONSTANTS & GLOBAL PERSISTENT STATE (LUXURY THEME)
+-- CONSTANTS & GLOBAL PERSISTENT STATE
 -- ================================================
-local FOLDER_NAME = "MyCloneFolder_Luxury"
+local FOLDER_NAME = "MyCloneFolder_V15"
 local CONFIG_FILE = "MyClone_Config.json"
 local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
 local FAV_PLAYERS_FILE = "MyClone_FavPlayers.json"
 
--- LUXURY COLOR PALETTE
 local COLORS = {
-    Background = Color3.fromRGB(13, 14, 21),     -- Deep space dark
-    Panel = Color3.fromRGB(22, 25, 37),          -- Elegant rich navy
-    Panel2 = Color3.fromRGB(32, 36, 51),         -- Lighter navy panel
-    Panel3 = Color3.fromRGB(45, 50, 70),         -- Border/Stroke navy
+    Background = Color3.fromRGB(10, 10, 16),
+    Panel = Color3.fromRGB(22, 24, 34),
+    Panel2 = Color3.fromRGB(32, 34, 48),
+    Panel3 = Color3.fromRGB(44, 47, 66),
+    Gold = Color3.fromRGB(255, 215, 100),
+    GoldDark = Color3.fromRGB(200, 160, 60),
     White = Color3.fromRGB(250, 250, 255),
-    SoftWhite = Color3.fromRGB(215, 220, 235),
-    Gray = Color3.fromRGB(140, 145, 165),
-    DarkGray = Color3.fromRGB(85, 90, 110),
-    Red = Color3.fromRGB(255, 60, 90),           -- Crimson
-    RedDark = Color3.fromRGB(180, 35, 55),
-    Purple = Color3.fromRGB(150, 90, 255),       -- Royal Purple
-    PurpleDark = Color3.fromRGB(95, 50, 190),
-    Green = Color3.fromRGB(45, 230, 140),        -- Emerald
-    Blue = Color3.fromRGB(60, 150, 255),         -- Azure
-    Orange = Color3.fromRGB(255, 140, 45),       -- Amber
-    Gold = Color3.fromRGB(255, 215, 0),          -- Luxury Gold
-    Delete = Color3.fromRGB(100, 30, 40),
-    DeleteActive = Color3.fromRGB(170, 35, 50),
+    SoftWhite = Color3.fromRGB(220, 225, 240),
+    Gray = Color3.fromRGB(150, 155, 175),
+    DarkGray = Color3.fromRGB(90, 95, 115),
+    Red = Color3.fromRGB(255, 70, 90),
+    RedDark = Color3.fromRGB(180, 40, 60),
+    Purple = Color3.fromRGB(140, 80, 255),
+    PurpleDark = Color3.fromRGB(100, 55, 210),
+    Green = Color3.fromRGB(50, 230, 140),
+    Blue = Color3.fromRGB(60, 160, 255),
+    Orange = Color3.fromRGB(255, 160, 60),
+    Delete = Color3.fromRGB(120, 40, 50),
+    DeleteActive = Color3.fromRGB(180, 50, 70),
 }
 
 -- Persistent Variables across UI close/reopen
@@ -110,8 +110,6 @@ _G.MyCloneState = _G.MyCloneState or {
     VariationCount = 6,
     PlayersSubTab = "Players",
     FriendsList = {},
-    RobloxFriendsLoaded = false,
-    RobloxFriendsList = {},
     FavoritesPlayersList = {},
     FollowMeMode = false,
     FreezePoseMode = false,
@@ -122,19 +120,26 @@ local State = _G.MyCloneState
 
 local CurrentAnimatorConnection = nil
 local SyncLoop = nil
-local AIChatLoop = nil
+local AIChatThread = nil
 local FollowMeLoop = nil
 local RainbowLoop = nil
 local GizmoDragging = false
 local CameraRestoreType = nil
 local CameraRestoreSubject = nil
 local DeleteAllArmed = false
+local DeleteAllFriendsArmed = false
+local HighlightObject = nil
 
 local GROQ_MODELS = {
     "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
+    "llama-3.1-70b-versatile",
     "llama3-8b-8192",
+    "llama3-70b-8192",
     "mixtral-8x7b-32768",
+    "deepseek-r1-distill-llama-70b",
+    "qwen-2.5-32b",
+    "mistral-saba-24b",
 }
 
 -- References UI
@@ -397,9 +402,27 @@ local function SetGizmoVisibility()
     if State.RotationMode then Gizmos.Rotation.Adornee = root end
 end
 
+local function UpdateHighlight(clone)
+    if HighlightObject then HighlightObject:Destroy(); HighlightObject = nil end
+    if not clone or not clone.Parent then return end
+    HighlightObject = Instance.new("Highlight")
+    HighlightObject.FillColor = COLORS.Purple
+    HighlightObject.OutlineColor = COLORS.White
+    HighlightObject.FillTransparency = 0.6
+    HighlightObject.OutlineTransparency = 0.3
+    HighlightObject.Adornee = clone
+    HighlightObject.Parent = CoreGui
+end
+
 local function SelectClone(clone)
-    if not clone or not clone:IsDescendantOf(Workspace:FindFirstChild(FOLDER_NAME)) then return end
+    if not clone or not clone:IsDescendantOf(Workspace:FindFirstChild(FOLDER_NAME)) then
+        State.SelectedClone = nil
+        UpdateHighlight(nil)
+        SetGizmoVisibility()
+        return
+    end
     State.SelectedClone = clone
+    UpdateHighlight(clone)
     SetGizmoVisibility()
     if State.CurrentTab == "Editor" and tabContentFrame then
         rebuildEditorTab()
@@ -417,6 +440,21 @@ local function LoadHistory()
         if isfile and readfile and isfile(HISTORY_FILE) then
             local data = HttpService:JSONDecode(readfile(HISTORY_FILE))
             if type(data) == "table" then State.HistoryList = data end
+        end
+    end)
+end
+
+local function SaveFavorites()
+    pcall(function()
+        if writefile then writefile(FAVORITES_FILE, HttpService:JSONEncode(State.FavoritesList)) end
+    end)
+end
+
+local function LoadFavorites()
+    pcall(function()
+        if isfile and readfile and isfile(FAVORITES_FILE) then
+            local data = HttpService:JSONDecode(readfile(FAVORITES_FILE))
+            if type(data) == "table" then State.FavoritesList = data end
         end
     end)
 end
@@ -507,6 +545,8 @@ local function CreateCloneFromUserId(userId, displayName, username)
         OriginalCFrame = spawnCFrame,
         OriginalRotation = spawnCFrame - spawnCFrame.Position,
         HideName = false,
+        Scale = 1,
+        Transparency = 0,
     }
     State.CloneData[model] = cloneData
     model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
@@ -514,6 +554,7 @@ local function CreateCloneFromUserId(userId, displayName, username)
     CreateNameTag(model, dispName, false)
     SelectClone(model)
 
+    -- Add to history
     local alreadyInHistory = false
     for _, entry in ipairs(State.HistoryList) do
         if entry.userId == userId then alreadyInHistory = true break end
@@ -524,6 +565,7 @@ local function CreateCloneFromUserId(userId, displayName, username)
     end
 
     if State.DanceMode or State.SyncTargetMode then SetupDanceSync() end
+
     if State.CurrentTab == "Clones" then rebuildClonesTab() end
     if State.CurrentTab == "History" then rebuildHistoryTab() end
 end
@@ -549,23 +591,39 @@ end
 -- HTTP & AI CHAT
 -- ================================================
 local function performHttpPost(url, headers, body)
-    local req = syn and syn.request or http_request or request or function(options)
-        local success, response = pcall(function() return HttpService:RequestAsync(options) end)
-        if success then return response end
-        return nil
-    end
-
+    -- Try HttpService first
     local success, response = pcall(function()
-        return req({
+        return HttpService:RequestAsync({
             Url = url,
             Method = "POST",
             Headers = headers,
             Body = body,
         })
     end)
-
-    if success and response and response.Body then
+    if success and response and response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
         return response.Body
+    end
+
+    -- Fallback to syn.request
+    if syn and syn.request then
+        local success, response = pcall(function()
+            return syn.request({Url = url, Method = "POST", Headers = headers, Body = body})
+        end)
+        if success and response and response.Body then return response.Body end
+    end
+    -- Fallback to http_request
+    if http_request then
+        local success, response = pcall(function()
+            return http_request({Url = url, Method = "POST", Headers = headers, Body = body})
+        end)
+        if success and response and response.Body then return response.Body end
+    end
+    -- Fallback to request
+    if request then
+        local success, response = pcall(function()
+            return request({Url = url, Method = "POST", Headers = headers, Body = body})
+        end)
+        if success and response and response.Body then return response.Body end
     end
     return nil
 end
@@ -585,11 +643,11 @@ local function SendGroqMessage(prompt, systemPrompt)
         local body = HttpService:JSONEncode({
             model = model,
             messages = {
-                {role = "system", content = systemPrompt or "Kamu asisten AI singkat gaul indonesia."},
+                {role = "system", content = systemPrompt or "Kamu adalah asisten yang menjawab singkat dalam bahasa gaul Indonesia, maksimal 10 kata, santai dan natural."},
                 {role = "user", content = prompt},
             },
-            temperature = 0.7,
-            max_tokens = 150,
+            temperature = 0.9,
+            max_tokens = 100,
         })
 
         local responseBody = performHttpPost(url, headers, body)
@@ -600,48 +658,69 @@ local function SendGroqMessage(prompt, systemPrompt)
                     return decoded.choices[1].message.content
                 end
             elseif decoded and decoded.error then
-                lastError = decoded.error.message or "Error API"
+                lastError = decoded.error.message or "unknown"
             end
         end
+        task.wait(0.5) -- slight delay between model attempts
     end
     return nil, lastError
 end
 
 local function DisplayCloneBubble(clone, message)
-    if not clone or not message or message == "" then return end
-    local head = clone:FindFirstChild("Head") or clone.PrimaryPart
-    if not head then return end
-
-    -- NATIVE ROBLOX BUBBLE CHAT FIX
-    -- Force using the native chat bubble system
-    local chatSuccess = pcall(function()
-        ChatService:Chat(head, message, Enum.ChatColor.White)
+    if not clone or not message then return end
+    -- Use Roblox built-in bubble only
+    local success = pcall(function()
+        TextChatService:DisplayBubble(clone, message)
     end)
-
-    if not chatSuccess then
-        -- Modern fallback
-        pcall(function()
-            TextChatService:DisplayBubble(head, message)
+    if not success then
+        -- Fallback to simple custom bubble if built-in fails
+        local head = clone:FindFirstChild("Head") or clone.PrimaryPart
+        if not head then return end
+        local bubble = Instance.new("BillboardGui")
+        bubble.Name = "ChatBubble"
+        bubble.Size = UDim2.new(0, 200, 0, 40)
+        bubble.StudsOffset = Vector3.new(0, 3, 0)
+        bubble.AlwaysOnTop = true
+        bubble.Adornee = head
+        bubble.Parent = clone
+        local bg = Instance.new("Frame")
+        bg.Size = UDim2.new(1,0,1,0)
+        bg.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        bg.BorderSizePixel = 0
+        bg.Parent = bubble
+        corner(bg, 10)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1,-10,1,0)
+        label.Position = UDim2.new(0,5,0,0)
+        label.BackgroundTransparency = 1
+        label.Text = message
+        label.TextColor3 = Color3.fromRGB(20,20,30)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 12
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.Parent = bg
+        task.delay(5, function()
+            if bubble and bubble.Parent then bubble:Destroy() end
         end)
     end
 end
 
 local function DoAIChatOnce()
+    if not State.GroqApiKey or State.GroqApiKey == "" then return false, "API key belum diisi" end
     local folder = Workspace:FindFirstChild(FOLDER_NAME)
     if not folder then return false, "Folder belum ada" end
     local clones = {}
     for _, clone in ipairs(folder:GetChildren()) do
         if clone:IsA("Model") then table.insert(clones, clone) end
     end
-    if #clones < 2 then return false, "Butuh minimal 2 clone untuk percakapan" end
+    if #clones < 2 then return false, "Butuh minimal 2 clone" end
 
     local clone1 = clones[math.random(1, #clones)]
     local clone2
     repeat clone2 = clones[math.random(1, #clones)] until clone2 ~= clone1
 
-    local prompt = "Buat percakapan singkat dua orang gaul Indonesia. Format:\nA: [pesan]\nB: [pesan]\nMaksimal 4 kata per baris."
-    local response, err = SendGroqMessage(prompt, "Output harus tepat 2 baris dimulai A: dan B:.")
-    
+    local prompt = "Buat percakapan singkat dua orang dalam bahasa gaul Indonesia. Format:\nA: [pesan]\nB: [pesan]\nMaksimal 3 kata per pesan, santai."
+    local response, err = SendGroqMessage(prompt, "Kamu adalah AI yang membuat percakapan gaul Indonesia singkat. Output harus dua baris dimulai dengan 'A:' dan 'B:'.")
     if response then
         local lines = {}
         for line in response:gmatch("[^\n]+") do table.insert(lines, line) end
@@ -650,19 +729,19 @@ local function DoAIChatOnce()
             local msg2 = lines[2]:gsub("^%s*B%s*:%s*", "")
             if #msg1 > 0 and #msg2 > 0 then
                 DisplayCloneBubble(clone1, msg1)
-                task.wait(2.5)
+                task.wait(2)
                 DisplayCloneBubble(clone2, msg2)
                 return true
             end
         end
     end
-    return false, err or "Format salah dari AI"
+    return false, err or "Gagal AI Chat"
 end
 
 local function StartAIChat()
-    if AIChatLoop then return end
+    if AIChatThread then return end
     State.AIChatEnabled = true
-    AIChatLoop = task.spawn(function()
+    AIChatThread = task.spawn(function()
         while State.AIChatEnabled do
             if os.clock() - State.AIChatLastTime >= State.AIChatCooldown then
                 State.AIChatLastTime = os.clock()
@@ -670,14 +749,24 @@ local function StartAIChat()
             end
             task.wait(2)
         end
+        AIChatThread = nil
     end)
 end
 
 local function StopAIChat()
     State.AIChatEnabled = false
-    AIChatLoop = nil
+    if AIChatThread then
+        -- wait for thread to exit
+        task.spawn(function()
+            while AIChatThread do task.wait() end
+        end)
+        AIChatThread = nil
+    end
 end
 
+-- ================================================
+-- MANUAL CHAT (Kirim Pesan Manual ke Clone)
+-- ================================================
 local function SendManualChat(clone, message)
     if not clone or not message or message == "" then return false end
     DisplayCloneBubble(clone, message)
@@ -685,7 +774,7 @@ local function SendManualChat(clone, message)
 end
 
 -- ================================================
--- VARIASI & FITUR BARU (AURA, SCALE, FOLLOW)
+-- VARIASI / FORMASI CLONE
 -- ================================================
 local function GetAllCloneModels()
     local list = {}
@@ -755,6 +844,14 @@ local function ArrangeFormation(shape, radius)
     end
 end
 
+-- ================================================
+-- FOLLOW ME MODE
+-- ================================================
+local function StopFollowMe()
+    State.FollowMeMode = false
+    if FollowMeLoop then FollowMeLoop:Disconnect(); FollowMeLoop = nil end
+end
+
 local function StartFollowMe()
     if FollowMeLoop then return end
     State.FollowMeMode = true
@@ -778,9 +875,12 @@ local function StartFollowMe()
     end)
 end
 
-local function StopFollowMe()
-    State.FollowMeMode = false
-    if FollowMeLoop then FollowMeLoop:Disconnect(); FollowMeLoop = nil end
+-- ================================================
+-- RAINBOW NAME MODE
+-- ================================================
+local function StopRainbowNames()
+    State.RainbowNameMode = false
+    if RainbowLoop then RainbowLoop:Disconnect(); RainbowLoop = nil end
 end
 
 local function StartRainbowNames()
@@ -803,11 +903,9 @@ local function StartRainbowNames()
     end)
 end
 
-local function StopRainbowNames()
-    State.RainbowNameMode = false
-    if RainbowLoop then RainbowLoop:Disconnect(); RainbowLoop = nil end
-end
-
+-- ================================================
+-- FREEZE POSE (Anchor semua Part clone terpilih)
+-- ================================================
 local function ToggleFreezePose(clone)
     if not clone then return end
     local frozen = clone:GetAttribute("FreezePose")
@@ -819,37 +917,43 @@ local function ToggleFreezePose(clone)
         end
     end
     local humanoid = clone:FindFirstChildOfClass("Humanoid")
-    if humanoid then humanoid.PlatformStand = frozen end
-end
-
-local function ToggleAuraEffect(clone)
-    if not clone or not clone.PrimaryPart then return end
-    local existing = clone.PrimaryPart:FindFirstChild("LuxuryAura")
-    if existing then
-        existing:Destroy()
-    else
-        local att = Instance.new("Attachment", clone.PrimaryPart)
-        att.Name = "LuxuryAura"
-        local pe = Instance.new("ParticleEmitter", att)
-        pe.Texture = "rbxassetid://243660364"
-        pe.Color = ColorSequence.new(COLORS.Gold)
-        pe.Size = NumberSequence.new({NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(0.5, 2.5), NumberSequenceKeypoint.new(1, 0)})
-        pe.Rate = 25
-        pe.Speed = NumberRange.new(1, 3)
-        pe.Lifetime = NumberRange.new(1, 2)
-        pe.LightEmission = 0.8
+    if humanoid then
+        if frozen then
+            humanoid.PlatformStand = true
+        else
+            humanoid.PlatformStand = false
+        end
     end
 end
 
-local function SetCloneScale(clone, scaleMult)
-    if not clone then return end
-    pcall(function()
-        clone:ScaleTo(scaleMult)
-    end)
+-- ================================================
+-- UPDATE CLONE SCALE & TRANSPARENCY
+-- ================================================
+local function UpdateCloneScale(clone, scale)
+    scale = math.clamp(scale, 0.1, 5)
+    if State.CloneData[clone] then State.CloneData[clone].Scale = scale end
+    for _, part in ipairs(clone:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.Size = part.Size * (scale / (State.CloneData[clone] and State.CloneData[clone].Scale or 1))
+        end
+    end
+    if State.CloneData[clone] then State.CloneData[clone].Scale = scale end
+end
+
+local function UpdateCloneTransparency(clone, transparency)
+    transparency = math.clamp(transparency, 0, 1)
+    if State.CloneData[clone] then State.CloneData[clone].Transparency = transparency end
+    for _, part in ipairs(clone:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.Transparency = transparency
+        elseif part:IsA("BasePart") and part.Name == "HumanoidRootPart" then
+            part.Transparency = math.max(1, transparency)
+        end
+    end
 end
 
 -- ================================================
--- UI BUILDERS & HELPERS
+-- UI BUILDERS & HELPERS (Luxurious Style)
 -- ================================================
 local function makeLabel(text, size, color, font, parent)
     local lbl = Instance.new("TextLabel")
@@ -866,35 +970,41 @@ end
 
 local function makeButton(text, color, parent, size)
     local btn = Instance.new("TextButton")
-    btn.Size = size or UDim2.new(1, 0, 0, 38)
+    btn.Size = size or UDim2.new(1, 0, 0, 36)
     btn.BackgroundColor3 = color or COLORS.Panel2
     btn.Text = text
     btn.TextColor3 = COLORS.White
     btn.Font = Enum.Font.GothamBold
-    btn.TextSize = 11
+    btn.TextSize = 10
     btn.AutoButtonColor = false
     btn.Parent = parent
-    corner(btn, 8)
-    stroke(btn, Color3.fromRGB(255, 255, 255), 0.05)
+    corner(btn, 10)
+    stroke(btn, Color3.fromRGB(255, 255, 255), 0.1)
     pressFX(btn)
+    -- Hover effect
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = color and color:Lerp(COLORS.Gold, 0.3) or COLORS.Panel3
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = color or COLORS.Panel2
+    end)
     return btn
 end
 
-local function makeInput(placeholder, parent)
+local function makeInput(parent, placeholderText)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, 0, 0, 40)
+    frame.Size = UDim2.new(1, 0, 0, 38)
     frame.BackgroundColor3 = COLORS.Panel2
     frame.Parent = parent
-    corner(frame, 8)
+    corner(frame, 10)
     stroke(frame, COLORS.Panel3, 1)
 
     local tb = Instance.new("TextBox")
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
-    tb.Text = "" -- Ensure no text is pre-filled like "Textbox"
-    tb.PlaceholderText = placeholder or ""
-    tb.PlaceholderColor3 = COLORS.Gray
+    tb.PlaceholderText = placeholderText or ""  -- No placeholder by default
+    tb.PlaceholderColor3 = COLORS.DarkGray
     tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
     tb.TextSize = 11
@@ -919,19 +1029,19 @@ end
 rebuildClonesTab = function()
     clearTabContent()
 
-    local inputLabel = makeLabel("MASUKKAN USERNAME / USER ID:", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
+    local inputLabel = makeLabel("MASUKKAN USERNAME / USER ID:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     inputLabel.LayoutOrder = 1
-    local inputBox, inputFrame = makeInput("Ketik target avatar...", tabContentFrame)
+    local inputBox, inputFrame = makeInput(tabContentFrame)  -- No placeholder
     inputFrame.LayoutOrder = 2
 
-    local cloneBtn = makeButton("CLONE TARGET", COLORS.Purple, tabContentFrame)
+    local cloneBtn = makeButton("CLONE TARGET", COLORS.Red, tabContentFrame)
     cloneBtn.LayoutOrder = 3
     cloneBtn.MouseButton1Click:Connect(function()
         CreateCloneFromInput(inputBox.Text)
         inputBox.Text = ""
     end)
 
-    local cloneAllBtn = makeButton("CLONE SEMUA PLAYER", COLORS.Blue, tabContentFrame)
+    local cloneAllBtn = makeButton("CLONE SEMUA PLAYER", COLORS.Green, tabContentFrame)
     cloneAllBtn.LayoutOrder = 4
     cloneAllBtn.MouseButton1Click:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
@@ -955,9 +1065,8 @@ rebuildClonesTab = function()
             for _, clone in ipairs(cloneList) do
                 if clone:IsA("Model") then
                     local isSelected = (State.SelectedClone == clone)
-                    local btnColor = isSelected and COLORS.Gold or COLORS.Panel
+                    local btnColor = isSelected and COLORS.PurpleDark or COLORS.Panel
                     local cloneButton = makeButton((isSelected and "▶ " or "") .. clone.Name, btnColor, tabContentFrame)
-                    if isSelected then cloneButton.TextColor3 = COLORS.Background end
                     cloneButton.LayoutOrder = index
                     cloneButton.MouseButton1Click:Connect(function()
                         SelectClone(clone)
@@ -973,6 +1082,7 @@ end
 rebuildEditorTab = function()
     clearTabContent()
 
+    -- Edit Mode toggle
     local editModeBtn = makeButton(State.EditMode and "EDIT MODE: ACTIVE" or "EDIT MODE: OFF", State.EditMode and COLORS.Green or COLORS.Panel, tabContentFrame)
     editModeBtn.LayoutOrder = 1
     editModeBtn.MouseButton1Click:Connect(function()
@@ -985,13 +1095,14 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
+    -- Selected clone card
     local selectedFrame = Instance.new("Frame")
-    selectedFrame.Size = UDim2.new(1, 0, 0, 85)
+    selectedFrame.Size = UDim2.new(1, 0, 0, 110)
     selectedFrame.BackgroundColor3 = COLORS.Panel
     selectedFrame.LayoutOrder = 2
     selectedFrame.Parent = tabContentFrame
-    corner(selectedFrame, 10)
-    stroke(selectedFrame, COLORS.Gold, 1.5) -- Golden luxury border
+    corner(selectedFrame, 12)
+    stroke(selectedFrame, COLORS.Panel3, 1)
 
     local selName = makeLabel(State.SelectedClone and State.SelectedClone.Name or "Tidak ada clone terpilih", 11, COLORS.White, Enum.Font.GothamBold, selectedFrame)
     selName.Position = UDim2.new(0, 10, 0, 4)
@@ -1006,15 +1117,14 @@ rebuildEditorTab = function()
     renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
-    renameBox.Text = ""
-    renameBox.PlaceholderText = "Ubah nama clone..."
+    renameBox.PlaceholderText = ""
     renameBox.PlaceholderColor3 = COLORS.DarkGray
     renameBox.TextColor3 = COLORS.White
     renameBox.Font = Enum.Font.Gotham
     renameBox.TextSize = 10
     renameBox.ClearTextOnFocus = false
     renameBox.Parent = selectedFrame
-    corner(renameBox, 6)
+    corner(renameBox, 8)
 
     local renameBtn = makeButton("SIMPAN", COLORS.Orange, selectedFrame, UDim2.new(0, 55, 0, 28))
     renameBtn.Position = UDim2.new(1, -58, 0, 48)
@@ -1030,30 +1140,10 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    -- Extra Features (Aura & Scale)
-    local ftxLabel = makeLabel("✨ FITUR SPESIAL (SELECTED CLONE):", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
-    ftxLabel.LayoutOrder = 3
-
-    local ftxRow = Instance.new("Frame")
-    ftxRow.Size = UDim2.new(1, 0, 0, 36)
-    ftxRow.BackgroundTransparency = 1
-    ftxRow.LayoutOrder = 4
-    ftxRow.Parent = tabContentFrame
-    local ftxLayout = Instance.new("UIListLayout")
-    ftxLayout.FillDirection = Enum.FillDirection.Horizontal
-    ftxLayout.Padding = UDim.new(0, 6)
-    ftxLayout.Parent = ftxRow
-
-    local auraBtn = makeButton("TOGLE AURA", COLORS.PurpleDark, ftxRow, UDim2.new(0.48, 0, 1, 0))
-    auraBtn.MouseButton1Click:Connect(function() ToggleAuraEffect(State.SelectedClone) end)
-
-    local scaleBtn = makeButton("SCALE: 2X", COLORS.Orange, ftxRow, UDim2.new(0.48, 0, 1, 0))
-    scaleBtn.MouseButton1Click:Connect(function() SetCloneScale(State.SelectedClone, 2) end)
-
-    -- Basic Controls
+    -- Hide name toggle
     local isHidden = State.SelectedClone and State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].HideName
     local hideBtn = makeButton(isHidden and "TAMPILKAN NAMA" or "SEMBUNYIKAN NAMA", COLORS.Panel2, tabContentFrame)
-    hideBtn.LayoutOrder = 5
+    hideBtn.LayoutOrder = 3
     hideBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1067,8 +1157,9 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.Blue or COLORS.Panel, tabContentFrame)
-    posBtn.LayoutOrder = 6
+    -- Position Mode
+    local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
+    posBtn.LayoutOrder = 4
     posBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.PositionMode = not State.PositionMode
@@ -1077,8 +1168,9 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    local rotBtn = makeButton(State.RotationMode and "GIZMO ROTASI: ON" or "GIZMO ROTASI: OFF", State.RotationMode and COLORS.Purple or COLORS.Panel, tabContentFrame)
-    rotBtn.LayoutOrder = 7
+    -- Rotation Mode
+    local rotBtn = makeButton(State.RotationMode and "GIZMO ROTASI: ON" or "GIZMO ROTASI: OFF", State.RotationMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    rotBtn.LayoutOrder = 5
     rotBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.RotationMode = not State.RotationMode
@@ -1087,8 +1179,9 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    local danceBtn = makeButton(State.DanceMode and "DANCE SYNC (SELECTED): ON" or "DANCE SYNC (SELECTED): OFF", State.DanceMode and COLORS.Green or COLORS.Panel, tabContentFrame)
-    danceBtn.LayoutOrder = 8
+    -- Dance Mode
+    local danceBtn = makeButton(State.DanceMode and "DANCE SYNC (SELECTED): ON" or "DANCE SYNC (SELECTED): OFF", State.DanceMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    danceBtn.LayoutOrder = 6
     danceBtn.MouseButton1Click:Connect(function()
         State.DanceMode = not State.DanceMode
         State.SyncTargetMode = false
@@ -1100,8 +1193,98 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    local resetPosBtn = makeButton("RESET POSISI", COLORS.Panel2, tabContentFrame)
-    resetPosBtn.LayoutOrder = 9
+    -- Teleport to LocalPlayer
+    local bringBtn = makeButton("TELEPORT KE SAYA", COLORS.Blue, tabContentFrame)
+    bringBtn.LayoutOrder = 7
+    bringBtn.MouseButton1Click:Connect(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local targetCFrame = root.CFrame * CFrame.new(0, 0, -3)
+        if State.SelectedClone and State.SelectedClone.PrimaryPart then
+            State.SelectedClone:PivotTo(targetCFrame)
+        end
+    end)
+
+    -- Teleport All to Me
+    local bringAllBtn = makeButton("TELEPORT SEMUA KE SAYA", COLORS.Blue, tabContentFrame)
+    bringAllBtn.LayoutOrder = 8
+    bringAllBtn.MouseButton1Click:Connect(function()
+        local character = LocalPlayer.Character
+        if not character then return end
+        local root = character:FindFirstChild("HumanoidRootPart")
+        if not root then return end
+        local baseCFrame = root.CFrame
+        local clones = GetAllCloneModels()
+        for i, clone in ipairs(clones) do
+            local angle = (i - 1) * (2 * math.pi / math.max(#clones, 1))
+            local offset = Vector3.new(math.sin(angle) * 8, 0, math.cos(angle) * 8 + 5)
+            clone:PivotTo(baseCFrame * CFrame.new(offset))
+        end
+    end)
+
+    -- Scale controls
+    local scaleLabel = makeLabel("UKURAN CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    scaleLabel.LayoutOrder = 9
+    local scaleRow = Instance.new("Frame")
+    scaleRow.Size = UDim2.new(1, 0, 0, 36)
+    scaleRow.BackgroundTransparency = 1
+    scaleRow.LayoutOrder = 10
+    scaleRow.Parent = tabContentFrame
+
+    local minusScale = makeButton("-", COLORS.Panel2, scaleRow, UDim2.new(0, 50, 1, 0))
+    minusScale.MouseButton1Click:Connect(function()
+        if State.SelectedClone then
+            local current = State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Scale or 1
+            UpdateCloneScale(State.SelectedClone, current - 0.1)
+        end
+    end)
+    local scaleValue = makeLabel(tostring(State.SelectedClone and State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Scale or 1), 10, COLORS.White, Enum.Font.GothamBold, scaleRow)
+    scaleValue.Size = UDim2.new(1, -120, 1, 0)
+    scaleValue.Position = UDim2.new(0, 60, 0, 0)
+    scaleValue.TextXAlignment = Enum.TextXAlignment.Center
+    local plusScale = makeButton("+", COLORS.Panel2, scaleRow, UDim2.new(0, 50, 1, 0))
+    plusScale.Position = UDim2.new(1, -50, 0, 0)
+    plusScale.MouseButton1Click:Connect(function()
+        if State.SelectedClone then
+            local current = State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Scale or 1
+            UpdateCloneScale(State.SelectedClone, current + 0.1)
+        end
+    end)
+
+    -- Transparency controls
+    local transLabel = makeLabel("TRANSPARANSI CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    transLabel.LayoutOrder = 11
+    local transRow = Instance.new("Frame")
+    transRow.Size = UDim2.new(1, 0, 0, 36)
+    transRow.BackgroundTransparency = 1
+    transRow.LayoutOrder = 12
+    transRow.Parent = tabContentFrame
+
+    local minusTrans = makeButton("-", COLORS.Panel2, transRow, UDim2.new(0, 50, 1, 0))
+    minusTrans.MouseButton1Click:Connect(function()
+        if State.SelectedClone then
+            local current = State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Transparency or 0
+            UpdateCloneTransparency(State.SelectedClone, current - 0.1)
+        end
+    end)
+    local transValue = makeLabel(tostring(State.SelectedClone and State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Transparency or 0), 10, COLORS.White, Enum.Font.GothamBold, transRow)
+    transValue.Size = UDim2.new(1, -120, 1, 0)
+    transValue.Position = UDim2.new(0, 60, 0, 0)
+    transValue.TextXAlignment = Enum.TextXAlignment.Center
+    local plusTrans = makeButton("+", COLORS.Panel2, transRow, UDim2.new(0, 50, 1, 0))
+    plusTrans.Position = UDim2.new(1, -50, 0, 0)
+    plusTrans.MouseButton1Click:Connect(function()
+        if State.SelectedClone then
+            local current = State.CloneData[State.SelectedClone] and State.CloneData[State.SelectedClone].Transparency or 0
+            UpdateCloneTransparency(State.SelectedClone, current + 0.1)
+        end
+    end)
+
+    -- Reset position & rotation
+    local resetPosBtn = makeButton("RESET POSISI", COLORS.Orange, tabContentFrame)
+    resetPosBtn.LayoutOrder = 13
     resetPosBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1111,20 +1294,57 @@ rebuildEditorTab = function()
         State.SelectedClone:PivotTo(CFrame.new(cData.OriginalCFrame.Position) * currentRot)
     end)
 
+    local resetRotBtn = makeButton("RESET ROTASI", COLORS.Orange, tabContentFrame)
+    resetRotBtn.LayoutOrder = 14
+    resetRotBtn.MouseButton1Click:Connect(function()
+        if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
+        local cData = State.CloneData[State.SelectedClone]
+        local primary = State.SelectedClone.PrimaryPart
+        if not primary then return end
+        State.SelectedClone:PivotTo(CFrame.new(primary.CFrame.Position) * cData.OriginalRotation)
+    end)
+
+    -- Delete Selected
     local delBtn = makeButton("HAPUS CLONE INI", COLORS.Delete, tabContentFrame)
-    delBtn.LayoutOrder = 10
+    delBtn.LayoutOrder = 15
     delBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone then return end
         local target = State.SelectedClone
         State.CloneData[target] = nil
         State.SelectedClone = nil
+        UpdateHighlight(nil)
         SetGizmoVisibility()
         target:Destroy()
         rebuildEditorTab()
     end)
 
+    -- Delete All Except Selected
+    local delAllExceptBtn = makeButton("HAPUS SEMUA KECUALI TERPILIH", COLORS.Delete, tabContentFrame)
+    delAllExceptBtn.LayoutOrder = 16
+    delAllExceptBtn.MouseButton1Click:Connect(function()
+        local selected = State.SelectedClone
+        local folder = Workspace:FindFirstChild(FOLDER_NAME)
+        if folder then
+            for _, clone in ipairs(folder:GetChildren()) do
+                if clone:IsA("Model") and clone ~= selected then
+                    State.CloneData[clone] = nil
+                    clone:Destroy()
+                end
+            end
+        end
+        if selected and selected.Parent then
+            SelectClone(selected)
+        else
+            State.SelectedClone = nil
+            UpdateHighlight(nil)
+            SetGizmoVisibility()
+        end
+        rebuildEditorTab()
+    end)
+
+    -- Delete All
     local delAllBtn = makeButton("HAPUS SEMUA CLONE", COLORS.Delete, tabContentFrame)
-    delAllBtn.LayoutOrder = 11
+    delAllBtn.LayoutOrder = 17
     delAllBtn.MouseButton1Click:Connect(function()
         if not DeleteAllArmed then
             DeleteAllArmed = true
@@ -1148,6 +1368,7 @@ rebuildEditorTab = function()
         end
         table.clear(State.CloneData)
         State.SelectedClone = nil
+        UpdateHighlight(nil)
         SetGizmoVisibility()
         rebuildEditorTab()
     end)
@@ -1156,10 +1377,10 @@ end
 rebuildSyncTab = function()
     clearTabContent()
 
-    local infoLabel = makeLabel("SYNC ANIMASI KE PLAYER LAIN:", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
+    local infoLabel = makeLabel("SYNC ANIMASI KE PLAYER LAIN:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     infoLabel.LayoutOrder = 1
 
-    local targetInput, targetFrame = makeInput("Username target player...", tabContentFrame)
+    local targetInput, targetFrame = makeInput(tabContentFrame) -- No placeholder
     targetFrame.LayoutOrder = 2
 
     local activateBtn = makeButton("AKTIFKAN GLOBAL SYNC", COLORS.PurpleDark, tabContentFrame)
@@ -1194,10 +1415,10 @@ end
 rebuildAIChatTab = function()
     clearTabContent()
 
-    local apiLabel = makeLabel("GROQ API KEY (WAJIB):", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
+    local apiLabel = makeLabel("GROQ API KEY:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
     apiLabel.LayoutOrder = 1
 
-    local apiInput, apiFrame = makeInput("Masukkan Groq API Key...", tabContentFrame)
+    local apiInput, apiFrame = makeInput(tabContentFrame)
     apiFrame.LayoutOrder = 2
     if State.GroqApiKey then apiInput.Text = State.GroqApiKey end
 
@@ -1212,7 +1433,11 @@ rebuildAIChatTab = function()
     local aiToggleBtn = makeButton(State.AIChatEnabled and "AUTO AI CHAT: ACTIVE" or "AUTO AI CHAT: OFF", State.AIChatEnabled and COLORS.Green or COLORS.Panel, tabContentFrame)
     aiToggleBtn.LayoutOrder = 4
     aiToggleBtn.MouseButton1Click:Connect(function()
-        if State.AIChatEnabled then StopAIChat() else StartAIChat() end
+        if State.AIChatEnabled then
+            StopAIChat()
+        else
+            StartAIChat()
+        end
         rebuildAIChatTab()
     end)
 
@@ -1226,11 +1451,15 @@ rebuildAIChatTab = function()
         end
     end)
 
-    local divider1 = makeLabel("━━━━━━━━━━━━━━━━━━━━", 9, COLORS.Panel3, nil, tabContentFrame)
-    divider1.LayoutOrder = 7
+    local infoLabel = makeLabel("Interval Chat: " .. State.AIChatCooldown .. " detik", 9, COLORS.Gray, nil, tabContentFrame)
+    infoLabel.LayoutOrder = 7
 
-    local manualLabel = makeLabel("CHAT MANUAL (NATIVE BUBBLE):", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
-    manualLabel.LayoutOrder = 8
+    -- ===== CHAT MANUAL =====
+    local divider1 = makeLabel("━━━━━━━━━━━━━━━━━━━━", 9, COLORS.DarkGray, nil, tabContentFrame)
+    divider1.LayoutOrder = 8
+
+    local manualLabel = makeLabel("CHAT MANUAL KE CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    manualLabel.LayoutOrder = 9
 
     local clones = GetAllCloneModels()
     local targetName = State.ManualChatTarget and State.ManualChatTarget.Name or nil
@@ -1240,25 +1469,29 @@ rebuildAIChatTab = function()
     end
 
     local targetBtn = makeButton(targetName and ("TARGET: " .. targetName) or "PILIH CLONE TARGET ▾", COLORS.Panel2, tabContentFrame)
-    targetBtn.LayoutOrder = 9
+    targetBtn.LayoutOrder = 10
 
     local pickerOpen = false
     local pickerHolder = Instance.new("Frame")
     pickerHolder.Size = UDim2.new(1, 0, 0, 0)
     pickerHolder.AutomaticSize = Enum.AutomaticSize.Y
     pickerHolder.BackgroundTransparency = 1
-    pickerHolder.LayoutOrder = 10
+    pickerHolder.LayoutOrder = 11
     pickerHolder.Parent = tabContentFrame
     pickerHolder.Visible = false
+
     local pickerLayout = Instance.new("UIListLayout")
     pickerLayout.Padding = UDim.new(0, 4)
+    pickerLayout.SortOrder = Enum.SortOrder.LayoutOrder
     pickerLayout.Parent = pickerHolder
 
     if #clones == 0 then
-        makeLabel("Belum ada clone.", 9, COLORS.DarkGray, nil, pickerHolder)
+        local noClone = makeLabel("Belum ada clone. Buat dulu di tab Clones.", 9, COLORS.DarkGray, nil, pickerHolder)
+        noClone.LayoutOrder = 1
     else
         for i, clone in ipairs(clones) do
             local pickBtn = makeButton(clone.Name, COLORS.Panel, pickerHolder, UDim2.new(1, 0, 0, 28))
+            pickBtn.LayoutOrder = i
             pickBtn.MouseButton1Click:Connect(function()
                 State.ManualChatTarget = clone
                 rebuildAIChatTab()
@@ -1271,11 +1504,11 @@ rebuildAIChatTab = function()
         pickerHolder.Visible = pickerOpen
     end)
 
-    local chatInput, chatFrame = makeInput("Ketik pesan buat clone...", tabContentFrame)
-    chatFrame.LayoutOrder = 11
+    local chatInput, chatFrame = makeInput(tabContentFrame)  -- No placeholder
+    chatFrame.LayoutOrder = 12
 
-    local sendBtn = makeButton("KIRIM PESAN BUBBLE", COLORS.Purple, tabContentFrame)
-    sendBtn.LayoutOrder = 12
+    local sendBtn = makeButton("KIRIM PESAN", COLORS.Blue, tabContentFrame)
+    sendBtn.LayoutOrder = 13
     sendBtn.MouseButton1Click:Connect(function()
         local msg = chatInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if msg == "" then return end
@@ -1285,34 +1518,295 @@ rebuildAIChatTab = function()
         chatInput.Text = ""
     end)
 
-    local hint = makeLabel("Tips: Menggunakan fitur chat bawaan Roblox (Native).", 8, COLORS.Gray, nil, tabContentFrame)
-    hint.LayoutOrder = 13
+    local hint = makeLabel("Tips: kalau tidak pilih target, pesan dikirim ke clone yang sedang dipilih (Selected Clone).", 8, COLORS.DarkGray, nil, tabContentFrame)
+    hint.LayoutOrder = 14
+
+    -- ===== RAINBOW NAME TOGGLE =====
+    local divider2 = makeLabel("━━━━━━━━━━━━━━━━━━━━", 9, COLORS.DarkGray, nil, tabContentFrame)
+    divider2.LayoutOrder = 15
+
+    local rainbowBtn = makeButton(State.RainbowNameMode and "RAINBOW NAME: ON" or "RAINBOW NAME: OFF", State.RainbowNameMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    rainbowBtn.LayoutOrder = 16
+    rainbowBtn.MouseButton1Click:Connect(function()
+        if State.RainbowNameMode then
+            StopRainbowNames()
+        else
+            StartRainbowNames()
+        end
+        rebuildAIChatTab()
+    end)
+end
+
+local function rebuildConfigTab()
+    clearTabContent()
+
+    local saveBtn = makeButton("SIMPAN CONFIGURASI", COLORS.Green, tabContentFrame)
+    saveBtn.LayoutOrder = 1
+    saveBtn.MouseButton1Click:Connect(function()
+        local data = {}
+        local folder = Workspace:FindFirstChild(FOLDER_NAME)
+        if folder then
+            for _, clone in ipairs(folder:GetChildren()) do
+                if clone:IsA("Model") and State.CloneData[clone] then
+                    local info = State.CloneData[clone]
+                    local primary = clone.PrimaryPart
+                    if primary then
+                        local pos = primary.Position
+                        local rot = primary.CFrame - primary.CFrame.Position
+                        local x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33 = rot:GetComponents()
+                        table.insert(data, {
+                            userId = info.UserId,
+                            displayName = info.DisplayName or info.Username,
+                            username = info.Username,
+                            name = clone.Name,
+                            hideName = info.HideName,
+                            scale = info.Scale,
+                            transparency = info.Transparency,
+                            position = {pos.X, pos.Y, pos.Z},
+                            rotation = {r11, r12, r13, r21, r22, r23, r31, r32, r33}
+                        })
+                    end
+                end
+            end
+        end
+        pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(data)) end)
+        if Storage and Storage.appSettings then
+            Storage.appSettings.mycloneConfig = data
+            if Storage.persistSettings then pcall(Storage.persistSettings) end
+        end
+    end)
+
+    local loadBtn = makeButton("MUAT CONFIGURASI", COLORS.Blue, tabContentFrame)
+    loadBtn.LayoutOrder = 2
+    loadBtn.MouseButton1Click:Connect(function()
+        local data = nil
+        pcall(function()
+            if isfile and readfile and isfile(CONFIG_FILE) then
+                data = HttpService:JSONDecode(readfile(CONFIG_FILE))
+            end
+        end)
+        if not data and Storage and Storage.appSettings and Storage.appSettings.mycloneConfig then
+            data = Storage.appSettings.mycloneConfig
+        end
+        if type(data) ~= "table" then return end
+        for _, info in ipairs(data) do
+            task.spawn(function()
+                local userId = info.userId
+                local model = CreateAvatarFromUserId(userId)
+                if model then
+                    State.CloneCounter = State.CloneCounter + 1
+                    local cloneName = info.name or ("Clone_" .. tostring(State.CloneCounter))
+                    model.Name = cloneName
+                    PrepareCloneModel(model)
+                    local position = info.position
+                    local rotData = info.rotation
+                    local cf
+                    if position and rotData then
+                        local pos = Vector3.new(position[1], position[2], position[3])
+                        local rot = CFrame.new(0,0,0, rotData[1], rotData[2], rotData[3], rotData[4], rotData[5], rotData[6], rotData[7], rotData[8], rotData[9])
+                        cf = CFrame.new(pos) * rot
+                    else
+                        cf = GetNextSpawnCFrame()
+                    end
+                    model:PivotTo(cf)
+                    local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                    if rootPart then
+                        rootPart.Anchored = true
+                        rootPart.CanCollide = false
+                        rootPart.Transparency = 1
+                    end
+                    local cloneData = {
+                        Index = State.CloneCounter,
+                        UserId = userId,
+                        Username = info.username or info.displayName,
+                        DisplayName = info.displayName,
+                        OriginalCFrame = cf,
+                        OriginalRotation = cf - cf.Position,
+                        HideName = info.hideName or false,
+                        Scale = info.scale or 1,
+                        Transparency = info.transparency or 0,
+                    }
+                    State.CloneData[model] = cloneData
+                    model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
+                    CreateNameTag(model, info.displayName or info.username or cloneName, cloneData.HideName)
+                    UpdateCloneScale(model, cloneData.Scale)
+                    UpdateCloneTransparency(model, cloneData.Transparency)
+                end
+            end)
+        end
+    end)
+end
+
+rebuildHistoryTab = function()
+    clearTabContent()
+
+    if #State.HistoryList == 0 then
+        local emptyLbl = makeLabel("Belum ada riwayat clone.", 10, COLORS.Gray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 1
+    else
+        for i, entry in ipairs(State.HistoryList) do
+            local itemFrame = Instance.new("Frame")
+            itemFrame.Size = UDim2.new(1, 0, 0, 42)
+            itemFrame.BackgroundColor3 = COLORS.Panel
+            itemFrame.LayoutOrder = i
+            itemFrame.Parent = tabContentFrame
+            corner(itemFrame, 10)
+            stroke(itemFrame, COLORS.Panel3, 1)
+
+            local nameLabel = makeLabel(entry.displayName or entry.username, 11, COLORS.White, Enum.Font.GothamBold, itemFrame)
+            nameLabel.Size = UDim2.new(1, -75, 0, 20)
+            nameLabel.Position = UDim2.new(0, 10, 0, 3)
+
+            local subLabel = makeLabel("@" .. (entry.username or "unknown"), 9, COLORS.Gray, nil, itemFrame)
+            subLabel.Size = UDim2.new(1, -75, 0, 14)
+            subLabel.Position = UDim2.new(0, 10, 0, 22)
+
+            local cloneBtn = makeButton("CLONE", COLORS.Red, itemFrame, UDim2.new(0, 58, 0, 26))
+            cloneBtn.Position = UDim2.new(1, -64, 0, 8)
+            cloneBtn.MouseButton1Click:Connect(function()
+                CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
+            end)
+        end
+
+        local clearBtn = makeButton("HAPUS RIWAYAT", COLORS.Delete, tabContentFrame)
+        clearBtn.LayoutOrder = #State.HistoryList + 1
+        clearBtn.MouseButton1Click:Connect(function()
+            State.HistoryList = {}
+            SaveHistory()
+            rebuildHistoryTab()
+        end)
+    end
+end
+
+rebuildVariasiTab = function()
+    clearTabContent()
+
+    local titleLabel = makeLabel("BENTUK FORMASI CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    titleLabel.LayoutOrder = 1
+
+    local shapes = {
+        {key = "Circle", label = "LINGKARAN"},
+        {key = "Line", label = "BARISAN"},
+        {key = "Grid", label = "GRID / KOTAK"},
+        {key = "VShape", label = "FORMASI V"},
+        {key = "Spiral", label = "SPIRAL"},
+    }
+
+    for i, shapeData in ipairs(shapes) do
+        local isActive = State.VariationShape == shapeData.key
+        local shapeBtn = makeButton((isActive and "▶ " or "") .. shapeData.label, isActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+        shapeBtn.LayoutOrder = i + 1
+        shapeBtn.MouseButton1Click:Connect(function()
+            State.VariationShape = shapeData.key
+            rebuildVariasiTab()
+        end)
+    end
+
+    local radiusLabel = makeLabel("JARAK / RADIUS: " .. State.VariationRadius .. " studs", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    radiusLabel.LayoutOrder = 10
+
+    local radiusRow = Instance.new("Frame")
+    radiusRow.Size = UDim2.new(1, 0, 0, 36)
+    radiusRow.BackgroundTransparency = 1
+    radiusRow.LayoutOrder = 11
+    radiusRow.Parent = tabContentFrame
+
+    local minusBtn = makeButton("-", COLORS.Panel2, radiusRow, UDim2.new(0, 50, 1, 0))
+    minusBtn.MouseButton1Click:Connect(function()
+        State.VariationRadius = math.max(2, State.VariationRadius - 2)
+        rebuildVariasiTab()
+    end)
+
+    local plusBtn = makeButton("+", COLORS.Panel2, radiusRow, UDim2.new(0, 50, 1, 0))
+    plusBtn.Position = UDim2.new(0, 58, 0, 0)
+    plusBtn.MouseButton1Click:Connect(function()
+        State.VariationRadius = math.min(60, State.VariationRadius + 2)
+        rebuildVariasiTab()
+    end)
+
+    local applyBtn = makeButton("TERAPKAN FORMASI", COLORS.Green, tabContentFrame)
+    applyBtn.LayoutOrder = 12
+    applyBtn.MouseButton1Click:Connect(function()
+        ArrangeFormation(State.VariationShape, State.VariationRadius)
+    end)
+
+    -- ===== FITUR MENARIK =====
+    local extraLabel = makeLabel("FITUR VARIASI LAINNYA:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    extraLabel.LayoutOrder = 13
+
+    local followBtn = makeButton(State.FollowMeMode and "FOLLOW ME: ON (Clone ngikutin)" or "FOLLOW ME: OFF", State.FollowMeMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    followBtn.LayoutOrder = 14
+    followBtn.MouseButton1Click:Connect(function()
+        if State.FollowMeMode then
+            StopFollowMe()
+        else
+            StartFollowMe()
+        end
+        rebuildVariasiTab()
+    end)
+
+    local freezeBtn = makeButton("FREEZE POSE (Clone Terpilih)", COLORS.Blue, tabContentFrame)
+    freezeBtn.LayoutOrder = 15
+    freezeBtn.MouseButton1Click:Connect(function()
+        if State.SelectedClone then ToggleFreezePose(State.SelectedClone) end
+    end)
+
+    local randomizeBtn = makeButton("ACAK ULANG POSISI SEMUA CLONE", COLORS.Orange, tabContentFrame)
+    randomizeBtn.LayoutOrder = 16
+    randomizeBtn.MouseButton1Click:Connect(function()
+        local clones = GetAllCloneModels()
+        local character = LocalPlayer.Character
+        local basePos = (character and character:FindFirstChild("HumanoidRootPart")) and character.HumanoidRootPart.Position or Vector3.new(0, 3, 0)
+        for _, clone in ipairs(clones) do
+            local randomOffset = Vector3.new(math.random(-20, 20), 0, math.random(-20, 20))
+            clone:PivotTo(CFrame.new(basePos + randomOffset))
+        end
+    end)
+
+    local mirrorBtn = makeButton("HADAPKAN SEMUA KE SAYA", COLORS.Purple, tabContentFrame)
+    mirrorBtn.LayoutOrder = 17
+    mirrorBtn.MouseButton1Click:Connect(function()
+        local clones = GetAllCloneModels()
+        local character = LocalPlayer.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+        local myPos = character.HumanoidRootPart.Position
+        for _, clone in ipairs(clones) do
+            if clone.PrimaryPart then
+                local cloneLook = CFrame.lookAt(clone.PrimaryPart.Position, myPos)
+                clone:PivotTo(cloneLook)
+            end
+        end
+    end)
+
+    local countLabel = makeLabel("Total clone aktif: " .. #GetAllCloneModels(), 9, COLORS.DarkGray, nil, tabContentFrame)
+    countLabel.LayoutOrder = 18
 end
 
 local function makePlayerCard(displayName, username, userId, parent, layoutOrder, actions)
     local card = Instance.new("Frame")
-    card.Size = UDim2.new(1, 0, 0, 46)
+    card.Size = UDim2.new(1, 0, 0, 42)
     card.BackgroundColor3 = COLORS.Panel
     card.LayoutOrder = layoutOrder
     card.Parent = parent
-    corner(card, 8)
+    corner(card, 10)
     stroke(card, COLORS.Panel3, 1)
 
     local actionWidth = #actions * 44
     local nameLbl = makeLabel(displayName or username or "Unknown", 11, COLORS.White, Enum.Font.GothamBold, card)
     nameLbl.Size = UDim2.new(1, -actionWidth - 16, 0, 20)
-    nameLbl.Position = UDim2.new(0, 10, 0, 5)
+    nameLbl.Position = UDim2.new(0, 10, 0, 3)
 
-    local subLbl = makeLabel("@" .. (username or "unknown"), 9, COLORS.Gold, nil, card)
+    local subLbl = makeLabel("@" .. (username or "unknown"), 9, COLORS.Gray, nil, card)
     subLbl.Size = UDim2.new(1, -actionWidth - 16, 0, 14)
-    subLbl.Position = UDim2.new(0, 10, 0, 24)
+    subLbl.Position = UDim2.new(0, 10, 0, 22)
 
     for i, actionData in ipairs(actions) do
-        local btn = makeButton(actionData.text, actionData.color, card, UDim2.new(0, 38, 0, 38))
+        local btn = makeButton(actionData.text, actionData.color, card, UDim2.new(0, 38, 0, 34))
         btn.Position = UDim2.new(1, -(44 * (#actions - i + 1)), 0, 4)
-        btn.TextSize = 9
+        btn.TextSize = 8
         btn.MouseButton1Click:Connect(actionData.onClick)
     end
+
     return card
 end
 
@@ -1339,11 +1833,56 @@ local function removeFavoritePlayer(userId)
     SaveFavPlayers()
 end
 
+local function isFriendAdded(userId)
+    for _, entry in ipairs(State.FriendsList) do
+        if entry.userId == userId then return true end
+    end
+    return false
+end
+
+local function LoadRobloxFriends()
+    -- Try using Players:GetFriendsAsync (only works in some contexts)
+    local success, friends = pcall(function()
+        return Players:GetFriendsAsync(LocalPlayer.UserId)
+    end)
+    if success and friends then
+        for _, friendId in ipairs(friends) do
+            if not isFriendAdded(friendId) then
+                local dispName = GetDisplayName(friendId) or "Friend_" .. friendId
+                table.insert(State.FriendsList, {userId = friendId, displayName = dispName, username = dispName})
+            end
+        end
+        return true
+    end
+
+    -- Fallback: HTTP to Roblox friends API
+    local url = "https://friends.roblox.com/v1/users/" .. LocalPlayer.UserId .. "/friends"
+    local success, response = pcall(function()
+        return HttpService:RequestAsync({Url = url, Method = "GET"})
+    end)
+    if success and response and response.Success then
+        local data = HttpService:JSONDecode(response.Body)
+        if data and data.data then
+            for _, friendData in ipairs(data.data) do
+                local friendId = friendData.id or friendData.userId
+                if friendId and not isFriendAdded(friendId) then
+                    local dispName = friendData.displayName or GetDisplayName(friendId) or "Friend_" .. friendId
+                    local username = friendData.name or dispName
+                    table.insert(State.FriendsList, {userId = friendId, displayName = dispName, username = username})
+                end
+            end
+            return true
+        end
+    end
+    return false
+end
+
 rebuildPlayersTab = function()
     clearTabContent()
 
+    -- Sub-tab bar
     local subTabRow = Instance.new("Frame")
-    subTabRow.Size = UDim2.new(1, 0, 0, 34)
+    subTabRow.Size = UDim2.new(1, 0, 0, 32)
     subTabRow.BackgroundTransparency = 1
     subTabRow.LayoutOrder = 1
     subTabRow.Parent = tabContentFrame
@@ -1351,13 +1890,13 @@ rebuildPlayersTab = function()
     local subTabLayout = Instance.new("UIListLayout")
     subTabLayout.FillDirection = Enum.FillDirection.Horizontal
     subTabLayout.Padding = UDim.new(0, 6)
+    subTabLayout.SortOrder = Enum.SortOrder.LayoutOrder
     subTabLayout.Parent = subTabRow
 
     local subTabs = {"Players", "Friends", "Favorit"}
     for i, subName in ipairs(subTabs) do
         local isActive = State.PlayersSubTab == subName
-        local subBtn = makeButton(subName, isActive and COLORS.Gold or COLORS.Panel2, subTabRow, UDim2.new(0, 90, 1, 0))
-        if isActive then subBtn.TextColor3 = COLORS.Background end
+        local subBtn = makeButton(subName, isActive and COLORS.PurpleDark or COLORS.Panel2, subTabRow, UDim2.new(0, 90, 1, 0))
         subBtn.LayoutOrder = i
         subBtn.MouseButton1Click:Connect(function()
             State.PlayersSubTab = subName
@@ -1368,136 +1907,183 @@ rebuildPlayersTab = function()
     if State.PlayersSubTab == "Players" then
         local infoLabel = makeLabel("PLAYERS DI MAP INI:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
         infoLabel.LayoutOrder = 2
+
         local playerList = Players:GetPlayers()
         local index = 3
+        local anyOther = false
         for _, player in ipairs(playerList) do
             if player ~= LocalPlayer then
+                anyOther = true
                 local pUserId = player.UserId
                 local isFav = isFavoritePlayer(pUserId)
                 makePlayerCard(player.DisplayName, player.Name, pUserId, tabContentFrame, index, {
-                    {text = "CLONE", color = COLORS.Purple, onClick = function() CreateCloneFromUserId(pUserId, player.DisplayName, player.Name) end},
-                    {text = isFav and "★" or "☆", color = isFav and COLORS.Orange or COLORS.Panel2, onClick = function()
-                        if isFav then removeFavoritePlayer(pUserId) else addFavoritePlayer(pUserId, player.DisplayName, player.Name) end
-                        rebuildPlayersTab()
-                    end},
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(pUserId, player.DisplayName, player.Name)
+                        end,
+                    },
+                    {
+                        text = isFav and "★" or "☆",
+                        color = isFav and COLORS.Orange or COLORS.Panel2,
+                        onClick = function()
+                            if isFavoritePlayer(pUserId) then
+                                removeFavoritePlayer(pUserId)
+                            else
+                                addFavoritePlayer(pUserId, player.DisplayName, player.Name)
+                            end
+                            rebuildPlayersTab()
+                        end,
+                    },
+                    {
+                        text = isFriendAdded(pUserId) and "✓" or "+F",
+                        color = isFriendAdded(pUserId) and COLORS.Green or COLORS.Blue,
+                        onClick = function()
+                            if not isFriendAdded(pUserId) then
+                                table.insert(State.FriendsList, {userId = pUserId, displayName = player.DisplayName, username = player.Name})
+                                rebuildPlayersTab()
+                            end
+                        end,
+                    },
                 })
                 index = index + 1
             end
         end
-
-    elseif State.PlayersSubTab == "Friends" then
-        local infoLabel = makeLabel("ROBLOX FRIENDS (AUTO SYNC):", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
-        infoLabel.LayoutOrder = 2
-
-        -- Load from Roblox API if not loaded yet
-        if not State.RobloxFriendsLoaded then
-            State.RobloxFriendsLoaded = true
-            task.spawn(function()
-                pcall(function()
-                    local success, page = pcall(function() return Players:GetFriendsAsync(LocalPlayer.UserId) end)
-                    if success and page then
-                        for _, item in ipairs(page:GetCurrentPage()) do
-                            table.insert(State.RobloxFriendsList, {userId = item.Id, username = item.Username, displayName = item.DisplayName})
-                        end
-                        if State.CurrentTab == "Players" and State.PlayersSubTab == "Friends" then rebuildPlayersTab() end
-                    end
-                end)
-            end)
-            makeLabel("Memuat teman dari server Roblox...", 9, COLORS.Gray, nil, tabContentFrame).LayoutOrder = 3
-            return
+        if not anyOther then
+            local emptyLbl = makeLabel("Tidak ada player lain di map ini.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = index
         end
 
-        local index = 3
-        for _, entry in ipairs(State.RobloxFriendsList) do
-            local isFav = isFavoritePlayer(entry.userId)
-            makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, index, {
-                {text = "CLONE", color = COLORS.Red, onClick = function() CreateCloneFromUserId(entry.userId, entry.displayName, entry.username) end},
-                {text = isFav and "★" or "☆", color = isFav and COLORS.Orange or COLORS.Panel2, onClick = function()
-                    if isFav then removeFavoritePlayer(entry.userId) else addFavoritePlayer(entry.userId, entry.displayName, entry.username) end
-                    rebuildPlayersTab()
-                end}
-            })
-            index = index + 1
+    elseif State.PlayersSubTab == "Friends" then
+        local infoLabel = makeLabel("DAFTAR TEMAN:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+        infoLabel.LayoutOrder = 2
+
+        local loadFriendsBtn = makeButton("LOAD TEMAN ROBLOX", COLORS.Blue, tabContentFrame)
+        loadFriendsBtn.LayoutOrder = 3
+        loadFriendsBtn.MouseButton1Click:Connect(function()
+            local success = LoadRobloxFriends()
+            if success then
+                rebuildPlayersTab()
+            end
+        end)
+
+        local addInput, addFrame = makeInput(tabContentFrame)  -- No placeholder
+        addFrame.LayoutOrder = 4
+
+        local addBtn = makeButton("TAMBAH TEMAN MANUAL", COLORS.Green, tabContentFrame)
+        addBtn.LayoutOrder = 5
+        addBtn.MouseButton1Click:Connect(function()
+            local text = addInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+            if text == "" then return end
+            local userId, _ = ResolveUserId(text)
+            if not userId then return end
+            if isFriendAdded(userId) then return end
+            local dispName = nil
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player.UserId == userId then dispName = player.DisplayName break end
+            end
+            if not dispName then dispName = GetDisplayName(userId) or text end
+            table.insert(State.FriendsList, {userId = userId, displayName = dispName, username = text})
+            addInput.Text = ""
+            rebuildPlayersTab()
+        end)
+
+        if #State.FriendsList == 0 then
+            local emptyLbl = makeLabel("Belum ada teman. Klik 'Load Teman Roblox' untuk memuat otomatis.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = 6
+        else
+            for i, entry in ipairs(State.FriendsList) do
+                local isFav = isFavoritePlayer(entry.userId)
+                makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, 6 + i, {
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
+                        end,
+                    },
+                    {
+                        text = isFav and "★" or "☆",
+                        color = isFav and COLORS.Orange or COLORS.Panel2,
+                        onClick = function()
+                            if isFavoritePlayer(entry.userId) then
+                                removeFavoritePlayer(entry.userId)
+                            else
+                                addFavoritePlayer(entry.userId, entry.displayName, entry.username)
+                            end
+                            rebuildPlayersTab()
+                        end,
+                    },
+                    {
+                        text = "X",
+                        color = COLORS.Delete,
+                        onClick = function()
+                            table.remove(State.FriendsList, i)
+                            rebuildPlayersTab()
+                        end,
+                    },
+                })
+            end
         end
 
     elseif State.PlayersSubTab == "Favorit" then
-        local infoLabel = makeLabel("PLAYER / TEMAN FAVORIT:", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
+        local infoLabel = makeLabel("PLAYER / TEMAN FAVORIT:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
         infoLabel.LayoutOrder = 2
-        for i, entry in ipairs(State.FavoritesPlayersList) do
-            makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, 2 + i, {
-                {text = "CLONE", color = COLORS.Blue, onClick = function() CreateCloneFromUserId(entry.userId, entry.displayName, entry.username) end},
-                {text = "HAPUS", color = COLORS.Delete, onClick = function() removeFavoritePlayer(entry.userId); rebuildPlayersTab() end},
-            })
+
+        if #State.FavoritesPlayersList == 0 then
+            local emptyLbl = makeLabel("Belum ada favorit. Tekan ☆ di tab Players/Friends untuk menambahkan.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = 3
+        else
+            for i, entry in ipairs(State.FavoritesPlayersList) do
+                makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, 2 + i, {
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
+                        end,
+                    },
+                    {
+                        text = "X",
+                        color = COLORS.Delete,
+                        onClick = function()
+                            removeFavoritePlayer(entry.userId)
+                            rebuildPlayersTab()
+                        end,
+                    },
+                })
+            end
+
+            local clearFavBtn = makeButton("HAPUS SEMUA FAVORIT", COLORS.Delete, tabContentFrame)
+            clearFavBtn.LayoutOrder = #State.FavoritesPlayersList + 3
+            clearFavBtn.MouseButton1Click:Connect(function()
+                State.FavoritesPlayersList = {}
+                SaveFavPlayers()
+                rebuildPlayersTab()
+            end)
         end
-    end
-end
-
-rebuildVariasiTab = function()
-    clearTabContent()
-    local titleLabel = makeLabel("BENTUK FORMASI CLONE:", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
-    titleLabel.LayoutOrder = 1
-    local shapes = { {key="Circle", label="LINGKARAN"}, {key="Line", label="BARISAN"}, {key="Grid", label="GRID / KOTAK"}, {key="VShape", label="FORMASI V"}, {key="Spiral", label="SPIRAL"} }
-    for i, shapeData in ipairs(shapes) do
-        local isActive = State.VariationShape == shapeData.key
-        local shapeBtn = makeButton((isActive and "▶ " or "") .. shapeData.label, isActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
-        shapeBtn.LayoutOrder = i + 1
-        shapeBtn.MouseButton1Click:Connect(function() State.VariationShape = shapeData.key; rebuildVariasiTab() end)
-    end
-    local applyBtn = makeButton("TERAPKAN FORMASI", COLORS.Green, tabContentFrame)
-    applyBtn.LayoutOrder = 10
-    applyBtn.MouseButton1Click:Connect(function() ArrangeFormation(State.VariationShape, State.VariationRadius) end)
-
-    local extraLabel = makeLabel("FITUR LAINNYA:", 10, COLORS.Gold, Enum.Font.GothamBold, tabContentFrame)
-    extraLabel.LayoutOrder = 11
-
-    local followBtn = makeButton(State.FollowMeMode and "FOLLOW ME: ON" or "FOLLOW ME: OFF", State.FollowMeMode and COLORS.Blue or COLORS.Panel, tabContentFrame)
-    followBtn.LayoutOrder = 12
-    followBtn.MouseButton1Click:Connect(function() if State.FollowMeMode then StopFollowMe() else StartFollowMe() end; rebuildVariasiTab() end)
-
-    local rainbowBtn = makeButton(State.RainbowNameMode and "RAINBOW NAME: ON" or "RAINBOW NAME: OFF", State.RainbowNameMode and COLORS.Orange or COLORS.Panel, tabContentFrame)
-    rainbowBtn.LayoutOrder = 13
-    rainbowBtn.MouseButton1Click:Connect(function() if State.RainbowNameMode then StopRainbowNames() else StartRainbowNames() end; rebuildVariasiTab() end)
-end
-
-rebuildConfigTab = function()
-    clearTabContent()
-    makeLabel("Konfigurasi disimpan otomatis di file.", 10, COLORS.Gray, nil, tabContentFrame).LayoutOrder = 1
-end
-
-rebuildHistoryTab = function()
-    clearTabContent()
-    if #State.HistoryList == 0 then
-        makeLabel("Belum ada riwayat clone.", 10, COLORS.Gray, nil, tabContentFrame).LayoutOrder = 1
-    else
-        for i, entry in ipairs(State.HistoryList) do
-            local itemFrame = Instance.new("Frame")
-            itemFrame.Size = UDim2.new(1, 0, 0, 42)
-            itemFrame.BackgroundColor3 = COLORS.Panel
-            itemFrame.LayoutOrder = i
-            itemFrame.Parent = tabContentFrame
-            corner(itemFrame, 8)
-            local nameLabel = makeLabel(entry.displayName or entry.username, 11, COLORS.White, Enum.Font.GothamBold, itemFrame)
-            nameLabel.Size = UDim2.new(1, -75, 0, 20)
-            nameLabel.Position = UDim2.new(0, 10, 0, 3)
-            local cloneBtn = makeButton("CLONE", COLORS.Purple, itemFrame, UDim2.new(0, 58, 0, 26))
-            cloneBtn.Position = UDim2.new(1, -64, 0, 8)
-            cloneBtn.MouseButton1Click:Connect(function() CreateCloneFromUserId(entry.userId, entry.displayName, entry.username) end)
-        end
-        local clearBtn = makeButton("HAPUS RIWAYAT", COLORS.Delete, tabContentFrame)
-        clearBtn.LayoutOrder = #State.HistoryList + 1
-        clearBtn.MouseButton1Click:Connect(function() State.HistoryList = {}; SaveHistory(); rebuildHistoryTab() end)
     end
 end
 
 rebuildCurrentTab = function()
-    if State.CurrentTab == "Clones" then rebuildClonesTab()
-    elseif State.CurrentTab == "Editor" then rebuildEditorTab()
-    elseif State.CurrentTab == "Sync" then rebuildSyncTab()
-    elseif State.CurrentTab == "AI Chat" then rebuildAIChatTab()
-    elseif State.CurrentTab == "Config" then rebuildConfigTab()
-    elseif State.CurrentTab == "History" then rebuildHistoryTab()
-    elseif State.CurrentTab == "Players" then rebuildPlayersTab()
-    elseif State.CurrentTab == "Variasi" then rebuildVariasiTab() end
+    if State.CurrentTab == "Clones" then
+        rebuildClonesTab()
+    elseif State.CurrentTab == "Editor" then
+        rebuildEditorTab()
+    elseif State.CurrentTab == "Sync" then
+        rebuildSyncTab()
+    elseif State.CurrentTab == "AI Chat" then
+        rebuildAIChatTab()
+    elseif State.CurrentTab == "Config" then
+        rebuildConfigTab()
+    elseif State.CurrentTab == "History" then
+        rebuildHistoryTab()
+    elseif State.CurrentTab == "Players" then
+        rebuildPlayersTab()
+    elseif State.CurrentTab == "Variasi" then
+        rebuildVariasiTab()
+    end
 end
 
 -- ================================================
@@ -1505,8 +2091,10 @@ end
 -- ================================================
 function _G.openMyCloneApp()
     _G.CurrentPhoneApp = "MyClone.lua"
+
     LoadApiKey()
     LoadHistory()
+    LoadFavorites()
     LoadFavPlayers()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
@@ -1517,70 +2105,196 @@ function _G.openMyCloneApp()
 
     local appContent = _G.appContent
     if not appContent then return end
+
     for _, child in ipairs(appContent:GetChildren()) do
-        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then child:Destroy() end
+        if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
+            child:Destroy()
+        end
     end
 
+    -- Header
+    local header = Instance.new("Frame")
+    header.Size = UDim2.new(1, 0, 0, 36)
+    header.BackgroundColor3 = COLORS.Panel
+    header.Parent = appContent
+    corner(header, 12)
+    stroke(header, COLORS.Panel3, 1)
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 1, 0)
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "MYCLONE APP"
+    title.TextColor3 = COLORS.Gold
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = header
+
+    -- Tab Bar (Horizontal Scrollable)
     tabBarFrame = Instance.new("ScrollingFrame")
-    tabBarFrame.Size = UDim2.new(1, 0, 0, 40)
+    tabBarFrame.Size = UDim2.new(1, 0, 0, 34)
+    tabBarFrame.Position = UDim2.new(0, 0, 0, 40)
     tabBarFrame.BackgroundTransparency = 1
     tabBarFrame.BorderSizePixel = 0
     tabBarFrame.ScrollBarThickness = 0
+    tabBarFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
     tabBarFrame.AutomaticCanvasSize = Enum.AutomaticSize.X
     tabBarFrame.Parent = appContent
+
     local tabLayout = Instance.new("UIListLayout")
     tabLayout.FillDirection = Enum.FillDirection.Horizontal
     tabLayout.SortOrder = Enum.SortOrder.LayoutOrder
     tabLayout.Padding = UDim.new(0, 6)
     tabLayout.Parent = tabBarFrame
 
-    local tabs = {"Clones", "Players", "Editor", "Sync", "Variasi", "AI Chat", "History"}
+    local tabs = {"Clones", "Players", "Editor", "Sync", "Variasi", "AI Chat", "Config", "History"}
     for i, tabName in ipairs(tabs) do
-        local isActive = (State.CurrentTab == tabName)
         local btn = Instance.new("TextButton")
-        btn.Size = UDim2.new(0, 80, 1, -4)
-        btn.BackgroundColor3 = isActive and COLORS.Gold or COLORS.Panel2
+        btn.Size = UDim2.new(0, 75, 1, 0)
+        btn.BackgroundColor3 = (State.CurrentTab == tabName) and COLORS.PurpleDark or COLORS.Panel2
         btn.Text = tabName
-        btn.TextColor3 = isActive and COLORS.Background or COLORS.White
+        btn.TextColor3 = COLORS.White
         btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 10
+        btn.TextSize = 9
         btn.AutoButtonColor = false
         btn.LayoutOrder = i
         btn.Parent = tabBarFrame
         corner(btn, 8)
+        stroke(btn, COLORS.Panel3, 1)
         pressFX(btn)
+        btn.MouseEnter:Connect(function()
+            if State.CurrentTab ~= tabName then
+                btn.BackgroundColor3 = COLORS.Panel3
+            end
+        end)
+        btn.MouseLeave:Connect(function()
+            if State.CurrentTab ~= tabName then
+                btn.BackgroundColor3 = COLORS.Panel2
+            end
+        end)
 
         btn.MouseButton1Click:Connect(function()
             State.CurrentTab = tabName
             for _, child in ipairs(tabBarFrame:GetChildren()) do
                 if child:IsA("TextButton") then
                     child.BackgroundColor3 = COLORS.Panel2
-                    child.TextColor3 = COLORS.White
                 end
             end
-            btn.BackgroundColor3 = COLORS.Gold
-            btn.TextColor3 = COLORS.Background
+            btn.BackgroundColor3 = COLORS.PurpleDark
             rebuildCurrentTab()
         end)
     end
 
+    -- Tab Content Container (Vertical Scrollable)
     tabContentFrame = Instance.new("ScrollingFrame")
-    tabContentFrame.Size = UDim2.new(1, 0, 1, -44)
-    tabContentFrame.Position = UDim2.new(0, 0, 0, 44)
+    tabContentFrame.Size = UDim2.new(1, 0, 1, -78)
+    tabContentFrame.Position = UDim2.new(0, 0, 0, 78)
     tabContentFrame.BackgroundTransparency = 1
     tabContentFrame.BorderSizePixel = 0
-    tabContentFrame.ScrollBarThickness = 2
-    tabContentFrame.ScrollBarImageColor3 = COLORS.Gold
+    tabContentFrame.ScrollBarThickness = 3
+    tabContentFrame.ScrollBarImageColor3 = COLORS.Purple
+    tabContentFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
     tabContentFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
     tabContentFrame.Parent = appContent
 
     local contentLayout = Instance.new("UIListLayout")
     contentLayout.Padding = UDim.new(0, 10)
+    contentLayout.SortOrder = Enum.SortOrder.LayoutOrder
     contentLayout.Parent = tabContentFrame
+
     local padding = Instance.new("UIPadding")
-    padding.PaddingRight = UDim.new(0, 4)
-    padding.PaddingLeft = UDim.new(0, 2)
+    padding.PaddingRight = UDim.new(0, 6)
+    padding.PaddingLeft = UDim.new(0, 4)
+    padding.PaddingTop = UDim.new(0, 4)
     padding.Parent = tabContentFrame
+
+    -- Initialize Gizmos safely
+    local parentTarget = CoreGui
+    pcall(function()
+        if not Gizmos.Position or not Gizmos.Position.Parent then
+            Gizmos.Position = Instance.new("Handles")
+            Gizmos.Position.Style = Enum.HandlesStyle.Movement
+            Gizmos.Position.Color3 = COLORS.Red
+            Gizmos.Position.Parent = parentTarget
+        end
+        if not Gizmos.Rotation or not Gizmos.Rotation.Parent then
+            Gizmos.Rotation = Instance.new("ArcHandles")
+            Gizmos.Rotation.Color3 = COLORS.Purple
+            Gizmos.Rotation.Parent = parentTarget
+        end
+    end)
+
+    SetGizmoVisibility()
+
+    -- Connect Gizmo Handlers safely once
+    if Gizmos.Position and not Gizmos.Position:GetAttribute("DragConnected") then
+        Gizmos.Position:SetAttribute("DragConnected", true)
+        local dragStartCFrame = nil
+        Gizmos.Position.MouseButton1Down:Connect(function()
+            if not State.SelectedClone or not State.PositionMode or not State.SelectedClone.PrimaryPart then return end
+            dragStartCFrame = State.SelectedClone.PrimaryPart.CFrame
+            GizmoDragging = true
+            local camera = Workspace.CurrentCamera
+            if camera then
+                CameraRestoreType = camera.CameraType
+                CameraRestoreSubject = camera.CameraSubject
+                camera.CameraType = Enum.CameraType.Scriptable
+            end
+            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition end)
+        end)
+        Gizmos.Position.MouseDrag:Connect(function(face, distance)
+            if not State.SelectedClone or not dragStartCFrame then return end
+            local delta = Vector3.FromNormalId(face) * distance
+            State.SelectedClone:PivotTo(dragStartCFrame * CFrame.new(delta))
+        end)
+        Gizmos.Position.MouseButton1Up:Connect(function()
+            dragStartCFrame = nil
+            GizmoDragging = false
+            local camera = Workspace.CurrentCamera
+            if camera and CameraRestoreType then
+                camera.CameraType = CameraRestoreType
+                if CameraRestoreSubject and CameraRestoreSubject.Parent then
+                    camera.CameraSubject = CameraRestoreSubject
+                end
+            end
+            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
+        end)
+    end
+
+    if Gizmos.Rotation and not Gizmos.Rotation:GetAttribute("DragConnected") then
+        Gizmos.Rotation:SetAttribute("DragConnected", true)
+        local rotStartCFrame = nil
+        Gizmos.Rotation.MouseButton1Down:Connect(function()
+            if not State.SelectedClone or not State.RotationMode or not State.SelectedClone.PrimaryPart then return end
+            rotStartCFrame = State.SelectedClone.PrimaryPart.CFrame
+            GizmoDragging = true
+            local camera = Workspace.CurrentCamera
+            if camera then
+                CameraRestoreType = camera.CameraType
+                CameraRestoreSubject = camera.CameraSubject
+                camera.CameraType = Enum.CameraType.Scriptable
+            end
+            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition end)
+        end)
+        Gizmos.Rotation.MouseDrag:Connect(function(axis, relativeAngle)
+            if not State.SelectedClone or not rotStartCFrame then return end
+            local axisVector = Vector3.FromAxis(axis)
+            State.SelectedClone:PivotTo(rotStartCFrame * CFrame.fromAxisAngle(axisVector, relativeAngle))
+        end)
+        Gizmos.Rotation.MouseButton1Up:Connect(function()
+            rotStartCFrame = nil
+            GizmoDragging = false
+            local camera = Workspace.CurrentCamera
+            if camera and CameraRestoreType then
+                camera.CameraType = CameraRestoreType
+                if CameraRestoreSubject and CameraRestoreSubject.Parent then
+                    camera.CameraSubject = CameraRestoreSubject
+                end
+            end
+            pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
+        end)
+    end
 
     -- Click Selection in World
     local inputConn
@@ -1597,7 +2311,12 @@ function _G.openMyCloneApp()
         end
     end)
 
-    appContent.Destroying:Connect(function() if inputConn then inputConn:Disconnect() end end)
+    appContent.Destroying:Connect(function()
+        if inputConn then inputConn:Disconnect() end
+        UpdateHighlight(nil)
+        -- State and loops persist in background!
+    end)
+
     rebuildCurrentTab()
 end
 
