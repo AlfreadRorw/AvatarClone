@@ -59,6 +59,7 @@ local CONFIG_FILE = "MyClone_Config.json"
 local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
+local FAV_PLAYERS_FILE = "MyClone_FavPlayers.json"
 
 local COLORS = {
     Background = Color3.fromRGB(12, 13, 18),
@@ -99,6 +100,16 @@ _G.MyCloneState = _G.MyCloneState or {
     AIChatEnabled = false,
     AIChatCooldown = 10,
     AIChatLastTime = 0,
+    ManualChatTarget = nil,
+    VariationShape = "Circle",
+    VariationRadius = 8,
+    VariationCount = 6,
+    PlayersSubTab = "Players",
+    FriendsList = {},
+    FavoritesPlayersList = {},
+    FollowMeMode = false,
+    FreezePoseMode = false,
+    RainbowNameMode = false,
 }
 
 local State = _G.MyCloneState
@@ -106,10 +117,13 @@ local State = _G.MyCloneState
 local CurrentAnimatorConnection = nil
 local SyncLoop = nil
 local AIChatLoop = nil
+local FollowMeLoop = nil
+local RainbowLoop = nil
 local GizmoDragging = false
 local CameraRestoreType = nil
 local CameraRestoreSubject = nil
 local DeleteAllArmed = false
+local DeleteAllFriendsArmed = false
 
 local GROQ_MODELS = {
     "llama-3.3-70b-versatile",
@@ -133,6 +147,7 @@ local Gizmos = _G.MyCloneGizmos
 
 -- Forward Declarations
 local rebuildCurrentTab, rebuildEditorTab, rebuildClonesTab, rebuildHistoryTab, rebuildSyncTab, rebuildAIChatTab
+local rebuildVariasiTab, rebuildPlayersTab
 
 -- ================================================
 -- UTILITY FUNCTIONS
@@ -421,6 +436,21 @@ local function LoadFavorites()
     end)
 end
 
+local function SaveFavPlayers()
+    pcall(function()
+        if writefile then writefile(FAV_PLAYERS_FILE, HttpService:JSONEncode(State.FavoritesPlayersList)) end
+    end)
+end
+
+local function LoadFavPlayers()
+    pcall(function()
+        if isfile and readfile and isfile(FAV_PLAYERS_FILE) then
+            local data = HttpService:JSONDecode(readfile(FAV_PLAYERS_FILE))
+            if type(data) == "table" then State.FavoritesPlayersList = data end
+        end
+    end)
+end
+
 local function SaveApiKey()
     pcall(function()
         if writefile and State.GroqApiKey then writefile(API_KEY_FILE, State.GroqApiKey) end
@@ -696,6 +726,168 @@ end
 local function StopAIChat()
     State.AIChatEnabled = false
     AIChatLoop = nil
+end
+
+-- ================================================
+-- MANUAL CHAT (Kirim Pesan Manual ke Clone)
+-- ================================================
+local function SendManualChat(clone, message)
+    if not clone or not message or message == "" then return false end
+    DisplayCloneBubble(clone, message)
+    return true
+end
+
+-- ================================================
+-- VARIASI / FORMASI CLONE
+-- ================================================
+local function GetAllCloneModels()
+    local list = {}
+    local folder = Workspace:FindFirstChild(FOLDER_NAME)
+    if not folder then return list end
+    for _, clone in ipairs(folder:GetChildren()) do
+        if clone:IsA("Model") then table.insert(list, clone) end
+    end
+    return list
+end
+
+local function ArrangeFormation(shape, radius)
+    local clones = GetAllCloneModels()
+    local count = #clones
+    if count == 0 then return end
+
+    local character = LocalPlayer.Character
+    local baseCFrame
+    if character and character:FindFirstChild("HumanoidRootPart") then
+        baseCFrame = character.HumanoidRootPart.CFrame
+    else
+        baseCFrame = CFrame.new(0, 3, 0)
+    end
+
+    if shape == "Circle" then
+        for i, clone in ipairs(clones) do
+            local angle = (i - 1) * (2 * math.pi / count)
+            local offset = Vector3.new(math.sin(angle) * radius, 0, math.cos(angle) * radius)
+            local targetPos = baseCFrame.Position + offset
+            local lookAt = CFrame.lookAt(targetPos, baseCFrame.Position)
+            clone:PivotTo(lookAt)
+        end
+    elseif shape == "Line" then
+        local startOffset = -((count - 1) * radius) / 2
+        for i, clone in ipairs(clones) do
+            local offset = Vector3.new(startOffset + (i - 1) * radius, 0, -radius)
+            local targetCFrame = baseCFrame * CFrame.new(offset)
+            clone:PivotTo(CFrame.new(targetCFrame.Position) * (baseCFrame - baseCFrame.Position))
+        end
+    elseif shape == "Grid" then
+        local cols = math.ceil(math.sqrt(count))
+        for i, clone in ipairs(clones) do
+            local row = math.floor((i - 1) / cols)
+            local col = (i - 1) % cols
+            local offset = Vector3.new((col - (cols - 1) / 2) * radius, 0, -radius - row * radius)
+            local targetCFrame = baseCFrame * CFrame.new(offset)
+            clone:PivotTo(CFrame.new(targetCFrame.Position) * (baseCFrame - baseCFrame.Position))
+        end
+    elseif shape == "VShape" then
+        for i, clone in ipairs(clones) do
+            local side = (i % 2 == 0) and 1 or -1
+            local step = math.ceil(i / 2)
+            local offset = Vector3.new(side * step * (radius / 2), 0, -step * (radius / 2) - radius)
+            local targetCFrame = baseCFrame * CFrame.new(offset)
+            clone:PivotTo(CFrame.new(targetCFrame.Position) * (baseCFrame - baseCFrame.Position))
+        end
+    elseif shape == "Spiral" then
+        for i, clone in ipairs(clones) do
+            local t = i / count
+            local angle = t * math.pi * 4
+            local r = radius * t + 1
+            local offset = Vector3.new(math.sin(angle) * r, 0, math.cos(angle) * r)
+            local targetPos = baseCFrame.Position + offset
+            local lookAt = CFrame.lookAt(targetPos, baseCFrame.Position)
+            clone:PivotTo(lookAt)
+        end
+    end
+end
+
+-- ================================================
+-- FOLLOW ME MODE
+-- ================================================
+local function StopFollowMe()
+    State.FollowMeMode = false
+    if FollowMeLoop then FollowMeLoop:Disconnect(); FollowMeLoop = nil end
+end
+
+local function StartFollowMe()
+    if FollowMeLoop then return end
+    State.FollowMeMode = true
+    FollowMeLoop = RunService.Heartbeat:Connect(function()
+        if not State.FollowMeMode then return end
+        local character = LocalPlayer.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+        local baseCFrame = character.HumanoidRootPart.CFrame
+        local clones = GetAllCloneModels()
+        for i, clone in ipairs(clones) do
+            if clone.PrimaryPart then
+                local angle = (i - 1) * (2 * math.pi / math.max(#clones, 1))
+                local offset = Vector3.new(math.sin(angle) * 6, 0, math.cos(angle) * 6 + 4)
+                local targetCFrame = CFrame.new(baseCFrame.Position + offset)
+                local currentPos = clone.PrimaryPart.Position
+                local newPos = currentPos:Lerp(targetCFrame.Position, 0.06)
+                local lookRot = CFrame.lookAt(newPos, baseCFrame.Position).Rotation
+                clone:PivotTo(CFrame.new(newPos) * lookRot)
+            end
+        end
+    end)
+end
+
+-- ================================================
+-- RAINBOW NAME MODE
+-- ================================================
+local function StopRainbowNames()
+    State.RainbowNameMode = false
+    if RainbowLoop then RainbowLoop:Disconnect(); RainbowLoop = nil end
+end
+
+local function StartRainbowNames()
+    if RainbowLoop then return end
+    State.RainbowNameMode = true
+    local hue = 0
+    RainbowLoop = RunService.Heartbeat:Connect(function(dt)
+        if not State.RainbowNameMode then return end
+        hue = (hue + dt * 0.15) % 1
+        local color = Color3.fromHSV(hue, 0.75, 1)
+        local folder = Workspace:FindFirstChild(FOLDER_NAME)
+        if not folder then return end
+        for _, clone in ipairs(folder:GetChildren()) do
+            local tag = clone:FindFirstChild("NameTag")
+            if tag then
+                local label = tag:FindFirstChildOfClass("TextLabel")
+                if label then label.TextColor3 = color end
+            end
+        end
+    end)
+end
+
+-- ================================================
+-- FREEZE POSE (Anchor semua Part clone terpilih)
+-- ================================================
+local function ToggleFreezePose(clone)
+    if not clone then return end
+    local frozen = clone:GetAttribute("FreezePose")
+    frozen = not frozen
+    clone:SetAttribute("FreezePose", frozen)
+    for _, part in ipairs(clone:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+            part.Anchored = frozen
+        end
+    end
+    local humanoid = clone:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        if frozen then
+            humanoid.PlatformStand = true
+        else
+            humanoid.PlatformStand = false
+        end
+    end
 end
 
 -- ================================================
@@ -1091,6 +1283,88 @@ rebuildAIChatTab = function()
 
     local infoLabel = makeLabel("Interval Chat: " .. State.AIChatCooldown .. " detik", 9, COLORS.Gray, nil, tabContentFrame)
     infoLabel.LayoutOrder = 7
+
+    -- ===== CHAT MANUAL =====
+    local divider1 = makeLabel("━━━━━━━━━━━━━━━━━━━━", 9, COLORS.DarkGray, nil, tabContentFrame)
+    divider1.LayoutOrder = 8
+
+    local manualLabel = makeLabel("CHAT MANUAL KE CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    manualLabel.LayoutOrder = 9
+
+    local clones = GetAllCloneModels()
+    local targetName = State.ManualChatTarget and State.ManualChatTarget.Name or nil
+    if State.ManualChatTarget and not State.ManualChatTarget.Parent then
+        State.ManualChatTarget = nil
+        targetName = nil
+    end
+
+    local targetBtn = makeButton(targetName and ("TARGET: " .. targetName) or "PILIH CLONE TARGET ▾", COLORS.Panel2, tabContentFrame)
+    targetBtn.LayoutOrder = 10
+
+    local pickerOpen = false
+    local pickerHolder = Instance.new("Frame")
+    pickerHolder.Size = UDim2.new(1, 0, 0, 0)
+    pickerHolder.AutomaticSize = Enum.AutomaticSize.Y
+    pickerHolder.BackgroundTransparency = 1
+    pickerHolder.LayoutOrder = 11
+    pickerHolder.Parent = tabContentFrame
+    pickerHolder.Visible = false
+
+    local pickerLayout = Instance.new("UIListLayout")
+    pickerLayout.Padding = UDim.new(0, 4)
+    pickerLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    pickerLayout.Parent = pickerHolder
+
+    if #clones == 0 then
+        local noClone = makeLabel("Belum ada clone. Buat dulu di tab Clones.", 9, COLORS.DarkGray, nil, pickerHolder)
+        noClone.LayoutOrder = 1
+    else
+        for i, clone in ipairs(clones) do
+            local pickBtn = makeButton(clone.Name, COLORS.Panel, pickerHolder, UDim2.new(1, 0, 0, 28))
+            pickBtn.LayoutOrder = i
+            pickBtn.MouseButton1Click:Connect(function()
+                State.ManualChatTarget = clone
+                rebuildAIChatTab()
+            end)
+        end
+    end
+
+    targetBtn.MouseButton1Click:Connect(function()
+        pickerOpen = not pickerOpen
+        pickerHolder.Visible = pickerOpen
+    end)
+
+    local chatInput, chatFrame = makeInput("Ketik pesan buat clone...", tabContentFrame)
+    chatFrame.LayoutOrder = 12
+
+    local sendBtn = makeButton("KIRIM PESAN", COLORS.Blue, tabContentFrame)
+    sendBtn.LayoutOrder = 13
+    sendBtn.MouseButton1Click:Connect(function()
+        local msg = chatInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if msg == "" then return end
+        local target = State.ManualChatTarget or State.SelectedClone
+        if not target or not target.Parent then return end
+        SendManualChat(target, msg)
+        chatInput.Text = ""
+    end)
+
+    local hint = makeLabel("Tips: kalau tidak pilih target, pesan dikirim ke clone yang sedang dipilih (Selected Clone).", 8, COLORS.DarkGray, nil, tabContentFrame)
+    hint.LayoutOrder = 14
+
+    -- ===== RAINBOW NAME TOGGLE =====
+    local divider2 = makeLabel("━━━━━━━━━━━━━━━━━━━━", 9, COLORS.DarkGray, nil, tabContentFrame)
+    divider2.LayoutOrder = 15
+
+    local rainbowBtn = makeButton(State.RainbowNameMode and "RAINBOW NAME: ON" or "RAINBOW NAME: OFF", State.RainbowNameMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    rainbowBtn.LayoutOrder = 16
+    rainbowBtn.MouseButton1Click:Connect(function()
+        if State.RainbowNameMode then
+            StopRainbowNames()
+        else
+            StartRainbowNames()
+        end
+        rebuildAIChatTab()
+    end)
 end
 
 local function rebuildConfigTab()
@@ -1228,6 +1502,348 @@ rebuildHistoryTab = function()
     end
 end
 
+rebuildVariasiTab = function()
+    clearTabContent()
+
+    local titleLabel = makeLabel("BENTUK FORMASI CLONE:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    titleLabel.LayoutOrder = 1
+
+    local shapes = {
+        {key = "Circle", label = "LINGKARAN"},
+        {key = "Line", label = "BARISAN"},
+        {key = "Grid", label = "GRID / KOTAK"},
+        {key = "VShape", label = "FORMASI V"},
+        {key = "Spiral", label = "SPIRAL"},
+    }
+
+    for i, shapeData in ipairs(shapes) do
+        local isActive = State.VariationShape == shapeData.key
+        local shapeBtn = makeButton((isActive and "▶ " or "") .. shapeData.label, isActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+        shapeBtn.LayoutOrder = i + 1
+        shapeBtn.MouseButton1Click:Connect(function()
+            State.VariationShape = shapeData.key
+            rebuildVariasiTab()
+        end)
+    end
+
+    local radiusLabel = makeLabel("JARAK / RADIUS: " .. State.VariationRadius .. " studs", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    radiusLabel.LayoutOrder = 10
+
+    local radiusRow = Instance.new("Frame")
+    radiusRow.Size = UDim2.new(1, 0, 0, 36)
+    radiusRow.BackgroundTransparency = 1
+    radiusRow.LayoutOrder = 11
+    radiusRow.Parent = tabContentFrame
+
+    local minusBtn = makeButton("-", COLORS.Panel2, radiusRow, UDim2.new(0, 50, 1, 0))
+    minusBtn.MouseButton1Click:Connect(function()
+        State.VariationRadius = math.max(2, State.VariationRadius - 2)
+        rebuildVariasiTab()
+    end)
+
+    local plusBtn = makeButton("+", COLORS.Panel2, radiusRow, UDim2.new(0, 50, 1, 0))
+    plusBtn.Position = UDim2.new(0, 58, 0, 0)
+    plusBtn.MouseButton1Click:Connect(function()
+        State.VariationRadius = math.min(60, State.VariationRadius + 2)
+        rebuildVariasiTab()
+    end)
+
+    local applyBtn = makeButton("TERAPKAN FORMASI", COLORS.Green, tabContentFrame)
+    applyBtn.LayoutOrder = 12
+    applyBtn.MouseButton1Click:Connect(function()
+        ArrangeFormation(State.VariationShape, State.VariationRadius)
+    end)
+
+    -- ===== FITUR MENARIK =====
+    local extraLabel = makeLabel("FITUR VARIASI LAINNYA:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+    extraLabel.LayoutOrder = 13
+
+    local followBtn = makeButton(State.FollowMeMode and "FOLLOW ME: ON (Clone ngikutin)" or "FOLLOW ME: OFF", State.FollowMeMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    followBtn.LayoutOrder = 14
+    followBtn.MouseButton1Click:Connect(function()
+        if State.FollowMeMode then
+            StopFollowMe()
+        else
+            StartFollowMe()
+        end
+        rebuildVariasiTab()
+    end)
+
+    local freezeBtn = makeButton("FREEZE POSE (Clone Terpilih)", COLORS.Blue, tabContentFrame)
+    freezeBtn.LayoutOrder = 15
+    freezeBtn.MouseButton1Click:Connect(function()
+        if State.SelectedClone then ToggleFreezePose(State.SelectedClone) end
+    end)
+
+    local randomizeBtn = makeButton("ACAK ULANG POSISI SEMUA CLONE", COLORS.Orange, tabContentFrame)
+    randomizeBtn.LayoutOrder = 16
+    randomizeBtn.MouseButton1Click:Connect(function()
+        local clones = GetAllCloneModels()
+        local character = LocalPlayer.Character
+        local basePos = (character and character:FindFirstChild("HumanoidRootPart")) and character.HumanoidRootPart.Position or Vector3.new(0, 3, 0)
+        for _, clone in ipairs(clones) do
+            local randomOffset = Vector3.new(math.random(-20, 20), 0, math.random(-20, 20))
+            clone:PivotTo(CFrame.new(basePos + randomOffset))
+        end
+    end)
+
+    local mirrorBtn = makeButton("HADAPKAN SEMUA KE SAYA", COLORS.Purple, tabContentFrame)
+    mirrorBtn.LayoutOrder = 17
+    mirrorBtn.MouseButton1Click:Connect(function()
+        local clones = GetAllCloneModels()
+        local character = LocalPlayer.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+        local myPos = character.HumanoidRootPart.Position
+        for _, clone in ipairs(clones) do
+            if clone.PrimaryPart then
+                local cloneLook = CFrame.lookAt(clone.PrimaryPart.Position, myPos)
+                clone:PivotTo(cloneLook)
+            end
+        end
+    end)
+
+    local countLabel = makeLabel("Total clone aktif: " .. #GetAllCloneModels(), 9, COLORS.DarkGray, nil, tabContentFrame)
+    countLabel.LayoutOrder = 18
+end
+
+local function makePlayerCard(displayName, username, userId, parent, layoutOrder, actions)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, 42)
+    card.BackgroundColor3 = COLORS.Panel
+    card.LayoutOrder = layoutOrder
+    card.Parent = parent
+    corner(card, 8)
+    stroke(card, COLORS.Panel3, 1)
+
+    local actionWidth = #actions * 44
+    local nameLbl = makeLabel(displayName or username or "Unknown", 11, COLORS.White, Enum.Font.GothamBold, card)
+    nameLbl.Size = UDim2.new(1, -actionWidth - 16, 0, 20)
+    nameLbl.Position = UDim2.new(0, 10, 0, 3)
+
+    local subLbl = makeLabel("@" .. (username or "unknown"), 9, COLORS.Gray, nil, card)
+    subLbl.Size = UDim2.new(1, -actionWidth - 16, 0, 14)
+    subLbl.Position = UDim2.new(0, 10, 0, 22)
+
+    for i, actionData in ipairs(actions) do
+        local btn = makeButton(actionData.text, actionData.color, card, UDim2.new(0, 38, 0, 34))
+        btn.Position = UDim2.new(1, -(44 * (#actions - i + 1)), 0, 4)
+        btn.TextSize = 8
+        btn.MouseButton1Click:Connect(actionData.onClick)
+    end
+
+    return card
+end
+
+local function isFavoritePlayer(userId)
+    for _, entry in ipairs(State.FavoritesPlayersList) do
+        if entry.userId == userId then return true end
+    end
+    return false
+end
+
+local function addFavoritePlayer(userId, displayName, username)
+    if isFavoritePlayer(userId) then return end
+    table.insert(State.FavoritesPlayersList, {userId = userId, displayName = displayName, username = username})
+    SaveFavPlayers()
+end
+
+local function removeFavoritePlayer(userId)
+    for i, entry in ipairs(State.FavoritesPlayersList) do
+        if entry.userId == userId then
+            table.remove(State.FavoritesPlayersList, i)
+            break
+        end
+    end
+    SaveFavPlayers()
+end
+
+local function isFriendAdded(userId)
+    for _, entry in ipairs(State.FriendsList) do
+        if entry.userId == userId then return true end
+    end
+    return false
+end
+
+rebuildPlayersTab = function()
+    clearTabContent()
+
+    -- Sub-tab bar
+    local subTabRow = Instance.new("Frame")
+    subTabRow.Size = UDim2.new(1, 0, 0, 32)
+    subTabRow.BackgroundTransparency = 1
+    subTabRow.LayoutOrder = 1
+    subTabRow.Parent = tabContentFrame
+
+    local subTabLayout = Instance.new("UIListLayout")
+    subTabLayout.FillDirection = Enum.FillDirection.Horizontal
+    subTabLayout.Padding = UDim.new(0, 6)
+    subTabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    subTabLayout.Parent = subTabRow
+
+    local subTabs = {"Players", "Friends", "Favorit"}
+    for i, subName in ipairs(subTabs) do
+        local isActive = State.PlayersSubTab == subName
+        local subBtn = makeButton(subName, isActive and COLORS.PurpleDark or COLORS.Panel2, subTabRow, UDim2.new(0, 90, 1, 0))
+        subBtn.LayoutOrder = i
+        subBtn.MouseButton1Click:Connect(function()
+            State.PlayersSubTab = subName
+            rebuildPlayersTab()
+        end)
+    end
+
+    if State.PlayersSubTab == "Players" then
+        local infoLabel = makeLabel("PLAYERS DI MAP INI:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+        infoLabel.LayoutOrder = 2
+
+        local playerList = Players:GetPlayers()
+        local index = 3
+        local anyOther = false
+        for _, player in ipairs(playerList) do
+            if player ~= LocalPlayer then
+                anyOther = true
+                local pUserId = player.UserId
+                local isFav = isFavoritePlayer(pUserId)
+                makePlayerCard(player.DisplayName, player.Name, pUserId, tabContentFrame, index, {
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(pUserId, player.DisplayName, player.Name)
+                        end,
+                    },
+                    {
+                        text = isFav and "★" or "☆",
+                        color = isFav and COLORS.Orange or COLORS.Panel2,
+                        onClick = function()
+                            if isFavoritePlayer(pUserId) then
+                                removeFavoritePlayer(pUserId)
+                            else
+                                addFavoritePlayer(pUserId, player.DisplayName, player.Name)
+                            end
+                            rebuildPlayersTab()
+                        end,
+                    },
+                    {
+                        text = isFriendAdded(pUserId) and "✓" or "+F",
+                        color = isFriendAdded(pUserId) and COLORS.Green or COLORS.Blue,
+                        onClick = function()
+                            if not isFriendAdded(pUserId) then
+                                table.insert(State.FriendsList, {userId = pUserId, displayName = player.DisplayName, username = player.Name})
+                                rebuildPlayersTab()
+                            end
+                        end,
+                    },
+                })
+                index = index + 1
+            end
+        end
+        if not anyOther then
+            local emptyLbl = makeLabel("Tidak ada player lain di map ini.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = index
+        end
+
+    elseif State.PlayersSubTab == "Friends" then
+        local infoLabel = makeLabel("DAFTAR TEMAN (Manual):", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+        infoLabel.LayoutOrder = 2
+
+        local addInput, addFrame = makeInput("Username teman...", tabContentFrame)
+        addFrame.LayoutOrder = 3
+
+        local addBtn = makeButton("TAMBAH TEMAN", COLORS.Green, tabContentFrame)
+        addBtn.LayoutOrder = 4
+        addBtn.MouseButton1Click:Connect(function()
+            local text = addInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+            if text == "" then return end
+            local userId, _ = ResolveUserId(text)
+            if not userId then return end
+            if isFriendAdded(userId) then return end
+            local dispName = nil
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player.UserId == userId then dispName = player.DisplayName break end
+            end
+            if not dispName then dispName = GetDisplayName(userId) or text end
+            table.insert(State.FriendsList, {userId = userId, displayName = dispName, username = text})
+            addInput.Text = ""
+            rebuildPlayersTab()
+        end)
+
+        if #State.FriendsList == 0 then
+            local emptyLbl = makeLabel("Belum ada teman ditambahkan.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = 5
+        else
+            for i, entry in ipairs(State.FriendsList) do
+                local isFav = isFavoritePlayer(entry.userId)
+                makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, 5 + i, {
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
+                        end,
+                    },
+                    {
+                        text = isFav and "★" or "☆",
+                        color = isFav and COLORS.Orange or COLORS.Panel2,
+                        onClick = function()
+                            if isFavoritePlayer(entry.userId) then
+                                removeFavoritePlayer(entry.userId)
+                            else
+                                addFavoritePlayer(entry.userId, entry.displayName, entry.username)
+                            end
+                            rebuildPlayersTab()
+                        end,
+                    },
+                    {
+                        text = "X",
+                        color = COLORS.Delete,
+                        onClick = function()
+                            table.remove(State.FriendsList, i)
+                            rebuildPlayersTab()
+                        end,
+                    },
+                })
+            end
+        end
+
+    elseif State.PlayersSubTab == "Favorit" then
+        local infoLabel = makeLabel("PLAYER / TEMAN FAVORIT:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
+        infoLabel.LayoutOrder = 2
+
+        if #State.FavoritesPlayersList == 0 then
+            local emptyLbl = makeLabel("Belum ada favorit. Tekan ☆ di tab Players/Friends untuk menambahkan.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            emptyLbl.LayoutOrder = 3
+        else
+            for i, entry in ipairs(State.FavoritesPlayersList) do
+                makePlayerCard(entry.displayName, entry.username, entry.userId, tabContentFrame, 2 + i, {
+                    {
+                        text = "CLONE",
+                        color = COLORS.Red,
+                        onClick = function()
+                            CreateCloneFromUserId(entry.userId, entry.displayName, entry.username)
+                        end,
+                    },
+                    {
+                        text = "X",
+                        color = COLORS.Delete,
+                        onClick = function()
+                            removeFavoritePlayer(entry.userId)
+                            rebuildPlayersTab()
+                        end,
+                    },
+                })
+            end
+
+            local clearFavBtn = makeButton("HAPUS SEMUA FAVORIT", COLORS.Delete, tabContentFrame)
+            clearFavBtn.LayoutOrder = #State.FavoritesPlayersList + 3
+            clearFavBtn.MouseButton1Click:Connect(function()
+                State.FavoritesPlayersList = {}
+                SaveFavPlayers()
+                rebuildPlayersTab()
+            end)
+        end
+    end
+end
+
 rebuildCurrentTab = function()
     if State.CurrentTab == "Clones" then
         rebuildClonesTab()
@@ -1241,6 +1857,10 @@ rebuildCurrentTab = function()
         rebuildConfigTab()
     elseif State.CurrentTab == "History" then
         rebuildHistoryTab()
+    elseif State.CurrentTab == "Players" then
+        rebuildPlayersTab()
+    elseif State.CurrentTab == "Variasi" then
+        rebuildVariasiTab()
     end
 end
 
@@ -1253,6 +1873,7 @@ function _G.openMyCloneApp()
     LoadApiKey()
     LoadHistory()
     LoadFavorites()
+    LoadFavPlayers()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
         local folder = Instance.new("Folder")
@@ -1285,7 +1906,7 @@ function _G.openMyCloneApp()
     tabLayout.Padding = UDim.new(0, 6)
     tabLayout.Parent = tabBarFrame
 
-    local tabs = {"Clones", "Editor", "Sync", "AI Chat", "Config", "History"}
+    local tabs = {"Clones", "Players", "Editor", "Sync", "Variasi", "AI Chat", "Config", "History"}
     for i, tabName in ipairs(tabs) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 75, 1, 0)
