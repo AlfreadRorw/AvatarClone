@@ -433,4 +433,33 @@ iconBuilders.Emote = function(p, c)
     -- Tambahkan juga outline di bagian bawah? Sudah cukup.
 end
 
+iconBuilders.MyClone = function(p, c)
+    -- Base tile gelap dengan outline putih (sama seperti icon lain)
+    local tile = baseTile(p, 30, 10)
+
+    -- ---- DUA SILUET ORANG (clone) ----
+    -- Orang kiri (clone pertama)
+    glyphRect(tile, 5, 5, -7, -5, 100) -- kepala (lingkaran)
+    glyphRect(tile, 9, 5, -7, 2, 4)    -- badan (persegi panjang)
+
+    -- Orang kanan (clone kedua)
+    glyphRect(tile, 5, 5, 7, -5, 100)  -- kepala
+    glyphRect(tile, 9, 5, 7, 2, 4)     -- badan
+
+    -- ---- RING LINGKAR (menandakan mode edit / transformasi) ----
+    glyphCircleOutline(tile, 24, 0, 0, 1.5)
+
+    -- ---- PANAH MELINGKAR (↻) di bawah ----
+    local arrow = Instance.new("TextLabel", tile)
+    arrow.Size = UDim2.new(0, 16, 0, 16)
+    arrow.AnchorPoint = Vector2.new(0.5, 0.5)
+    arrow.Position = UDim2.new(0.5, 0, 0.5, 10) -- posisi di bawah ring
+    arrow.BackgroundTransparency = 1
+    arrow.Text = "↻"
+    arrow.TextColor3 = WHITE
+    arrow.Font = Enum.Font.GothamBlack
+    arrow.TextSize = 12
+    arrow.ZIndex = 2
+end
+
 return iconBuilders

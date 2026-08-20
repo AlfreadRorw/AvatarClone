@@ -177,6 +177,7 @@ buildAppIcon("AlfreadAI", 17, appGrid, function() _G.openApp("AlfreadAI", _G.ope
 buildAppIcon("Shader", 18, appGrid, function() _G.openApp("Shader", _G.openShaderApp) end)
 buildAppIcon("Games", 19, appGrid, function() _G.openApp("Games", _G.openGamesApp) end)
 buildAppIcon("Emote", 20, appGrid, function() _G.openApp("Emote", _G.openEmoteApp) end)
+buildAppIcon("MyClone", 21, appGrid, function() _G.openApp("MyClone", _G.openMyCloneApp) end)
 
 return {
     buildAppIcon = buildAppIcon,
