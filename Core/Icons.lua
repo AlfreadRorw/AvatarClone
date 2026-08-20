@@ -1,19 +1,4 @@
 -- Core/Icons.lua
--- ================================================================
--- MONOCHROME EDITION — semua icon didesain ulang jadi hitam-putih
--- dengan gaya konsisten: base tile gelap solid + glyph putih di atasnya.
---
--- Prinsip desain yang dipakai konsisten di SEMUA icon:
---   - Kanvas kerja adalah frame 'p' (slot icon standar sistem).
---   - Ada satu "tile" dasar (kotak/lingkaran gelap) yang selalu diposisikan
---     dengan AnchorPoint (0.5, 0.5) di titik (0.5, 0.42) dari p — konsisten
---     di semua icon, supaya tidak ada yang "geser" dari posisi seharusnya.
---   - Semua glyph (bentuk di dalam tile) diposisikan RELATIF terhadap
---     tile itu sendiri, juga dengan AnchorPoint tengah + offset piksel,
---     BUKAN operasi matematika langsung di komponen scale UDim2 (itu
---     penyebab bug lama di icon Server yang posisinya melenceng).
---   - Warna hanya hitam & putih untuk semua glyph, sesuai permintaan.
--- ================================================================
 
 local T = _G.T
 local Helpers = _G.Helpers
