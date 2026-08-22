@@ -685,7 +685,19 @@ _G.PhoneState = {
     isLocked       = true,
     isCloning      = false,
     toolEquipped   = true,
+    currentScreen  = "home", -- "home" atau nama app yang sedang terbuka (mis. "MyClone")
 }
+
+-- Dipanggil oleh setiap module app (MyClone, dsb) saat app itu dibuka,
+-- supaya Phone tahu app mana yang sedang aktif dan tidak auto-balik ke Home
+-- ketika phone ditutup lalu dibuka lagi lewat FloatingIcon.
+function _G.setCurrentScreen(screenName)
+    _G.PhoneState.currentScreen = screenName or "home"
+end
+
+function _G.getCurrentScreen()
+    return _G.PhoneState.currentScreen or "home"
+end
 
 -- ==================== PHONE FUNCTIONS ====================
 function _G.showKeyEntry()
@@ -706,6 +718,7 @@ function _G.unlock()
     keyInput.Text = ""
     ksStatus.Text = ""
     if _G.goHome then _G.goHome() end
+    _G.PhoneState.currentScreen = "home"
     _G.showDynamicNotification("Phone Unlocked!", Color3.fromRGB(0,255,100))
 end
 
@@ -726,6 +739,7 @@ function _G.openPhone()
                     _G.PhoneState.isLocked = false
                     task.wait(0.3)
                     if _G.goHome then _G.goHome() end
+                    _G.PhoneState.currentScreen = "home"
                     _G.showDynamicNotification("Welcome back!", Color3.fromRGB(0,255,100))
                     return
                 end
@@ -734,7 +748,17 @@ function _G.openPhone()
             _G.showKeyEntry()
         end)
     else
-        if _G.goHome then _G.goHome() end
+        -- PENTING: Jangan otomatis lompat ke Home kalau sebelumnya user
+        -- sedang membuka sebuah app (mis. MyClone). Phone yang ditutup lewat
+        -- FloatingIcon lalu dibuka lagi harus tetap menampilkan app yang sama,
+        -- bukan reset ke Home tiap kali dibuka.
+        if _G.PhoneState.currentScreen == "home" or _G.PhoneState.currentScreen == nil then
+            if _G.goHome then _G.goHome() end
+            _G.PhoneState.currentScreen = "home"
+        end
+        -- Jika currentScreen bukan "home", tidak melakukan apa-apa di sini:
+        -- app yang sebelumnya terbuka masih Visible = true di dalam phone frame,
+        -- jadi otomatis langsung terlihat lagi begitu phone.Visible = true.
     end
 end
 
@@ -782,6 +806,7 @@ task.spawn(function()
             end)
             if ok and not isValid then
                 _G.PhoneState.isLocked = true
+                _G.PhoneState.currentScreen = "home"
                 if Storage and Storage.clearSavedKey then
                     pcall(Storage.clearSavedKey)
                 end
@@ -821,4 +846,6 @@ return {
     isPortrait       = isPortrait,
     getGridIconSize  = getGridIconSize,
     PHONE_SIZE       = PHONE_SIZE,
+    setCurrentScreen = _G.setCurrentScreen,
+    getCurrentScreen = _G.getCurrentScreen,
 }

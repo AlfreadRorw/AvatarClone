@@ -155,6 +155,12 @@ local function createFloatingIcon()
     end)
 
     -- Click
+    -- Catatan: toggle buka/tutup di sini TIDAK menyentuh app yang sedang aktif.
+    -- Saat closePhone() dipanggil, phone hanya di-hide (phone.Visible = false),
+    -- app yang sedang terbuka (mis. MyClone) tetap ada sebagai child dan tetap
+    -- Visible = true. Ketika openPhone() dipanggil lagi, Phone.lua akan mengecek
+    -- _G.PhoneState.currentScreen — kalau bukan "home", dia TIDAK memanggil
+    -- goHome(), sehingga app yang sama langsung kelihatan lagi tanpa reset.
     btn.MouseButton1Click:Connect(function()
         if clickMoved then return end
         

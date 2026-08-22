@@ -596,70 +596,60 @@ end
 -- ================================================
 -- HTTP & AI CHAT
 -- ================================================
+-- Prioritas metode HTTP disamakan dengan AlfreadAI.lua (yang sudah terbukti jalan):
+-- syn.request -> http_request -> request -> RequestAsync (fallback terakhir).
+-- PENTING: kalau salah satu metode berhasil TERHUBUNG ke server (dapat response,
+-- walau isinya error JSON dari Groq seperti model_not_found), itu dianggap
+-- "berhasil transport"-nya, dan body-nya langsung dikembalikan apa adanya supaya
+-- SendGroqMessage yang menentukan apakah errornya soal model atau bukan.
+-- Kita TIDAK berhenti lebih awal berdasarkan status code di sini, supaya loop
+-- multi-model di SendGroqMessage selalu lanjut mencoba model berikutnya.
 local function performHttpPost(url, headers, body)
     local attempts = {}
-
-    if HttpService then
-        local success, response = pcall(function()
-            return HttpService:RequestAsync({
-                Url = url,
-                Method = "POST",
-                Headers = headers,
-                Body = body,
-            })
-        end)
-        if success and response then
-            if response.Success and response.StatusCode >= 200 and response.StatusCode < 300 then
-                return response.Body, nil
-            else
-                table.insert(attempts, "RequestAsync: HTTP " .. tostring(response.StatusCode) .. " - " .. tostring(response.Body))
-                if response.StatusCode == 400 or response.StatusCode == 401 or response.StatusCode == 404 then
-                    -- Real server response, no need to try other executor methods
-                    return nil, attempts[#attempts]
-                end
-            end
-        elseif not success then
-            table.insert(attempts, "RequestAsync error: " .. tostring(response))
-        end
-    end
+    local opts = {Url = url, Method = "POST", Headers = headers, Body = body}
 
     if syn and syn.request then
-        local success, response = pcall(function()
-            return syn.request({Url = url, Method = "POST", Headers = headers, Body = body})
-        end)
-        if success and response then
-            if response.Body and (response.StatusCode == nil or (response.StatusCode >= 200 and response.StatusCode < 300)) then
-                return response.Body, nil
-            end
-            table.insert(attempts, "syn.request: HTTP " .. tostring(response.StatusCode))
-        else
-            table.insert(attempts, "syn.request error: " .. tostring(response))
+        local success, response = pcall(function() return syn.request(opts) end)
+        if success and response and response.Body then
+            return response.Body, nil
         end
+        table.insert(attempts, "syn.request: " .. tostring(success and (response and response.StatusCode) or response))
     end
 
     if http_request then
-        local success, response = pcall(function()
-            return http_request({Url = url, Method = "POST", Headers = headers, Body = body})
-        end)
-        if success and response and response.Body then return response.Body, nil end
-        table.insert(attempts, "http_request error/empty")
+        local success, response = pcall(function() return http_request(opts) end)
+        if success and response and response.Body then
+            return response.Body, nil
+        end
+        table.insert(attempts, "http_request: " .. tostring(success and (response and response.StatusCode) or response))
     end
 
     if request then
-        local success, response = pcall(function()
-            return request({Url = url, Method = "POST", Headers = headers, Body = body})
-        end)
-        if success and response and response.Body then return response.Body, nil end
-        table.insert(attempts, "request() error/empty")
+        local success, response = pcall(function() return request(opts) end)
+        if success and response and response.Body then
+            return response.Body, nil
+        end
+        table.insert(attempts, "request(): " .. tostring(success and (response and response.StatusCode) or response))
+    end
+
+    if HttpService then
+        local success, response = pcall(function() return HttpService:RequestAsync(opts) end)
+        if success and response and response.Body then
+            -- RequestAsync tetap punya Body walau StatusCode error (mis. 404) -
+            -- itu tetap dikembalikan supaya SendGroqMessage bisa baca pesan
+            -- error asli dari Groq dan lanjut ke model berikutnya kalau perlu.
+            return response.Body, nil
+        end
+        table.insert(attempts, "RequestAsync: " .. tostring(success and (response and response.StatusCode) or response))
     end
 
     if #attempts == 0 then
-        return nil, "Executor tidak mendukung HTTP request (RequestAsync/syn.request/http_request/request semua tidak tersedia atau diblok)."
+        return nil, "Executor tidak mendukung HTTP request (syn.request/http_request/request/RequestAsync semua tidak tersedia)."
     end
     return nil, table.concat(attempts, " | ")
 end
 
-local function SendGroqMessage(prompt, systemPrompt)
+local function SendGroqMessage(prompt, systemPrompt, onProgress)
     if not State.GroqApiKey or State.GroqApiKey == "" then
         return nil, "API key belum diisi. Buka tab Config, masukkan Groq API Key dulu."
     end
@@ -670,7 +660,10 @@ local function SendGroqMessage(prompt, systemPrompt)
     }
     local errors = {}
 
-    for _, model in ipairs(GROQ_MODELS) do
+    for i, model in ipairs(GROQ_MODELS) do
+        if onProgress then
+            pcall(onProgress, "Mencoba model " .. i .. "/" .. #GROQ_MODELS .. " (" .. model .. ")...")
+        end
         local body = HttpService:JSONEncode({
             model = model,
             messages = {
@@ -741,7 +734,10 @@ local function DoAIChatOnce()
 
     State.AIChatStatus = "Meminta balasan AI..."
     local prompt = "Buat percakapan singkat dua orang dalam bahasa gaul Indonesia. Format WAJIB persis:\nA: [pesan]\nB: [pesan]\nMaksimal 6 kata per pesan, santai, natural, jangan pakai tanda kutip."
-    local response, err = SendGroqMessage(prompt, "Kamu adalah AI yang membuat percakapan gaul Indonesia singkat. Selalu balas dua baris, baris pertama diawali 'A:' dan baris kedua diawali 'B:'. Jangan tambahkan penjelasan lain.")
+    local response, err = SendGroqMessage(prompt, "Kamu adalah AI yang membuat percakapan gaul Indonesia singkat. Selalu balas dua baris, baris pertama diawali 'A:' dan baris kedua diawali 'B:'. Jangan tambahkan penjelasan lain.", function(progressText)
+        State.AIChatStatus = progressText
+        pcall(rebuildAIChatTab)
+    end)
 
     if not response then
         State.AIChatStatus = "Gagal"
