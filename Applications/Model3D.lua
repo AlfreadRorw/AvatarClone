@@ -1528,3 +1528,6 @@ task.spawn(function()
 end)
 
 print("[Model3D] Loaded! Developer mode:", isDeveloper)
+
+-- [FIX] Mengembalikan fungsi agar tidak error 'nil' saat dipanggil oleh fungsi openApp di LocalScript utama 
+return _G.openModel3DApp
