@@ -369,66 +369,6 @@ function Firebase.RenameSavedAvatar(devUserId, avatarId, newName)
     return Firebase.PatchData("saved_avatars/" .. tostring(devUserId) .. "/" .. avatarId, {name = newName})
 end
 
--- =======================================================
--- MODEL 3D SPECIFIC FIREBASE ENDPOINTS
--- =======================================================
-
--- Simpan Config Model3D milik Developer (Terlihat oleh SEMUA Player)
-function Firebase.SaveDevModel3DConfig(configName, data, callback)
-    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
-    local path = "model3d_configs/" .. tostring(devUserId) .. "/" .. configName
-    Firebase.SetData(path, data, function(success, res)
-        if callback then callback(success, res) end
-    end)
-end
-
--- Ambil SEMUA Config Model3D milik Developer
-function Firebase.GetDevModel3DConfigs(callback)
-    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
-    local path = "model3d_configs/" .. tostring(devUserId)
-    Firebase.GetData(path, function(success, data)
-        if success and type(data) == "table" then
-            if callback then callback(true, data) end
-        else
-            if callback then callback(false, {}) end
-        end
-    end)
-end
-
--- Simpan Config Model3D milik Player (Privat)
-function Firebase.SavePlayerModel3DConfig(configName, data, callback)
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer then return end
-    local path = "model3d_configs_player/" .. tostring(localPlayer.UserId) .. "/" .. configName
-    Firebase.SetData(path, data, function(success, res)
-        if callback then callback(success, res) end
-    end)
-end
-
--- Ambil Config Model3D milik Player Tertentu (bisa milik sendiri atau dipanggil Developer via UserId)
-function Firebase.GetPlayerModel3DConfigs(targetUserId, callback)
-    local path = "model3d_configs_player/" .. tostring(targetUserId)
-    Firebase.GetData(path, function(success, data)
-        if success and type(data) == "table" then
-            if callback then callback(true, data) end
-        else
-            if callback then callback(false, {}) end
-        end
-    end)
-end
-
--- Hapus Config Model3D
-function Firebase.DeleteModel3DConfig(configName, isDevConfig, callback)
-    local localPlayer = Players.LocalPlayer
-    if not localPlayer then return end
-    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
-    local path = isDevConfig and ("model3d_configs/" .. tostring(devUserId) .. "/" .. configName)
-                            or ("model3d_configs_player/" .. tostring(localPlayer.UserId) .. "/" .. configName)
-    Firebase.SetData(path, nil, function(success, res)
-        if callback then callback(success, res) end
-    end)
-end
-
 -- ==================== GATE AKSES PREMIUM.LUA ====================
 function Firebase.IsPermanentUser(userId)
     local uid = tostring(userId)
@@ -456,6 +396,66 @@ function Firebase.IsPermanentUser(userId)
     end
 
     return result
+end
+
+-- ==================== MODEL3D CONFIGS ====================
+-- Struktur data di Firebase:
+--   model3d_dev/{devUserId}/{configId}        -> config milik DEVELOPER.
+--       Bisa dibaca oleh SEMUA pengguna script (siapapun boleh GET),
+--       tapi HANYA developer sendiri yang boleh PUSH/DELETE (dicek di
+--       Model3D.lua lewat Config.DEVELOPER_USER_ID sebelum manggil fungsi ini).
+--   model3d_player/{ownerUserId}/{configId}   -> config milik PLAYER biasa.
+--       Hanya kelihatan oleh: (1) pemilik config itu sendiri, dan
+--       (2) developer (yang boleh browse config semua player).
+--       Player lain yang BUKAN pemilik dan BUKAN dev tidak akan
+--       memanggil path milik orang lain sama sekali dari sisi UI,
+--       jadi tidak pernah kelihatan confignya (client tidak expose
+--       userId orang lain untuk di-browse kecuali oleh dev).
+--
+-- configData = {
+--   name        = "Nama Config",
+--   ownerUserId = <userId pembuat>,
+--   ownerName   = "DisplayName",
+--   createdAt   = os.time(),
+--   items       = { { kind="model", assetId=123, cframe={...}, size={...} },
+--                   { kind="image", url="https://files.catbox.moe/xxxx.png", cframe={...}, size={...} }, ... }
+-- }
+
+function Firebase.SaveDevModel3D(devUserId, configId, configData)
+    if not configId or configId == "" then
+        return Firebase.PushData("model3d_dev/" .. tostring(devUserId), configData)
+    end
+    return Firebase.SetData("model3d_dev/" .. tostring(devUserId) .. "/" .. configId, configData) and configId or nil
+end
+
+function Firebase.GetDevModel3DList(devUserId)
+    return Firebase.GetData("model3d_dev/" .. tostring(devUserId))
+end
+
+function Firebase.DeleteDevModel3D(devUserId, configId)
+    return Firebase.DeleteData("model3d_dev/" .. tostring(devUserId) .. "/" .. configId)
+end
+
+function Firebase.SavePlayerModel3D(ownerUserId, configId, configData)
+    if not configId or configId == "" then
+        return Firebase.PushData("model3d_player/" .. tostring(ownerUserId), configData)
+    end
+    return Firebase.SetData("model3d_player/" .. tostring(ownerUserId) .. "/" .. configId, configData) and configId or nil
+end
+
+function Firebase.GetPlayerModel3DList(ownerUserId)
+    return Firebase.GetData("model3d_player/" .. tostring(ownerUserId))
+end
+
+function Firebase.DeletePlayerModel3D(ownerUserId, configId)
+    return Firebase.DeleteData("model3d_player/" .. tostring(ownerUserId) .. "/" .. configId)
+end
+
+-- Dipakai developer untuk lihat daftar SEMUA player yang pernah menyimpan
+-- minimal 1 config, supaya dev bisa browse/pilih lalu load config milik
+-- player manapun. Mengembalikan tabel {[userIdString] = {configId=data,...}, ...}
+function Firebase.GetAllPlayerModel3D()
+    return Firebase.GetData("model3d_player")
 end
 
 return Firebase

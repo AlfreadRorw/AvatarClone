@@ -1,257 +1,141 @@
 -- ================================================
--- Model3D.lua — 3D Model & Image Viewer with Gizmo + Firebase Sync
--- ================================================
--- Fitur:
---   1. Load 3D Model dari Asset ID (InsertService:LoadAsset)
---   2. Load Gambar dari URL (Catbox, dll) ke Part dengan SurfaceGui
---   3. Gizmo Posisi (Handles Movement), Rotasi (ArcHandles), Ukuran (Handles Resize)
---   4. Save/Load Config lokal (nama bebas)
---   5. Firebase: Dev config → terlihat SEMUA player
---   6. Firebase: Player config → hanya pemilik (dev bisa load punya player lain)
---   7. Semua player bisa load Model3D yang dipasang dev
+-- MODEL3D APP — Spawn Model 3D (Asset ID) & Gambar (Catbox)
+-- Gizmo: Posisi, Rotasi, Ukuran
+-- Config: Save/Load lokal (per player) + sinkron Firebase (dev <-> semua player)
 -- ================================================
 
-local Services = _G.Services or {
-    Players = game:GetService("Players"),
-    Workspace = game:GetService("Workspace"),
-    TweenService = game:GetService("TweenService"),
-    UserInputService = game:GetService("UserInputService"),
-    HttpService = game:GetService("HttpService"),
-    RunService = game:GetService("RunService"),
-    CoreGui = game:GetService("CoreGui"),
-    InsertService = game:GetService("InsertService"),
-    TeleportService = game:GetService("TeleportService"),
-}
-local Players = Services.Players
-local Workspace = Services.Workspace
-local TweenService = Services.TweenService
+local Services         = _G.Services
+local LocalPlayer      = _G.LocalPlayer
+local T                = _G.T or {}
+local Helpers          = _G.Helpers or {}
+local Config           = _G.Config or {}
+local Storage          = _G.Storage
+local Firebase         = _G.Firebase
+local appContent       = _G.appContent
+
+local Players          = Services.Players
+local Workspace        = Services.Workspace
+local HttpService       = Services.HttpService
+local RunService       = Services.RunService
 local UserInputService = Services.UserInputService
-local HttpService = Services.HttpService
-local RunService = Services.RunService
-local CoreGui = Services.CoreGui
-local InsertService = Services.InsertService
-local LocalPlayer = Players.LocalPlayer
+local InsertService    = game:GetService("InsertService")
+local CoreGui          = game:GetService("CoreGui")
 
-local T = _G.T or {}
-local Helpers = _G.Helpers or {}
-local Storage = _G.Storage or {}
-local Firebase = _G.Firebase or {}
-local Config = _G.Config or {}
-local appContent = _G.appContent
+local corner   = Helpers.corner
+local stroke   = Helpers.stroke
+local tween    = Helpers.tween
+local pressFX  = Helpers.pressFX
 
--- ==================== LOCAL HELPERS (fallback) ====================
-local corner = Helpers.corner or function(parent, radius)
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, radius or 8)
-    c.Parent = parent
-end
+local DEV_USER_ID = Config.DEVELOPER_USER_ID
 
-local stroke = Helpers.stroke or function(parent, color, thickness, transparency)
-    local s = Instance.new("UIStroke")
-    s.Color = color or Color3.fromRGB(60, 60, 80)
-    s.Thickness = thickness or 1
-    s.Transparency = transparency or 0
-    s.Parent = parent
-end
-
-local pressFX = Helpers.pressFX or function(btn)
-    local orig = btn.Size
-    btn.MouseButton1Down:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.08), {Size = UDim2.new(orig.X.Scale, orig.X.Offset - 2, orig.Y.Scale, orig.Y.Offset - 2)}):Play()
-    end)
-    btn.MouseButton1Up:Connect(function()
-        TweenService:Create(btn, TweenInfo.new(0.08), {Size = UDim2.new(orig.X.Scale, orig.X.Offset, orig.Y.Scale, orig.Y.Offset)}):Play()
-    end)
-end
-
-local function splitPath(path, sep)
-    sep = sep or "."
-    local parts = {}
-    for part in string.gmatch(path or "", "([^" .. sep .. "]+)") do
-        table.insert(parts, part)
-    end
-    return parts
-end
-
-local function notify(text, color)
-    if _G.showDynamicNotification then
-        _G.showDynamicNotification(text, color)
-    end
-end
-
-local DEVELOPER_USER_ID = Config.DEVELOPER_USER_ID or 10164114772
-local isDeveloper = (LocalPlayer.UserId == DEVELOPER_USER_ID)
-
--- ==================== PALETTE ====================
+-- ==================== DARK THEME (konsisten dengan app lain) ====================
 local C = {
-    bg          = Color3.fromRGB(10, 10, 16),
-    card        = Color3.fromRGB(18, 18, 26),
-    card2       = Color3.fromRGB(24, 24, 34),
-    card3       = Color3.fromRGB(32, 32, 44),
-    border      = Color3.fromRGB(48, 48, 62),
-    accent      = Color3.fromRGB(100, 180, 255),
-    accent2     = Color3.fromRGB(150, 120, 255),
-    green       = Color3.fromRGB(80, 220, 140),
-    red         = Color3.fromRGB(255, 90, 100),
-    gold        = Color3.fromRGB(255, 195, 80),
-    text        = Color3.fromRGB(240, 240, 250),
-    text2       = Color3.fromRGB(160, 160, 178),
-    text3       = Color3.fromRGB(95, 95, 112),
-    dev         = Color3.fromRGB(255, 160, 60),
+    bg      = Color3.fromRGB(12, 12, 18),
+    card    = Color3.fromRGB(22, 22, 30),
+    card2   = Color3.fromRGB(28, 28, 38),
+    border  = Color3.fromRGB(46, 46, 60),
+    text    = Color3.fromRGB(240, 240, 250),
+    text2   = Color3.fromRGB(160, 160, 178),
+    text3   = Color3.fromRGB(95, 95, 112),
+    accent  = Color3.fromRGB(130, 120, 255),
+    accent2 = Color3.fromRGB(80, 200, 255),
+    green   = Color3.fromRGB(90, 230, 160),
+    red     = Color3.fromRGB(255, 95, 100),
+    gold    = Color3.fromRGB(255, 195, 80),
 }
 
--- ==================== STATE ====================
+-- ==================== FOLDER WORKSPACE ====================
+local FOLDER_NAME = "Model3D_Objects"
+
+local function getFolder()
+    local folder = Workspace:FindFirstChild(FOLDER_NAME)
+    if not folder then
+        folder = Instance.new("Folder")
+        folder.Name = FOLDER_NAME
+        folder.Parent = Workspace
+    end
+    return folder
+end
+
+-- ==================== STATE PERSISTEN (survive reopen app) ====================
 _G.Model3DState = _G.Model3DState or {
-    selectedObject = nil,          -- Model atau Part yang dipilih
-    objects = {},                  -- {[instance] = {type="model"|"image", name, assetId, url, cframe, size, configRef}}
-    gizmoMode = "position",        -- "position" | "rotation" | "resize"
-    currentTab = "Models",         -- "Models" | "Images" | "Config"
-    selectedConfigName = nil,
-    objectCounter = 0,
-    syncEnabled = false,
+    SelectedObject = nil,   -- instance yang sedang dipilih di map
+    PositionMode   = false,
+    RotationMode   = false,
+    ScaleMode      = false,
+    ConfigFilter   = "Milikku", -- "Milikku" | "Developer" | "Player Lain" (khusus dev)
+    BrowsePlayerUserId = nil,   -- dipakai dev untuk browse config player tertentu
 }
-
 local State = _G.Model3DState
-local Gizmos = _G.Model3DGizmos or {}
-_G.Model3DGizmos = Gizmos
 
--- ==================== GIZMO HELPER ====================
-local function setupGizmo(handles, mode)
-    if not handles then return end
-    handles.Adornee = nil
-    handles.Enabled = false
+_G.Model3DGizmos = _G.Model3DGizmos or {}
+local Gizmos = _G.Model3DGizmos
 
-    if not State.selectedObject then return end
+local isDeveloper = (DEV_USER_ID and tostring(LocalPlayer.UserId) == tostring(DEV_USER_ID))
 
-    local primary = State.selectedObject:FindFirstChild("PrimaryPart") or State.selectedObject:FindFirstChildOfClass("BasePart")
-    if not primary then return end
+-- ==================== STORAGE LOKAL ====================
+local LOCAL_FILE = "PhoneIDViewer_Model3DConfigs.json"
+local function loadLocalConfigs()
+    local data = {}
+    pcall(function()
+        if isfile and isfile(LOCAL_FILE) then
+            data = HttpService:JSONDecode(readfile(LOCAL_FILE))
+        end
+    end)
+    return type(data) == "table" and data or {}
+end
+local function saveLocalConfigs(data)
+    pcall(function()
+        if writefile then writefile(LOCAL_FILE, HttpService:JSONEncode(data)) end
+    end)
+end
+local LocalConfigs = loadLocalConfigs() -- {[configName] = configData}
 
-    handles.Adornee = primary
-    handles.Enabled = true
-
-    if mode == "position" then
-        handles.Style = Enum.HandlesStyle.Movement
-        handles.Color3 = C.accent
-    elseif mode == "rotation" then
-        handles.Style = Enum.HandlesStyle.Rotation
-        handles.Color3 = C.accent2
-    elseif mode == "resize" then
-        handles.Style = Enum.HandlesStyle.Resize
-        handles.Color3 = C.gold
-    end
+-- ==================== HELPER: CFrame <-> Table ====================
+local function cframeToTable(cf)
+    local components = {cf:GetComponents()}
+    return components
+end
+local function tableToCFrame(t)
+    if not t or #t < 12 then return CFrame.new() end
+    return CFrame.new(unpack(t))
 end
 
--- ==================== CREATE GIZMO ====================
-local function createGizmo()
-    if Gizmos.Handles then
-        pcall(function() Gizmos.Handles:Destroy() end)
-    end
+-- ==================== SPAWN OBJECT: MODEL 3D DARI ASSET ID ====================
+local function spawnModel3D(assetId, atCFrame)
+    local id = tonumber(assetId)
+    if not id then return nil, "Asset ID tidak valid" end
 
-    local handles = Instance.new("Handles")
-    handles.Name = "Model3DGizmo"
-    handles.Parent = CoreGui
-    handles.Enabled = false
-    handles.Color3 = C.accent
-    handles.Style = Enum.HandlesStyle.Movement
-    handles.Adornee = nil
-
-    -- Drag handler
-    handles.MouseButton1Down:Connect(function()
-        if not State.selectedObject then return end
-        local primary = State.selectedObject:FindFirstChild("PrimaryPart") or State.selectedObject:FindFirstChildOfClass("BasePart")
-        if primary then
-            primary:SetAttribute("_GizmoDragStart", primary.CFrame)
-        end
+    local ok, result = pcall(function()
+        return InsertService:LoadAsset(id)
     end)
+    if not ok or not result then
+        return nil, "Gagal load asset. Pastikan Asset ID benar & berupa Model/Mesh."
+    end
 
-    handles.MouseDrag:Connect(function(face, distance)
-        if not State.selectedObject then return end
-        local primary = State.selectedObject:FindFirstChild("PrimaryPart") or State.selectedObject:FindFirstChildOfClass("BasePart")
-        if not primary then return end
-
-        local start = primary:GetAttribute("_GizmoDragStart")
-        if not start then return end
-
-        local delta = Vector3.FromNormalId(face) * distance
-        local newCF = start * CFrame.new(delta)
-
-        if State.gizmoMode == "position" then
-            State.selectedObject:PivotTo(CFrame.new(newCF.Position) * (primary.CFrame - primary.CFrame.Position))
-        elseif State.gizmoMode == "rotation" then
-            -- Rotation handles already update CFrame directly
-        elseif State.gizmoMode == "resize" then
-            -- Resize handles update size directly
+    local model = result:FindFirstChildOfClass("Model") or result:FindFirstChildOfClass("MeshPart") or result:FindFirstChildOfClass("Part")
+    if not model then
+        -- Kadang assetnya langsung berupa banyak part tanpa Model wrapper,
+        -- jadi kita bungkus semua children jadi 1 Model.
+        local wrapper = Instance.new("Model")
+        wrapper.Name = "Model3D_" .. tostring(id)
+        for _, child in ipairs(result:GetChildren()) do
+            child.Parent = wrapper
         end
+        model = wrapper
+    end
+    result:Destroy()
 
-        -- Update stored CFrame
-        local objData = State.objects[State.selectedObject]
-        if objData then
-            objData.cframe = primary.CFrame
-        end
-    end)
+    model.Name = "Model3D_" .. tostring(id)
+    model:SetAttribute("Model3D_Kind", "model")
+    model:SetAttribute("Model3D_AssetId", id)
 
-    handles.MouseButton1Up:Connect(function()
-        if State.selectedObject then
-            local primary = State.selectedObject:FindFirstChild("PrimaryPart") or State.selectedObject:FindFirstChildOfClass("BasePart")
-            if primary then
-                primary:SetAttribute("_GizmoDragStart", nil)
-            end
-        end
-    end)
-
-    Gizmos.Handles = handles
-    return handles
-end
-
--- ==================== LOAD 3D MODEL ====================
-local function loadModelFromAssetId(assetId, name)
-    if not assetId or assetId == "" then
-        notify("Masukkan Asset ID terlebih dahulu!", C.red)
-        return nil
+    -- Pastikan ada PrimaryPart supaya bisa di-PivotTo
+    if model:IsA("Model") and not model.PrimaryPart then
+        local firstPart = model:FindFirstChildWhichIsA("BasePart", true)
+        if firstPart then model.PrimaryPart = firstPart end
     end
 
-    local idNum = tonumber(assetId)
-    if not idNum or idNum <= 0 then
-        notify("Asset ID tidak valid!", C.red)
-        return nil
-    end
-
-    local success, model = pcall(function()
-        return InsertService:LoadAsset(idNum)
-    end)
-
-    if not success or not model then
-        notify("Gagal load model! ID tidak valid atau tidak memiliki akses.", C.red)
-        return nil
-    end
-
-    -- Bersihkan script
-    for _, obj in ipairs(model:GetDescendants()) do
-        if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
-            obj:Destroy()
-        end
-    end
-
-    -- Cari PrimaryPart
-    local primary = model:FindFirstChild("PrimaryPart") or model:FindFirstChildOfClass("BasePart")
-    if primary then
-        model.PrimaryPart = primary
-    end
-
-    -- Posisikan di depan player
-    local char = LocalPlayer.Character
-    local spawnCF = CFrame.new(0, 3, -10)
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local root = char.HumanoidRootPart
-        spawnCF = root.CFrame * CFrame.new(0, 0, -8)
-        spawnCF = CFrame.new(spawnCF.Position + Vector3.new(0, 2, 0))
-    end
-    model:PivotTo(spawnCF)
-
-    model.Name = name or ("Model3D_" .. tostring(State.objectCounter + 1))
-    model.Parent = Workspace
-
-    -- Anchor semua part
     for _, part in ipairs(model:GetDescendants()) do
         if part:IsA("BasePart") then
             part.Anchored = true
@@ -259,1275 +143,1378 @@ local function loadModelFromAssetId(assetId, name)
         end
     end
 
-    State.objectCounter = State.objectCounter + 1
-    State.objects[model] = {
-        type = "model",
-        name = model.Name,
-        assetId = tostring(assetId),
-        cframe = spawnCF,
-        size = nil, -- will be computed if needed
-    }
+    model.Parent = getFolder()
+    local baseCFrame = atCFrame or CFrame.new()
+    pcall(function() model:PivotTo(baseCFrame) end)
 
-    State.selectedObject = model
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
-
-    notify("✅ Model " .. model.Name .. " berhasil dimuat!", C.green)
-    return model
+    return model, nil
 end
 
--- ==================== LOAD IMAGE ====================
-local function loadImageFromUrl(url, name)
-    if not url or url == "" then
-        notify("Masukkan URL gambar terlebih dahulu!", C.red)
-        return nil
-    end
+-- ==================== SPAWN OBJECT: GAMBAR DARI LINK CATBOX ====================
+local function spawnImage(imageUrl, atCFrame)
+    if not imageUrl or imageUrl == "" then return nil, "Link gambar kosong" end
 
-    -- Buat Part sebagai media gambar
     local part = Instance.new("Part")
-    part.Name = name or ("Image_" .. tostring(State.objectCounter + 1))
-    part.Size = Vector3.new(8, 8, 1)
-    part.Material = Enum.Material.SmoothPlastic
+    part.Name = "Model3D_Image"
+    part.Size = Vector3.new(4, 4, 0.2)
     part.Anchored = true
     part.CanCollide = false
-    part.Color = Color3.new(1, 1, 1)
-    part.Reflectance = 0
+    part.Transparency = 1
+    part:SetAttribute("Model3D_Kind", "image")
+    part:SetAttribute("Model3D_ImageUrl", imageUrl)
 
-    -- Posisi di depan player
-    local char = LocalPlayer.Character
-    local spawnCF = CFrame.new(0, 3, -10)
-    if char and char:FindFirstChild("HumanoidRootPart") then
-        local root = char.HumanoidRootPart
-        spawnCF = root.CFrame * CFrame.new(0, 1.5, -8)
-        spawnCF = CFrame.new(spawnCF.Position + Vector3.new(0, 2, 0))
-    end
-    part.CFrame = spawnCF
-    part.Parent = Workspace
-
-    -- SurfaceGui untuk gambar
     local gui = Instance.new("SurfaceGui")
+    gui.Name = "ImageSurface"
     gui.Face = Enum.NormalId.Front
+    gui.LightInfluence = 0
+    gui.AlwaysOnTop = false
+    gui.PixelsPerStud = 50
     gui.Parent = part
 
-    local imageLabel = Instance.new("ImageLabel")
-    imageLabel.Size = UDim2.new(1, 0, 1, 0)
-    imageLabel.BackgroundTransparency = 1
-    imageLabel.Image = url
-    imageLabel.ScaleType = Enum.ScaleType.Fit
-    imageLabel.Parent = gui
+    local img = Instance.new("ImageLabel")
+    img.Name = "Img"
+    img.Size = UDim2.new(1, 0, 1, 0)
+    img.BackgroundTransparency = 1
+    img.Image = imageUrl
+    img.ScaleType = Enum.ScaleType.Fit
+    img.Parent = gui
 
-    -- Coba load thumbnail sebagai fallback
-    task.spawn(function()
-        local ok, result = pcall(function()
-            return HttpService:GetAsync(url)
-        end)
-        if not ok then
-            -- URL mungkin gambar langsung, tetap pakai ImageLabel
+    -- Bungkus jadi Model supaya konsisten dengan objek model (PivotTo, dsb)
+    local model = Instance.new("Model")
+    model.Name = "Model3D_Image"
+    model:SetAttribute("Model3D_Kind", "image")
+    model:SetAttribute("Model3D_ImageUrl", imageUrl)
+    part.Parent = model
+    model.PrimaryPart = part
+
+    model.Parent = getFolder()
+    local baseCFrame = atCFrame or CFrame.new()
+    pcall(function() model:PivotTo(baseCFrame) end)
+
+    return model, nil
+end
+
+-- ==================== HAPUS OBJECT ====================
+local function deleteObject(obj)
+    if not obj then return end
+    if State.SelectedObject == obj then
+        State.SelectedObject = nil
+        State.PositionMode = false
+        State.RotationMode = false
+        State.ScaleMode = false
+    end
+    pcall(function() obj:Destroy() end)
+end
+
+-- ==================== SCALE HELPER ====================
+-- Menyimpan skala relatif per-object lewat attribute, supaya bisa dihitung
+-- ulang tanpa distorsi berulang saat resize dipanggil banyak kali.
+local function getObjectOriginalSize(obj)
+    local stored = obj:GetAttribute("Model3D_OriginalSize")
+    if stored then return stored end
+    -- Hitung bounding box awal sekali saja lalu simpan.
+    local ok, size = pcall(function()
+        local _, sizeVec = obj:GetBoundingBox()
+        return sizeVec
+    end)
+    if ok and size then
+        obj:SetAttribute("Model3D_OriginalSize", size)
+        return size
+    end
+    return Vector3.new(4, 4, 4)
+end
+
+local function applyScale(obj, scaleFactor)
+    if not obj or not obj:IsA("Model") then return end
+    scaleFactor = math.clamp(scaleFactor, 0.05, 50)
+    local ok = pcall(function()
+        obj:ScaleTo(scaleFactor)
+    end)
+    if ok then
+        obj:SetAttribute("Model3D_Scale", scaleFactor)
+    end
+end
+
+local function getObjectScale(obj)
+    return obj:GetAttribute("Model3D_Scale") or 1
+end
+
+-- ==================== GIZMO SYSTEM ====================
+local GizmoDragging = false
+local CameraRestoreType, CameraRestoreSubject = nil, nil
+
+local function lockCameraForDrag()
+    local camera = Workspace.CurrentCamera
+    if camera then
+        CameraRestoreType = camera.CameraType
+        CameraRestoreSubject = camera.CameraSubject
+        camera.CameraType = Enum.CameraType.Scriptable
+    end
+    pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition end)
+end
+
+local function restoreCameraAfterDrag()
+    local camera = Workspace.CurrentCamera
+    if camera and CameraRestoreType then
+        camera.CameraType = CameraRestoreType
+        if CameraRestoreSubject and CameraRestoreSubject.Parent then
+            camera.CameraSubject = CameraRestoreSubject
+        end
+    end
+    pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
+end
+
+local function setGizmoVisibility()
+    if Gizmos.Position then Gizmos.Position.Adornee = State.PositionMode and State.SelectedObject or nil end
+    if Gizmos.Rotation then Gizmos.Rotation.Adornee = State.RotationMode and State.SelectedObject or nil end
+    if Gizmos.Scale then Gizmos.Scale.Adornee = State.ScaleMode and State.SelectedObject or nil end
+end
+
+local function initGizmos()
+    pcall(function()
+        if not Gizmos.Position or not Gizmos.Position.Parent then
+            Gizmos.Position = Instance.new("Handles")
+            Gizmos.Position.Style = Enum.HandlesStyle.Movement
+            Gizmos.Position.Color3 = C.red
+            Gizmos.Position.Parent = CoreGui
+        end
+        if not Gizmos.Rotation or not Gizmos.Rotation.Parent then
+            Gizmos.Rotation = Instance.new("ArcHandles")
+            Gizmos.Rotation.Color3 = C.accent
+            Gizmos.Rotation.Parent = CoreGui
+        end
+        if not Gizmos.Scale or not Gizmos.Scale.Parent then
+            Gizmos.Scale = Instance.new("Handles")
+            Gizmos.Scale.Style = Enum.HandlesStyle.Resize
+            Gizmos.Scale.Color3 = C.gold
+            Gizmos.Scale.Parent = CoreGui
         end
     end)
 
-    State.objectCounter = State.objectCounter + 1
-    State.objects[part] = {
-        type = "image",
-        name = part.Name,
-        url = url,
-        cframe = spawnCF,
-        size = part.Size,
-    }
+    setGizmoVisibility()
 
-    State.selectedObject = part
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
+    if Gizmos.Position and not Gizmos.Position:GetAttribute("Model3DConnected") then
+        Gizmos.Position:SetAttribute("Model3DConnected", true)
+        local dragStartCFrame = nil
+        Gizmos.Position.MouseButton1Down:Connect(function()
+            if not State.SelectedObject or not State.PositionMode then return end
+            dragStartCFrame = State.SelectedObject:GetPivot()
+            GizmoDragging = true
+            lockCameraForDrag()
+        end)
+        Gizmos.Position.MouseDrag:Connect(function(face, distance)
+            if not State.SelectedObject or not dragStartCFrame then return end
+            local delta = Vector3.FromNormalId(face) * distance
+            State.SelectedObject:PivotTo(dragStartCFrame * CFrame.new(delta))
+        end)
+        Gizmos.Position.MouseButton1Up:Connect(function()
+            dragStartCFrame = nil
+            GizmoDragging = false
+            restoreCameraAfterDrag()
+        end)
+    end
 
-    notify("✅ Gambar " .. part.Name .. " berhasil dimuat!", C.green)
-    return part
+    if Gizmos.Rotation and not Gizmos.Rotation:GetAttribute("Model3DConnected") then
+        Gizmos.Rotation:SetAttribute("Model3DConnected", true)
+        local rotStartCFrame = nil
+        Gizmos.Rotation.MouseButton1Down:Connect(function()
+            if not State.SelectedObject or not State.RotationMode then return end
+            rotStartCFrame = State.SelectedObject:GetPivot()
+            GizmoDragging = true
+            lockCameraForDrag()
+        end)
+        Gizmos.Rotation.MouseDrag:Connect(function(axis, relativeAngle)
+            if not State.SelectedObject or not rotStartCFrame then return end
+            local axisVector = Vector3.FromAxis(axis)
+            State.SelectedObject:PivotTo(rotStartCFrame * CFrame.fromAxisAngle(axisVector, relativeAngle))
+        end)
+        Gizmos.Rotation.MouseButton1Up:Connect(function()
+            rotStartCFrame = nil
+            GizmoDragging = false
+            restoreCameraAfterDrag()
+        end)
+    end
+
+    if Gizmos.Scale and not Gizmos.Scale:GetAttribute("Model3DConnected") then
+        Gizmos.Scale:SetAttribute("Model3DConnected", true)
+        local scaleStartValue = nil
+        Gizmos.Scale.MouseButton1Down:Connect(function()
+            if not State.SelectedObject or not State.ScaleMode then return end
+            scaleStartValue = getObjectScale(State.SelectedObject)
+            GizmoDragging = true
+            lockCameraForDrag()
+        end)
+        Gizmos.Scale.MouseDrag:Connect(function(face, distance)
+            if not State.SelectedObject or not scaleStartValue then return end
+            -- distance dari Handles Resize dalam studs; ubah jadi faktor skala halus.
+            local newScale = scaleStartValue + (distance * 0.15)
+            applyScale(State.SelectedObject, newScale)
+        end)
+        Gizmos.Scale.MouseButton1Up:Connect(function()
+            scaleStartValue = nil
+            GizmoDragging = false
+            restoreCameraAfterDrag()
+        end)
+    end
 end
 
--- ==================== DELETE OBJECT ====================
-local function deleteSelectedObject()
-    if not State.selectedObject then
-        notify("Tidak ada objek yang dipilih!", C.text3)
+-- ==================== CONFIG BUILD/APPLY ====================
+-- Membuat snapshot config dari SEMUA object yang sedang ada di folder Model3D.
+local function buildConfigFromWorkspace(name)
+    local folder = getFolder()
+    local items = {}
+    for _, obj in ipairs(folder:GetChildren()) do
+        if obj:IsA("Model") then
+            local kind = obj:GetAttribute("Model3D_Kind")
+            local item = {
+                kind   = kind,
+                cframe = cframeToTable(obj:GetPivot()),
+                scale  = getObjectScale(obj),
+            }
+            if kind == "model" then
+                item.assetId = obj:GetAttribute("Model3D_AssetId")
+            elseif kind == "image" then
+                item.url = obj:GetAttribute("Model3D_ImageUrl")
+            end
+            table.insert(items, item)
+        end
+    end
+
+    return {
+        name        = name,
+        ownerUserId = LocalPlayer.UserId,
+        ownerName   = LocalPlayer.DisplayName,
+        createdAt   = os.time(),
+        items       = items,
+        placeId     = game.PlaceId,
+    }
+end
+
+-- Menghapus semua object Model3D yang sekarang ada di map lalu spawn ulang
+-- sesuai isi config. Dipakai saat Load Config.
+local function applyConfigToWorkspace(configData, callback)
+    if not configData or type(configData) ~= "table" or not configData.items then
+        if callback then callback(false, "Config kosong / rusak") end
         return
     end
 
-    local obj = State.selectedObject
-    State.objects[obj] = nil
-    State.selectedObject = nil
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
-
-    pcall(function() obj:Destroy() end)
-    notify("Objek dihapus", C.text2)
-end
-
--- ==================== CLEAR ALL OBJECTS ====================
-local function clearAllObjects()
-    local count = 0
-    for obj, _ in pairs(State.objects) do
-        pcall(function() obj:Destroy() end)
-        count = count + 1
+    local folder = getFolder()
+    for _, obj in ipairs(folder:GetChildren()) do
+        obj:Destroy()
     end
-    table.clear(State.objects)
-    State.selectedObject = nil
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
-    notify("Semua objek dihapus (" .. count .. ")", C.text2)
-end
+    State.SelectedObject = nil
+    State.PositionMode = false
+    State.RotationMode = false
+    State.ScaleMode = false
+    setGizmoVisibility()
 
--- ==================== SAVE CONFIG (LOKAL + FIREBASE) ====================
-local function saveConfig(name, isPublic)
-    if not name or name == "" then
-        notify("Masukkan nama config!", C.red)
-        return false
-    end
+    local total = #configData.items
+    local loaded = 0
+    local failed = 0
 
-    local objectsData = {}
-    for obj, data in pairs(State.objects) do
-        local primary = obj:FindFirstChild("PrimaryPart") or obj:FindFirstChildOfClass("BasePart")
-        local cframe = primary and primary.CFrame or data.cframe or CFrame.new(0, 3, 0)
-        local size = nil
-        if data.type == "image" and obj:IsA("BasePart") then
-            size = obj.Size
-        elseif data.type == "model" then
-            -- ambil ukuran bounding box
-            local min, max = Vector3.new(1e9, 1e9, 1e9), Vector3.new(-1e9, -1e9, -1e9)
-            for _, part in ipairs(obj:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    local pos = part.Position
-                    local s = part.Size / 2
-                    min = Vector3.new(math.min(min.X, pos.X - s.X), math.min(min.Y, pos.Y - s.Y), math.min(min.Z, pos.Z - s.Z))
-                    max = Vector3.new(math.max(max.X, pos.X + s.X), math.max(max.Y, pos.Y + s.Y), math.max(max.Z, pos.Z + s.Z))
+    for _, item in ipairs(configData.items) do
+        task.spawn(function()
+            local cf = tableToCFrame(item.cframe)
+            local obj, err
+            if item.kind == "model" then
+                obj, err = spawnModel3D(item.assetId, cf)
+            elseif item.kind == "image" then
+                obj, err = spawnImage(item.url, cf)
+            end
+            if obj then
+                if item.scale and item.scale ~= 1 then
+                    applyScale(obj, item.scale)
                 end
-            end
-            if min.X < 1e8 then
-                size = max - min
-            end
-        end
-
-        table.insert(objectsData, {
-            type = data.type,
-            name = data.name,
-            assetId = data.assetId,
-            url = data.url,
-            cframe = cframe,
-            size = size or Vector3.new(4, 4, 1),
-        })
-    end
-
-    if #objectsData == 0 then
-        notify("Tidak ada objek untuk disimpan!", C.red)
-        return false
-    end
-
-    local configData = {
-        name = name,
-        objects = objectsData,
-        savedAt = os.time(),
-        savedBy = LocalPlayer.UserId,
-        savedByName = LocalPlayer.DisplayName,
-    }
-
-    -- Simpan ke Storage lokal
-    if not Storage.appSettings then Storage.appSettings = {} end
-    Storage.appSettings.model3dConfigs = Storage.appSettings.model3dConfigs or {}
-    Storage.appSettings.model3dConfigs[name] = configData
-    pcall(function()
-        if Storage.persistSettings then Storage.persistSettings() end
-    end)
-
-    -- Firebase
-    local fbSuccess = false
-    if isDeveloper then
-        -- Dev config → semua orang bisa lihat
-        if Firebase and Firebase.SaveDevModel3DConfig then
-            local ok, err = pcall(function()
-                Firebase.SaveDevModel3DConfig(name, configData, function(success)
-                    fbSuccess = success
-                end)
-            end)
-            if ok then
-                notify("✅ Config '" .. name .. "' disimpan sebagai PUBLIC (dev)!", C.dev)
+                loaded = loaded + 1
             else
-                notify("⚠ Gagal sync ke Firebase dev", C.red)
+                failed = failed + 1
             end
-        end
-    else
-        -- Player config → privat (hanya dirinya)
-        if Firebase and Firebase.SavePlayerModel3DConfig then
-            local ok, err = pcall(function()
-                Firebase.SavePlayerModel3DConfig(name, configData, function(success)
-                    fbSuccess = success
-                end)
-            end)
-            if ok then
-                notify("✅ Config '" .. name .. "' disimpan PRIVAT!", C.green)
-            else
-                notify("⚠ Gagal sync ke Firebase player", C.red)
+
+            if loaded + failed >= total then
+                if callback then callback(true, ("Selesai: %d berhasil, %d gagal"):format(loaded, failed)) end
             end
-        end
+        end)
     end
 
-    return true
+    if total == 0 and callback then
+        callback(true, "Config ini tidak berisi objek apapun.")
+    end
 end
 
--- ==================== LOAD CONFIG ====================
-local function loadConfig(name, sourceData)
-    local data = sourceData
+-- ==================== SAVE / LOAD LOKAL ====================
+local function saveConfigLocal(name)
+    if not name or name == "" then return false, "Nama config kosong" end
+    local configData = buildConfigFromWorkspace(name)
+    LocalConfigs[name] = configData
+    saveLocalConfigs(LocalConfigs)
+    return true, "Config '" .. name .. "' tersimpan lokal (" .. #configData.items .. " objek)."
+end
 
+local function loadConfigLocal(name, callback)
+    local data = LocalConfigs[name]
     if not data then
-        -- Cek lokal dulu
-        if Storage.appSettings and Storage.appSettings.model3dConfigs then
-            data = Storage.appSettings.model3dConfigs[name]
-        end
-        if not data then
-            notify("Config '" .. name .. "' tidak ditemukan.", C.red)
-            return false
-        end
+        if callback then callback(false, "Config tidak ditemukan") end
+        return
     end
-
-    -- Hapus semua objek saat ini
-    clearAllObjects()
-
-    local successCount = 0
-    for _, objData in ipairs(data.objects) do
-        if objData.type == "model" and objData.assetId then
-            local model = loadModelFromAssetId(objData.assetId, objData.name)
-            if model then
-                if objData.cframe then
-                    model:PivotTo(objData.cframe)
-                end
-                -- Update stored data
-                local stored = State.objects[model]
-                if stored then
-                    stored.cframe = objData.cframe or model.PrimaryPart and model.PrimaryPart.CFrame or CFrame.new(0, 3, 0)
-                    stored.name = objData.name or model.Name
-                end
-                successCount = successCount + 1
-            end
-        elseif objData.type == "image" and objData.url then
-            local part = loadImageFromUrl(objData.url, objData.name)
-            if part then
-                if objData.cframe then
-                    part.CFrame = objData.cframe
-                end
-                if objData.size then
-                    part.Size = objData.size
-                end
-                local stored = State.objects[part]
-                if stored then
-                    stored.cframe = objData.cframe or part.CFrame
-                    stored.size = objData.size or part.Size
-                    stored.name = objData.name or part.Name
-                end
-                successCount = successCount + 1
-            end
-        end
-    end
-
-    State.selectedObject = nil
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
-
-    if successCount > 0 then
-        notify("✅ Config '" .. name .. "' dimuat (" .. successCount .. " objek)", C.green)
-        return true
-    else
-        notify("⚠ Tidak ada objek yang berhasil dimuat dari config.", C.text3)
-        return false
-    end
+    applyConfigToWorkspace(data, callback)
 end
 
--- ==================== GET FIREBASE CONFIGS ====================
-local function fetchConfigsFromFirebase(callback)
-    local results = {dev = {}, players = {}}
+local function deleteConfigLocal(name)
+    LocalConfigs[name] = nil
+    saveLocalConfigs(LocalConfigs)
+end
 
+-- ==================== SAVE / LOAD FIREBASE ====================
+-- Developer: simpan ke model3d_dev (terlihat semua orang).
+-- Player biasa: simpan ke model3d_player (hanya dirinya + dev yang bisa lihat).
+local function saveConfigFirebase(name, callback)
     if not Firebase then
-        if callback then callback(results) end
-        return results
+        if callback then callback(false, "Firebase tidak tersedia") end
+        return
     end
+    local configData = buildConfigFromWorkspace(name)
 
-    local function fetchDev()
-        if not Firebase.GetDevModel3DConfigs then
-            if callback then callback(results) end
-            return
+    task.spawn(function()
+        local ok
+        if isDeveloper then
+            ok = Firebase.SaveDevModel3D(LocalPlayer.UserId, name, configData)
+        else
+            ok = Firebase.SavePlayerModel3D(LocalPlayer.UserId, name, configData)
         end
-        pcall(function()
-            Firebase.GetDevModel3DConfigs(function(success, data)
-                if success and type(data) == "table" then
-                    for name, cfg in pairs(data) do
-                        if type(cfg) == "table" and cfg.objects then
-                            table.insert(results.dev, {name = name, data = cfg, source = "dev"})
-                        end
-                    end
-                end
-                -- Lanjut ke player configs
-                fetchPlayers()
-            end)
-        end)
-    end
-
-    local function fetchPlayers()
-        if not Firebase.GetPlayerModel3DConfigs then
-            if callback then callback(results) end
-            return
-        end
-        -- Ambil config player sendiri
-        pcall(function()
-            Firebase.GetPlayerModel3DConfigs(LocalPlayer.UserId, function(success, data)
-                if success and type(data) == "table" then
-                    for name, cfg in pairs(data) do
-                        if type(cfg) == "table" and cfg.objects then
-                            table.insert(results.players, {name = name, data = cfg, source = "self"})
-                        end
-                    end
-                end
-                if callback then callback(results) end
-            end)
-        end)
-    end
-
-    fetchDev()
-    return results
-end
-
--- ==================== LOAD CONFIG BY USER ID (DEV ONLY) ====================
-local function loadPlayerConfigByUserId(targetUserId, configName)
-    if not isDeveloper then
-        notify("Hanya developer yang bisa load config player lain!", C.red)
-        return false
-    end
-
-    if not Firebase or not Firebase.GetPlayerModel3DConfigs then
-        notify("Firebase tidak tersedia!", C.red)
-        return false
-    end
-
-    pcall(function()
-        Firebase.GetPlayerModel3DConfigs(targetUserId, function(success, data)
-            if success and type(data) == "table" then
-                local found = data[configName]
-                if found and type(found) == "table" and found.objects then
-                    loadConfig(configName, found)
-                else
-                    notify("Config '" .. configName .. "' tidak ditemukan untuk User ID " .. tostring(targetUserId), C.red)
-                end
+        if callback then
+            if ok then
+                callback(true, "Config '" .. name .. "' tersimpan online (" .. #configData.items .. " objek).")
             else
-                notify("Gagal mengambil config player", C.red)
+                callback(false, "Gagal menyimpan ke server.")
             end
-        end)
+        end
     end)
-    return true
 end
 
--- ==================== RENDER UI ====================
-local rebuildUI = nil
+-- Mengambil daftar config developer (bisa dipanggil siapapun, termasuk player biasa).
+local function fetchDevConfigs(callback)
+    if not Firebase then callback(nil, "Firebase tidak tersedia") return end
+    task.spawn(function()
+        local list = Firebase.GetDevModel3DList(DEV_USER_ID)
+        callback(list)
+    end)
+end
 
-local function renderHeader(parent)
-    local header = Instance.new("Frame", parent)
-    header.Size = UDim2.new(1, 0, 0, 48)
+-- Mengambil daftar config milik player yang sedang login (dirinya sendiri).
+local function fetchMyPlayerConfigs(callback)
+    if not Firebase then callback(nil, "Firebase tidak tersedia") return end
+    task.spawn(function()
+        local list = Firebase.GetPlayerModel3DList(LocalPlayer.UserId)
+        callback(list)
+    end)
+end
+
+-- Khusus developer: ambil daftar SEMUA player yang punya config tersimpan,
+-- supaya dev bisa browse & load config milik player manapun.
+local function fetchAllPlayerConfigsForDev(callback)
+    if not Firebase or not isDeveloper then callback(nil) return end
+    task.spawn(function()
+        local all = Firebase.GetAllPlayerModel3D()
+        callback(all)
+    end)
+end
+
+local function loadConfigFromFirebaseData(configData, callback)
+    applyConfigToWorkspace(configData, callback)
+end
+
+-- ==================== UI STATE ====================
+local rebuildUI
+
+-- ==================== RENDER: HEADER ====================
+local function renderHeader()
+    local header = Instance.new("Frame", appContent)
+    header.Size = UDim2.new(1, 0, 0, 50)
     header.BackgroundColor3 = C.card
     header.LayoutOrder = 0
     corner(header, 12)
-    stroke(header, C.accent, 1, 0.4)
+    stroke(header, C.accent, 1, 0.5)
+
+    local grad = Instance.new("UIGradient", header)
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, C.accent),
+        ColorSequenceKeypoint.new(1, C.accent2),
+    })
+    grad.Transparency = NumberSequence.new(0.88)
+    grad.Rotation = 20
+
+    local icon = Instance.new("TextLabel", header)
+    icon.Size = UDim2.new(0, 34, 0, 34)
+    icon.Position = UDim2.new(0, 8, 0.5, -17)
+    icon.BackgroundColor3 = C.accent
+    icon.Text = "🧊"
+    icon.TextSize = 16
+    corner(icon, 100)
 
     local title = Instance.new("TextLabel", header)
-    title.Size = UDim2.new(1, -80, 0, 22)
-    title.Position = UDim2.new(0, 12, 0, 4)
+    title.Size = UDim2.new(1, -130, 0, 20)
+    title.Position = UDim2.new(0, 50, 0, 6)
     title.BackgroundTransparency = 1
-    title.Text = "🧊 Model3D Studio"
-    title.TextColor3 = isDeveloper and C.dev or C.text
+    title.Text = "Model 3D"
+    title.TextColor3 = C.text
     title.Font = Enum.Font.GothamBlack
     title.TextSize = 14
     title.TextXAlignment = Enum.TextXAlignment.Left
 
     local sub = Instance.new("TextLabel", header)
-    sub.Size = UDim2.new(1, -80, 0, 14)
-    sub.Position = UDim2.new(0, 12, 0, 26)
+    sub.Size = UDim2.new(1, -130, 0, 14)
+    sub.Position = UDim2.new(0, 50, 0, 26)
     sub.BackgroundTransparency = 1
-    sub.Text = isDeveloper and "👑 Developer Mode — Config bersifat PUBLIC" or "Mode Player — Config PRIVAT"
-    sub.TextColor3 = isDeveloper and C.dev or C.text3
+    sub.Text = isDeveloper and "👑 Mode Developer" or "Spawn model & gambar ke map"
+    sub.TextColor3 = isDeveloper and C.gold or C.text3
     sub.Font = Enum.Font.Gotham
     sub.TextSize = 9
     sub.TextXAlignment = Enum.TextXAlignment.Left
 
-    local countLbl = Instance.new("TextLabel", header)
-    countLbl.Size = UDim2.new(0, 80, 0, 18)
-    countLbl.Position = UDim2.new(1, -88, 0, 14)
-    countLbl.BackgroundTransparency = 1
-    countLbl.Text = "Objek: " .. (#State.objects)
-    countLbl.TextColor3 = C.text2
-    countLbl.Font = Enum.Font.GothamBold
-    countLbl.TextSize = 11
-    countLbl.TextXAlignment = Enum.TextXAlignment.Right
-
-    return header
+    local clearBtn = Instance.new("TextButton", header)
+    clearBtn.Size = UDim2.new(0, 60, 0, 26)
+    clearBtn.Position = UDim2.new(1, -68, 0.5, -13)
+    clearBtn.BackgroundColor3 = C.red
+    clearBtn.BackgroundTransparency = 0.85
+    clearBtn.Text = "🗑 Clear"
+    clearBtn.TextColor3 = C.red
+    clearBtn.Font = Enum.Font.GothamBold
+    clearBtn.TextSize = 9
+    clearBtn.AutoButtonColor = false
+    corner(clearBtn, 8)
+    pressFX(clearBtn)
+    clearBtn.MouseButton1Click:Connect(function()
+        local folder = getFolder()
+        for _, obj in ipairs(folder:GetChildren()) do obj:Destroy() end
+        State.SelectedObject = nil
+        State.PositionMode, State.RotationMode, State.ScaleMode = false, false, false
+        setGizmoVisibility()
+        Helpers.showDynamicNotification("Semua objek dihapus", C.red)
+        rebuildUI()
+    end)
 end
 
-local function renderTabBar(parent)
-    local tabBar = Instance.new("Frame", parent)
-    tabBar.Size = UDim2.new(1, 0, 0, 36)
-    tabBar.BackgroundColor3 = C.card2
-    tabBar.LayoutOrder = 1
-    corner(tabBar, 10)
+-- ==================== RENDER: SECTION LABEL ====================
+local function sectionLabel(text, order)
+    local lbl = Instance.new("TextLabel", appContent)
+    lbl.Size = UDim2.new(1, 0, 0, 20)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = text
+    lbl.TextColor3 = C.text2
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextSize = 10
+    lbl.TextXAlignment = Enum.TextXAlignment.Left
+    lbl.LayoutOrder = order
+    return lbl
+end
 
-    local tabs = {"Models", "Images", "Config"}
-    local tabBtns = {}
+-- ==================== RENDER: SPAWN MODEL 3D ====================
+local function renderSpawnModelSection(order)
+    sectionLabel("SPAWN MODEL 3D (Asset ID)", order)
 
-    for i, tabName in ipairs(tabs) do
-        local btn = Instance.new("TextButton", tabBar)
-        btn.Size = UDim2.new(1 / #tabs, -4, 1, -6)
-        btn.Position = UDim2.new((i - 1) / #tabs + 0.02, 0, 0.03, 0)
-        btn.BackgroundColor3 = (State.currentTab == tabName) and C.accent or C.card3
-        btn.Text = tabName
-        btn.TextColor3 = (State.currentTab == tabName) and Color3.new(1, 1, 1) or C.text2
-        btn.Font = Enum.Font.GothamBold
-        btn.TextSize = 11
-        btn.AutoButtonColor = false
-        corner(btn, 6)
-        pressFX(btn)
+    local row = Instance.new("Frame", appContent)
+    row.Size = UDim2.new(1, 0, 0, 44)
+    row.BackgroundColor3 = C.card
+    row.LayoutOrder = order + 1
+    corner(row, 12)
+    stroke(row, C.border, 1, 0.3)
 
-        btn.MouseButton1Click:Connect(function()
-            State.currentTab = tabName
-            for _, b in ipairs(tabBtns) do
-                b.BackgroundColor3 = C.card3
-                b.TextColor3 = C.text2
+    local input = Instance.new("TextBox", row)
+    input.Size = UDim2.new(1, -96, 1, -12)
+    input.Position = UDim2.new(0, 8, 0, 6)
+    input.BackgroundColor3 = C.bg
+    input.PlaceholderText = "Masukkan Asset ID model..."
+    input.PlaceholderColor3 = C.text3
+    input.Text = ""
+    input.TextColor3 = C.text
+    input.Font = Enum.Font.Code
+    input.TextSize = 12
+    input.ClearTextOnFocus = false
+    corner(input, 8)
+    local ip = Instance.new("UIPadding", input)
+    ip.PaddingLeft = UDim.new(0, 8)
+
+    local spawnBtn = Instance.new("TextButton", row)
+    spawnBtn.Size = UDim2.new(0, 80, 1, -12)
+    spawnBtn.Position = UDim2.new(1, -84, 0, 6)
+    spawnBtn.BackgroundColor3 = C.accent
+    spawnBtn.Text = "SPAWN"
+    spawnBtn.TextColor3 = Color3.new(1, 1, 1)
+    spawnBtn.Font = Enum.Font.GothamBlack
+    spawnBtn.TextSize = 11
+    spawnBtn.AutoButtonColor = false
+    corner(spawnBtn, 8)
+    pressFX(spawnBtn)
+
+    local function doSpawn()
+        local assetId = input.Text:gsub("%s+", "")
+        if assetId == "" then return end
+
+        local character = LocalPlayer.Character
+        local baseCFrame = CFrame.new(0, 5, 0)
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            baseCFrame = character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -8)
+        end
+
+        spawnBtn.Text = "..."
+        task.spawn(function()
+            local obj, err = spawnModel3D(assetId, baseCFrame)
+            spawnBtn.Text = "SPAWN"
+            if obj then
+                State.SelectedObject = obj
+                input.Text = ""
+                Helpers.showDynamicNotification("Model berhasil di-spawn!", C.green)
+                rebuildUI()
+            else
+                Helpers.showDynamicNotification(err or "Gagal spawn model", C.red)
             end
-            btn.BackgroundColor3 = C.accent
-            btn.TextColor3 = Color3.new(1, 1, 1)
-            rebuildUI()
         end)
-
-        table.insert(tabBtns, btn)
     end
 
-    return tabBar
+    spawnBtn.MouseButton1Click:Connect(doSpawn)
+    input.FocusLost:Connect(function(enter) if enter then doSpawn() end end)
 end
 
-local function renderModelsTab(parent)
-    local container = Instance.new("Frame", parent)
-    container.Size = UDim2.new(1, 0, 0, 0)
-    container.AutomaticSize = Enum.AutomaticSize.Y
-    container.BackgroundTransparency = 1
-    container.LayoutOrder = 2
+-- ==================== RENDER: SPAWN GAMBAR ====================
+local function renderSpawnImageSection(order)
+    sectionLabel("SPAWN GAMBAR (Link Catbox)", order)
 
-    -- Input Asset ID
-    local inputFrame = Instance.new("Frame", container)
-    inputFrame.Size = UDim2.new(1, 0, 0, 44)
-    inputFrame.BackgroundColor3 = C.card2
-    corner(inputFrame, 10)
-    stroke(inputFrame, C.border, 1, 0.4)
+    local row = Instance.new("Frame", appContent)
+    row.Size = UDim2.new(1, 0, 0, 44)
+    row.BackgroundColor3 = C.card
+    row.LayoutOrder = order + 1
+    corner(row, 12)
+    stroke(row, C.border, 1, 0.3)
 
-    local inputBox = Instance.new("TextBox", inputFrame)
-    inputBox.Size = UDim2.new(1, -90, 0, 32)
-    inputBox.Position = UDim2.new(0, 8, 0.5, -16)
-    inputBox.BackgroundColor3 = C.card3
-    inputBox.PlaceholderText = "Asset ID (contoh: 1234567890)"
-    inputBox.Text = ""
-    inputBox.TextColor3 = C.text
-    inputBox.Font = Enum.Font.Gotham
-    inputBox.TextSize = 11
-    inputBox.ClearTextOnFocus = false
-    corner(inputBox, 6)
+    local input = Instance.new("TextBox", row)
+    input.Size = UDim2.new(1, -96, 1, -12)
+    input.Position = UDim2.new(0, 8, 0, 6)
+    input.BackgroundColor3 = C.bg
+    input.PlaceholderText = "https://files.catbox.moe/xxxx.png"
+    input.PlaceholderColor3 = C.text3
+    input.Text = ""
+    input.TextColor3 = C.text
+    input.Font = Enum.Font.Code
+    input.TextSize = 11
+    input.ClearTextOnFocus = false
+    corner(input, 8)
+    local ip = Instance.new("UIPadding", input)
+    ip.PaddingLeft = UDim.new(0, 8)
 
-    local loadBtn = Instance.new("TextButton", inputFrame)
-    loadBtn.Size = UDim2.new(0, 72, 0, 32)
-    loadBtn.Position = UDim2.new(1, -80, 0.5, -16)
-    loadBtn.BackgroundColor3 = C.accent
-    loadBtn.Text = "Load"
-    loadBtn.TextColor3 = Color3.new(1, 1, 1)
-    loadBtn.Font = Enum.Font.GothamBold
-    loadBtn.TextSize = 11
-    loadBtn.AutoButtonColor = false
-    corner(loadBtn, 6)
-    pressFX(loadBtn)
+    local spawnBtn = Instance.new("TextButton", row)
+    spawnBtn.Size = UDim2.new(0, 80, 1, -12)
+    spawnBtn.Position = UDim2.new(1, -84, 0, 6)
+    spawnBtn.BackgroundColor3 = C.accent2
+    spawnBtn.Text = "SPAWN"
+    spawnBtn.TextColor3 = Color3.new(0, 0, 0)
+    spawnBtn.Font = Enum.Font.GothamBlack
+    spawnBtn.TextSize = 11
+    spawnBtn.AutoButtonColor = false
+    corner(spawnBtn, 8)
+    pressFX(spawnBtn)
 
-    loadBtn.MouseButton1Click:Connect(function()
-        local id = inputBox.Text:gsub("%s+", "")
-        if id ~= "" then
-            loadModelFromAssetId(id)
-            inputBox.Text = ""
-            rebuildUI()
+    local function doSpawn()
+        local url = input.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if url == "" then return end
+
+        local character = LocalPlayer.Character
+        local baseCFrame = CFrame.new(0, 5, 0)
+        if character and character:FindFirstChild("HumanoidRootPart") then
+            baseCFrame = character.HumanoidRootPart.CFrame * CFrame.new(0, 0, -8)
         end
-    end)
 
-    inputBox.FocusLost:Connect(function(enter)
-        if enter then loadBtn.MouseButton1Click:Fire() end
-    end)
-
-    -- List objek model
-    local listLbl = Instance.new("TextLabel", container)
-    listLbl.Size = UDim2.new(1, 0, 0, 20)
-    listLbl.Position = UDim2.new(0, 0, 0, 52)
-    listLbl.BackgroundTransparency = 1
-    listLbl.Text = "Model Aktif:"
-    listLbl.TextColor3 = C.text2
-    listLbl.Font = Enum.Font.GothamBold
-    listLbl.TextSize = 10
-    listLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local listScroll = Instance.new("ScrollingFrame", container)
-    listScroll.Size = UDim2.new(1, 0, 0, 160)
-    listScroll.Position = UDim2.new(0, 0, 0, 74)
-    listScroll.BackgroundColor3 = C.card3
-    listScroll.BorderSizePixel = 0
-    listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    listScroll.ScrollBarThickness = 2
-
-    local listLayout = Instance.new("UIListLayout", listScroll)
-    listLayout.Padding = UDim.new(0, 4)
-
-    local listPad = Instance.new("UIPadding", listScroll)
-    listPad.PaddingTop = UDim.new(0, 4)
-    listPad.PaddingBottom = UDim.new(0, 4)
-
-    -- Render model list
-    local order = 0
-    for obj, data in pairs(State.objects) do
-        if data.type == "model" then
-            order = order + 1
-            local isSel = (State.selectedObject == obj)
-
-            local row = Instance.new("Frame", listScroll)
-            row.Size = UDim2.new(1, 0, 0, 28)
-            row.BackgroundColor3 = isSel and C.accent or C.card2
-            row.LayoutOrder = order
-            corner(row, 6)
-
-            local nameLbl = Instance.new("TextLabel", row)
-            nameLbl.Size = UDim2.new(1, -50, 0, 20)
-            nameLbl.Position = UDim2.new(0, 8, 0, 4)
-            nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = data.name or "Model"
-            nameLbl.TextColor3 = isSel and Color3.new(1, 1, 1) or C.text
-            nameLbl.Font = Enum.Font.Gotham
-            nameLbl.TextSize = 10
-            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-
-            local selBtn = Instance.new("TextButton", row)
-            selBtn.Size = UDim2.new(0, 40, 0, 20)
-            selBtn.Position = UDim2.new(1, -44, 0.5, -10)
-            selBtn.BackgroundColor3 = isSel and Color3.new(1, 1, 1) or C.card3
-            selBtn.Text = isSel and "✓" or "Pilih"
-            selBtn.TextColor3 = isSel and C.accent or C.text2
-            selBtn.Font = Enum.Font.GothamBold
-            selBtn.TextSize = 8
-            selBtn.AutoButtonColor = false
-            corner(selBtn, 4)
-            pressFX(selBtn)
-
-            selBtn.MouseButton1Click:Connect(function()
-                State.selectedObject = obj
-                setupGizmo(Gizmos.Handles, State.gizmoMode)
-                rebuildUI()
-            end)
-
-            local delBtn = Instance.new("TextButton", row)
-            delBtn.Size = UDim2.new(0, 20, 0, 20)
-            delBtn.Position = UDim2.new(1, -22, 0.5, -10)
-            delBtn.BackgroundColor3 = C.red
-            delBtn.Text = "✕"
-            delBtn.TextColor3 = Color3.new(1, 1, 1)
-            delBtn.Font = Enum.Font.GothamBold
-            delBtn.TextSize = 10
-            delBtn.AutoButtonColor = false
-            corner(delBtn, 4)
-            pressFX(delBtn)
-
-            delBtn.MouseButton1Click:Connect(function()
-                State.objects[obj] = nil
-                if State.selectedObject == obj then
-                    State.selectedObject = nil
-                    setupGizmo(Gizmos.Handles, State.gizmoMode)
-                end
-                pcall(function() obj:Destroy() end)
-                rebuildUI()
-            end)
-        end
-    end
-
-    if order == 0 then
-        local empty = Instance.new("TextLabel", listScroll)
-        empty.Size = UDim2.new(1, 0, 0, 30)
-        empty.BackgroundTransparency = 1
-        empty.Text = "Belum ada model. Load Asset ID di atas!"
-        empty.TextColor3 = C.text3
-        empty.Font = Enum.Font.Gotham
-        empty.TextSize = 9
-        empty.LayoutOrder = 1
-    end
-
-    return container
-end
-
-local function renderImagesTab(parent)
-    local container = Instance.new("Frame", parent)
-    container.Size = UDim2.new(1, 0, 0, 0)
-    container.AutomaticSize = Enum.AutomaticSize.Y
-    container.BackgroundTransparency = 1
-    container.LayoutOrder = 2
-
-    -- Input URL
-    local inputFrame = Instance.new("Frame", container)
-    inputFrame.Size = UDim2.new(1, 0, 0, 44)
-    inputFrame.BackgroundColor3 = C.card2
-    corner(inputFrame, 10)
-    stroke(inputFrame, C.border, 1, 0.4)
-
-    local inputBox = Instance.new("TextBox", inputFrame)
-    inputBox.Size = UDim2.new(1, -90, 0, 32)
-    inputBox.Position = UDim2.new(0, 8, 0.5, -16)
-    inputBox.BackgroundColor3 = C.card3
-    inputBox.PlaceholderText = "URL Gambar (Catbox, Imgur, dll)"
-    inputBox.Text = ""
-    inputBox.TextColor3 = C.text
-    inputBox.Font = Enum.Font.Gotham
-    inputBox.TextSize = 10
-    inputBox.ClearTextOnFocus = false
-    corner(inputBox, 6)
-
-    local loadBtn = Instance.new("TextButton", inputFrame)
-    loadBtn.Size = UDim2.new(0, 72, 0, 32)
-    loadBtn.Position = UDim2.new(1, -80, 0.5, -16)
-    loadBtn.BackgroundColor3 = C.gold
-    loadBtn.Text = "Load"
-    loadBtn.TextColor3 = Color3.fromRGB(10, 10, 10)
-    loadBtn.Font = Enum.Font.GothamBold
-    loadBtn.TextSize = 11
-    loadBtn.AutoButtonColor = false
-    corner(loadBtn, 6)
-    pressFX(loadBtn)
-
-    loadBtn.MouseButton1Click:Connect(function()
-        local url = inputBox.Text:gsub("%s+", "")
-        if url ~= "" then
-            loadImageFromUrl(url)
-            inputBox.Text = ""
-            rebuildUI()
-        end
-    end)
-
-    inputBox.FocusLost:Connect(function(enter)
-        if enter then loadBtn.MouseButton1Click:Fire() end
-    end)
-
-    -- List objek gambar
-    local listLbl = Instance.new("TextLabel", container)
-    listLbl.Size = UDim2.new(1, 0, 0, 20)
-    listLbl.Position = UDim2.new(0, 0, 0, 52)
-    listLbl.BackgroundTransparency = 1
-    listLbl.Text = "Gambar Aktif:"
-    listLbl.TextColor3 = C.text2
-    listLbl.Font = Enum.Font.GothamBold
-    listLbl.TextSize = 10
-    listLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    local listScroll = Instance.new("ScrollingFrame", container)
-    listScroll.Size = UDim2.new(1, 0, 0, 160)
-    listScroll.Position = UDim2.new(0, 0, 0, 74)
-    listScroll.BackgroundColor3 = C.card3
-    listScroll.BorderSizePixel = 0
-    listScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    listScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    listScroll.ScrollBarThickness = 2
-
-    local listLayout = Instance.new("UIListLayout", listScroll)
-    listLayout.Padding = UDim.new(0, 4)
-
-    local listPad = Instance.new("UIPadding", listScroll)
-    listPad.PaddingTop = UDim.new(0, 4)
-    listPad.PaddingBottom = UDim.new(0, 4)
-
-    -- Render image list
-    local order = 0
-    for obj, data in pairs(State.objects) do
-        if data.type == "image" then
-            order = order + 1
-            local isSel = (State.selectedObject == obj)
-
-            local row = Instance.new("Frame", listScroll)
-            row.Size = UDim2.new(1, 0, 0, 28)
-            row.BackgroundColor3 = isSel and C.gold or C.card2
-            row.LayoutOrder = order
-            corner(row, 6)
-
-            local nameLbl = Instance.new("TextLabel", row)
-            nameLbl.Size = UDim2.new(1, -50, 0, 20)
-            nameLbl.Position = UDim2.new(0, 8, 0, 4)
-            nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = data.name or "Image"
-            nameLbl.TextColor3 = isSel and Color3.fromRGB(10, 10, 10) or C.text
-            nameLbl.Font = Enum.Font.Gotham
-            nameLbl.TextSize = 10
-            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-
-            local selBtn = Instance.new("TextButton", row)
-            selBtn.Size = UDim2.new(0, 40, 0, 20)
-            selBtn.Position = UDim2.new(1, -44, 0.5, -10)
-            selBtn.BackgroundColor3 = isSel and Color3.new(1, 1, 1) or C.card3
-            selBtn.Text = isSel and "✓" or "Pilih"
-            selBtn.TextColor3 = isSel and C.gold or C.text2
-            selBtn.Font = Enum.Font.GothamBold
-            selBtn.TextSize = 8
-            selBtn.AutoButtonColor = false
-            corner(selBtn, 4)
-            pressFX(selBtn)
-
-            selBtn.MouseButton1Click:Connect(function()
-                State.selectedObject = obj
-                setupGizmo(Gizmos.Handles, State.gizmoMode)
-                rebuildUI()
-            end)
-
-            local delBtn = Instance.new("TextButton", row)
-            delBtn.Size = UDim2.new(0, 20, 0, 20)
-            delBtn.Position = UDim2.new(1, -22, 0.5, -10)
-            delBtn.BackgroundColor3 = C.red
-            delBtn.Text = "✕"
-            delBtn.TextColor3 = Color3.new(1, 1, 1)
-            delBtn.Font = Enum.Font.GothamBold
-            delBtn.TextSize = 10
-            delBtn.AutoButtonColor = false
-            corner(delBtn, 4)
-            pressFX(delBtn)
-
-            delBtn.MouseButton1Click:Connect(function()
-                State.objects[obj] = nil
-                if State.selectedObject == obj then
-                    State.selectedObject = nil
-                    setupGizmo(Gizmos.Handles, State.gizmoMode)
-                end
-                pcall(function() obj:Destroy() end)
-                rebuildUI()
-            end)
-        end
-    end
-
-    if order == 0 then
-        local empty = Instance.new("TextLabel", listScroll)
-        empty.Size = UDim2.new(1, 0, 0, 30)
-        empty.BackgroundTransparency = 1
-        empty.Text = "Belum ada gambar. Load URL di atas!"
-        empty.TextColor3 = C.text3
-        empty.Font = Enum.Font.Gotham
-        empty.TextSize = 9
-        empty.LayoutOrder = 1
-    end
-
-    return container
-end
-
-local function renderConfigTab(parent)
-    local container = Instance.new("Frame", parent)
-    container.Size = UDim2.new(1, 0, 0, 0)
-    container.AutomaticSize = Enum.AutomaticSize.Y
-    container.BackgroundTransparency = 1
-    container.LayoutOrder = 2
-
-    -- ===== SAVE SECTION =====
-    local saveFrame = Instance.new("Frame", container)
-    saveFrame.Size = UDim2.new(1, 0, 0, 44)
-    saveFrame.BackgroundColor3 = C.card2
-    saveFrame.LayoutOrder = 0
-    corner(saveFrame, 10)
-    stroke(saveFrame, C.border, 1, 0.4)
-
-    local saveInput = Instance.new("TextBox", saveFrame)
-    saveInput.Size = UDim2.new(1, -180, 0, 32)
-    saveInput.Position = UDim2.new(0, 8, 0.5, -16)
-    saveInput.BackgroundColor3 = C.card3
-    saveInput.PlaceholderText = "Nama config..."
-    saveInput.Text = ""
-    saveInput.TextColor3 = C.text
-    saveInput.Font = Enum.Font.Gotham
-    saveInput.TextSize = 11
-    saveInput.ClearTextOnFocus = false
-    corner(saveInput, 6)
-
-    local saveBtn = Instance.new("TextButton", saveFrame)
-    saveBtn.Size = UDim2.new(0, 78, 0, 32)
-    saveBtn.Position = UDim2.new(1, -86, 0.5, -16)
-    saveBtn.BackgroundColor3 = C.green
-    saveBtn.Text = isDeveloper and "Save Public" or "Save Private"
-    saveBtn.TextColor3 = Color3.fromRGB(10, 10, 10)
-    saveBtn.Font = Enum.Font.GothamBold
-    saveBtn.TextSize = 9
-    saveBtn.AutoButtonColor = false
-    corner(saveBtn, 6)
-    pressFX(saveBtn)
-
-    saveBtn.MouseButton1Click:Connect(function()
-        local name = saveInput.Text:gsub("%s+", " ")
-        if name ~= "" then
-            saveConfig(name)
-            saveInput.Text = ""
+        local obj, err = spawnImage(url, baseCFrame)
+        if obj then
+            State.SelectedObject = obj
+            input.Text = ""
+            Helpers.showDynamicNotification("Gambar berhasil di-spawn!", C.green)
             rebuildUI()
         else
-            notify("Masukkan nama config!", C.red)
-        end
-    end)
-
-    -- ===== LOAD SECTION =====
-    local loadFrame = Instance.new("Frame", container)
-    loadFrame.Size = UDim2.new(1, 0, 0, 0)
-    loadFrame.AutomaticSize = Enum.AutomaticSize.Y
-    loadFrame.BackgroundTransparency = 1
-    loadFrame.LayoutOrder = 1
-
-    local loadLbl = Instance.new("TextLabel", loadFrame)
-    loadLbl.Size = UDim2.new(1, 0, 0, 22)
-    loadLbl.BackgroundTransparency = 1
-    loadLbl.Text = "📂 Load Config"
-    loadLbl.TextColor3 = C.text2
-    loadLbl.Font = Enum.Font.GothamBold
-    loadLbl.TextSize = 11
-    loadLbl.TextXAlignment = Enum.TextXAlignment.Left
-
-    -- Tabs: Lokal | Dev (Public) | Player (Self)
-    local subTabBar = Instance.new("Frame", loadFrame)
-    subTabBar.Size = UDim2.new(1, 0, 0, 28)
-    subTabBar.BackgroundTransparency = 1
-
-    local subTabLayout = Instance.new("UIListLayout", subTabBar)
-    subTabLayout.FillDirection = Enum.FillDirection.Horizontal
-    subTabLayout.Padding = UDim.new(0, 4)
-
-    local loadSource = "local"
-    local configListCache = {localConfigs = {}, devConfigs = {}, playerConfigs = {}}
-    local loadingFlags = {local = false, dev = false, player = false}
-
-    local function refreshConfigList(source)
-        loadSource = source
-        rebuildUI()
-    end
-
-    local function renderConfigList(container, configs, source)
-        for _, child in ipairs(container:GetChildren()) do
-            if not child:IsA("UIListLayout") and not child:IsA("UIPadding") then
-                child:Destroy()
-            end
-        end
-
-        if #configs == 0 then
-            local empty = Instance.new("TextLabel", container)
-            empty.Size = UDim2.new(1, 0, 0, 30)
-            empty.BackgroundTransparency = 1
-            empty.Text = "Tidak ada config " .. (source == "dev" and "PUBLIC" or source == "player" and "PRIVAT" or "lokal")
-            empty.TextColor3 = C.text3
-            empty.Font = Enum.Font.Gotham
-            empty.TextSize = 9
-            empty.LayoutOrder = 1
-            return
-        end
-
-        for i, entry in ipairs(configs) do
-            local row = Instance.new("Frame", container)
-            row.Size = UDim2.new(1, 0, 0, 32)
-            row.BackgroundColor3 = C.card2
-            row.LayoutOrder = i
-            corner(row, 6)
-            stroke(row, C.border, 1, 0.3)
-
-            local nameLbl = Instance.new("TextLabel", row)
-            nameLbl.Size = UDim2.new(1, -100, 0, 20)
-            nameLbl.Position = UDim2.new(0, 8, 0, 6)
-            nameLbl.BackgroundTransparency = 1
-            nameLbl.Text = entry.name
-            nameLbl.TextColor3 = C.text
-            nameLbl.Font = Enum.Font.GothamBold
-            nameLbl.TextSize = 10
-            nameLbl.TextXAlignment = Enum.TextXAlignment.Left
-            nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
-
-            if source == "dev" and entry.ownerName then
-                local ownerLbl = Instance.new("TextLabel", row)
-                ownerLbl.Size = UDim2.new(0, 100, 0, 14)
-                ownerLbl.Position = UDim2.new(1, -108, 0.5, -2)
-                ownerLbl.BackgroundTransparency = 1
-                ownerLbl.Text = "👤 " .. entry.ownerName
-                ownerLbl.TextColor3 = C.dev
-                ownerLbl.Font = Enum.Font.Gotham
-                ownerLbl.TextSize = 7
-                ownerLbl.TextXAlignment = Enum.TextXAlignment.Right
-            end
-
-            local loadBtn = Instance.new("TextButton", row)
-            loadBtn.Size = UDim2.new(0, 50, 0, 24)
-            loadBtn.Position = UDim2.new(1, -56, 0.5, -12)
-            loadBtn.BackgroundColor3 = C.accent
-            loadBtn.Text = "Load"
-            loadBtn.TextColor3 = Color3.new(1, 1, 1)
-            loadBtn.Font = Enum.Font.GothamBold
-            loadBtn.TextSize = 8
-            loadBtn.AutoButtonColor = false
-            corner(loadBtn, 4)
-            pressFX(loadBtn)
-
-            loadBtn.MouseButton1Click:Connect(function()
-                if source == "local" then
-                    loadConfig(entry.name)
-                elseif source == "dev" then
-                    loadConfig(entry.name, entry.data)
-                elseif source == "player" then
-                    loadConfig(entry.name, entry.data)
-                end
-                rebuildUI()
-            end)
+            Helpers.showDynamicNotification(err or "Gagal spawn gambar", C.red)
         end
     end
 
-    -- Build sub-tabs: Lokal, Public (Dev), Private (Self)
-    local subTabs = {}
-    local function makeSubTab(label, source)
-        local btn = Instance.new("TextButton", subTabBar)
-        btn.Size = UDim2.new(0, 0, 1, 0)
-        btn.AutomaticSize = Enum.AutomaticSize.X
-        btn.BackgroundColor3 = (loadSource == source) and C.accent or C.card3
-        btn.Text = ""
-        btn.AutoButtonColor = false
-        corner(btn, 6)
+    spawnBtn.MouseButton1Click:Connect(doSpawn)
+    input.FocusLost:Connect(function(enter) if enter then doSpawn() end end)
+end
 
-        local pad = Instance.new("UIPadding", btn)
-        pad.PaddingLeft = UDim.new(0, 12)
-        pad.PaddingRight = UDim.new(0, 12)
+-- ==================== RENDER: DAFTAR OBJEK DI MAP ====================
+local function renderObjectListSection(order)
+    local folder = getFolder()
+    local objects = folder:GetChildren()
 
-        local lbl = Instance.new("TextLabel", btn)
-        lbl.Size = UDim2.new(0, 0, 1, 0)
-        lbl.AutomaticSize = Enum.AutomaticSize.X
-        lbl.BackgroundTransparency = 1
-        lbl.Text = label
-        lbl.TextColor3 = (loadSource == source) and Color3.new(1, 1, 1) or C.text2
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 9
+    sectionLabel("OBJEK DI MAP (" .. #objects .. ")", order)
 
-        pressFX(btn)
+    if #objects == 0 then
+        local empty = Instance.new("TextLabel", appContent)
+        empty.Size = UDim2.new(1, 0, 0, 40)
+        empty.BackgroundTransparency = 1
+        empty.Text = "Belum ada objek. Spawn model atau gambar di atas."
+        empty.TextColor3 = C.text3
+        empty.Font = Enum.Font.Gotham
+        empty.TextSize = 10
+        empty.TextWrapped = true
+        empty.LayoutOrder = order + 1
+        return
+    end
 
-        btn.MouseButton1Click:Connect(function()
-            loadSource = source
-            for _, tb in ipairs(subTabs) do
-                tb.BackgroundColor3 = C.card3
-                local lbl = tb:FindFirstChildOfClass("TextLabel")
-                if lbl then lbl.TextColor3 = C.text2 end
-            end
-            btn.BackgroundColor3 = C.accent
-            if lbl then lbl.TextColor3 = Color3.new(1, 1, 1) end
+    for i, obj in ipairs(objects) do
+        local isSelected = State.SelectedObject == obj
+        local kind = obj:GetAttribute("Model3D_Kind") or "model"
+
+        local row = Instance.new("Frame", appContent)
+        row.Size = UDim2.new(1, 0, 0, 46)
+        row.BackgroundColor3 = isSelected and C.card2 or C.card
+        row.LayoutOrder = order + 1 + i
+        corner(row, 10)
+        stroke(row, isSelected and C.accent or C.border, isSelected and 1.5 or 1, isSelected and 0.1 or 0.3)
+
+        local icon = Instance.new("TextLabel", row)
+        icon.Size = UDim2.new(0, 34, 0, 34)
+        icon.Position = UDim2.new(0, 6, 0.5, -17)
+        icon.BackgroundColor3 = C.bg
+        icon.Text = kind == "image" and "🖼️" or "🧊"
+        icon.TextSize = 14
+        corner(icon, 8)
+
+        local nameLbl = Instance.new("TextLabel", row)
+        nameLbl.Size = UDim2.new(1, -160, 0, 18)
+        nameLbl.Position = UDim2.new(0, 46, 0, 6)
+        nameLbl.BackgroundTransparency = 1
+        nameLbl.Text = obj.Name
+        nameLbl.TextColor3 = C.text
+        nameLbl.Font = Enum.Font.GothamBold
+        nameLbl.TextSize = 11
+        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+        nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+        local scaleLbl = Instance.new("TextLabel", row)
+        scaleLbl.Size = UDim2.new(1, -160, 0, 14)
+        scaleLbl.Position = UDim2.new(0, 46, 0, 24)
+        scaleLbl.BackgroundTransparency = 1
+        scaleLbl.Text = ("Scale: %.2fx"):format(getObjectScale(obj))
+        scaleLbl.TextColor3 = C.text3
+        scaleLbl.Font = Enum.Font.Gotham
+        scaleLbl.TextSize = 9
+        scaleLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+        local selectBtn = Instance.new("TextButton", row)
+        selectBtn.Size = UDim2.new(0, 60, 0, 34)
+        selectBtn.Position = UDim2.new(1, -104, 0.5, -17)
+        selectBtn.BackgroundColor3 = isSelected and C.accent or C.card2
+        selectBtn.Text = isSelected and "DIPILIH" or "PILIH"
+        selectBtn.TextColor3 = isSelected and Color3.new(1, 1, 1) or C.text2
+        selectBtn.Font = Enum.Font.GothamBold
+        selectBtn.TextSize = 9
+        selectBtn.AutoButtonColor = false
+        corner(selectBtn, 8)
+        pressFX(selectBtn)
+        selectBtn.MouseButton1Click:Connect(function()
+            State.SelectedObject = isSelected and nil or obj
+            setGizmoVisibility()
             rebuildUI()
         end)
 
-        table.insert(subTabs, btn)
+        local delBtn = Instance.new("TextButton", row)
+        delBtn.Size = UDim2.new(0, 34, 0, 34)
+        delBtn.Position = UDim2.new(1, -40, 0.5, -17)
+        delBtn.BackgroundColor3 = C.red
+        delBtn.BackgroundTransparency = 0.85
+        delBtn.Text = "🗑"
+        delBtn.TextColor3 = C.red
+        delBtn.Font = Enum.Font.GothamBold
+        delBtn.TextSize = 12
+        delBtn.AutoButtonColor = false
+        corner(delBtn, 8)
+        pressFX(delBtn)
+        delBtn.MouseButton1Click:Connect(function()
+            deleteObject(obj)
+            rebuildUI()
+        end)
+    end
+end
+
+-- ==================== RENDER: GIZMO CONTROL PANEL ====================
+local function renderGizmoSection(order)
+    sectionLabel("GIZMO KONTROL", order)
+
+    if not State.SelectedObject or not State.SelectedObject.Parent then
+        local hint = Instance.new("TextLabel", appContent)
+        hint.Size = UDim2.new(1, 0, 0, 30)
+        hint.BackgroundTransparency = 1
+        hint.Text = "Pilih objek di daftar atas untuk mengaktifkan gizmo."
+        hint.TextColor3 = C.text3
+        hint.Font = Enum.Font.Gotham
+        hint.TextSize = 10
+        hint.TextWrapped = true
+        hint.LayoutOrder = order + 1
+        return
+    end
+
+    local btnRow = Instance.new("Frame", appContent)
+    btnRow.Size = UDim2.new(1, 0, 0, 44)
+    btnRow.BackgroundTransparency = 1
+    btnRow.LayoutOrder = order + 1
+
+    local btnLayout = Instance.new("UIListLayout", btnRow)
+    btnLayout.FillDirection = Enum.FillDirection.Horizontal
+    btnLayout.Padding = UDim.new(0, 6)
+    btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+
+    local function gizmoToggleBtn(label, icon, isActive, color, onClick)
+        local btn = Instance.new("TextButton", btnRow)
+        btn.Size = UDim2.new(0, 96, 1, 0)
+        btn.BackgroundColor3 = isActive and color or C.card
+        btn.Text = ""
+        btn.AutoButtonColor = false
+        corner(btn, 12)
+        stroke(btn, isActive and color or C.border, isActive and 1.5 or 1, isActive and 0 or 0.3)
+        pressFX(btn)
+
+        local iconLbl = Instance.new("TextLabel", btn)
+        iconLbl.Size = UDim2.new(1, 0, 0, 20)
+        iconLbl.Position = UDim2.new(0, 0, 0, 4)
+        iconLbl.BackgroundTransparency = 1
+        iconLbl.Text = icon
+        iconLbl.TextSize = 14
+
+        local textLbl = Instance.new("TextLabel", btn)
+        textLbl.Size = UDim2.new(1, 0, 0, 16)
+        textLbl.Position = UDim2.new(0, 0, 0, 24)
+        textLbl.BackgroundTransparency = 1
+        textLbl.Text = label
+        textLbl.TextColor3 = isActive and Color3.new(1, 1, 1) or C.text2
+        textLbl.Font = Enum.Font.GothamBold
+        textLbl.TextSize = 9
+
+        btn.MouseButton1Click:Connect(onClick)
         return btn
     end
 
-    makeSubTab("📁 Lokal", "local")
-    makeSubTab("🌍 Public (Dev)", "dev")
-    makeSubTab("🔒 Private (Saya)", "player")
-
-    -- Container list config
-    local listContainer = Instance.new("ScrollingFrame", loadFrame)
-    listContainer.Size = UDim2.new(1, 0, 0, 180)
-    listContainer.BackgroundColor3 = C.card3
-    listContainer.BorderSizePixel = 0
-    listContainer.CanvasSize = UDim2.new(0, 0, 0, 0)
-    listContainer.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    listContainer.ScrollBarThickness = 2
-
-    local listLayout = Instance.new("UIListLayout", listContainer)
-    listLayout.Padding = UDim.new(0, 4)
-
-    local listPad = Instance.new("UIPadding", listContainer)
-    listPad.PaddingTop = UDim.new(0, 4)
-    listPad.PaddingBottom = UDim.new(0, 4)
-
-    -- ===== FETCH & RENDER LIST =====
-    local function fetchAndRenderConfigs()
-        if loadSource == "local" then
-            local configs = {}
-            if Storage.appSettings and Storage.appSettings.model3dConfigs then
-                for name, data in pairs(Storage.appSettings.model3dConfigs) do
-                    if type(data) == "table" and data.objects then
-                        table.insert(configs, {name = name, data = data})
-                    end
-                end
-            end
-            table.sort(configs, function(a, b) return a.name < b.name end)
-            renderConfigList(listContainer, configs, "local")
-
-        elseif loadSource == "dev" then
-            if not loadingFlags.dev then
-                loadingFlags.dev = true
-                if Firebase and Firebase.GetDevModel3DConfigs then
-                    pcall(function()
-                        Firebase.GetDevModel3DConfigs(function(success, data)
-                            configListCache.devConfigs = {}
-                            if success and type(data) == "table" then
-                                for name, cfg in pairs(data) do
-                                    if type(cfg) == "table" and cfg.objects then
-                                        local ownerName = cfg.savedByName or "Developer"
-                                        table.insert(configListCache.devConfigs, {
-                                            name = name,
-                                            data = cfg,
-                                            ownerName = ownerName,
-                                        })
-                                    end
-                                end
-                                table.sort(configListCache.devConfigs, function(a, b) return a.name < b.name end)
-                            end
-                            loadingFlags.dev = false
-                            rebuildUI()
-                        end)
-                    end)
-                end
-            end
-            renderConfigList(listContainer, configListCache.devConfigs, "dev")
-
-        elseif loadSource == "player" then
-            if not loadingFlags.player then
-                loadingFlags.player = true
-                if Firebase and Firebase.GetPlayerModel3DConfigs then
-                    pcall(function()
-                        Firebase.GetPlayerModel3DConfigs(LocalPlayer.UserId, function(success, data)
-                            configListCache.playerConfigs = {}
-                            if success and type(data) == "table" then
-                                for name, cfg in pairs(data) do
-                                    if type(cfg) == "table" and cfg.objects then
-                                        table.insert(configListCache.playerConfigs, {name = name, data = cfg})
-                                    end
-                                end
-                                table.sort(configListCache.playerConfigs, function(a, b) return a.name < b.name end)
-                            end
-                            loadingFlags.player = false
-                            rebuildUI()
-                        end)
-                    end)
-                end
-            end
-            renderConfigList(listContainer, configListCache.playerConfigs, "player")
-        end
-    end
-
-    -- Load initial
-    task.spawn(function()
-        task.wait(0.1)
-        fetchAndRenderConfigs()
+    gizmoToggleBtn("Posisi", "✥", State.PositionMode, C.red, function()
+        State.PositionMode = not State.PositionMode
+        if State.PositionMode then State.RotationMode = false; State.ScaleMode = false end
+        setGizmoVisibility()
+        rebuildUI()
+    end)
+    gizmoToggleBtn("Rotasi", "↻", State.RotationMode, C.accent, function()
+        State.RotationMode = not State.RotationMode
+        if State.RotationMode then State.PositionMode = false; State.ScaleMode = false end
+        setGizmoVisibility()
+        rebuildUI()
+    end)
+    gizmoToggleBtn("Ukuran", "⤢", State.ScaleMode, C.gold, function()
+        State.ScaleMode = not State.ScaleMode
+        if State.ScaleMode then State.PositionMode = false; State.RotationMode = false end
+        setGizmoVisibility()
+        rebuildUI()
     end)
 
-    -- Override rebuildUI untuk tab config agar refresh list
-    local oldRebuild = rebuildUI
-    rebuildUI = function()
-        oldRebuild()
-        if State.currentTab == "Config" then
-            fetchAndRenderConfigs()
-        end
-    end
+    -- Slider skala manual (selain drag gizmo) supaya presisi
+    local scaleRow = Instance.new("Frame", appContent)
+    scaleRow.Size = UDim2.new(1, 0, 0, 44)
+    scaleRow.BackgroundColor3 = C.card
+    scaleRow.LayoutOrder = order + 2
+    corner(scaleRow, 12)
+    stroke(scaleRow, C.border, 1, 0.3)
 
-    -- ===== DEV ONLY: LOAD PLAYER CONFIG BY USER ID =====
-    if isDeveloper then
-        local devFrame = Instance.new("Frame", container)
-        devFrame.Size = UDim2.new(1, 0, 0, 44)
-        devFrame.BackgroundColor3 = C.card2
-        devFrame.LayoutOrder = 2
-        corner(devFrame, 10)
-        stroke(devFrame, C.dev, 1, 0.5)
+    local currentScale = getObjectScale(State.SelectedObject)
 
-        local devLabel = Instance.new("TextLabel", devFrame)
-        devLabel.Size = UDim2.new(1, -180, 0, 16)
-        devLabel.Position = UDim2.new(0, 8, 0, 4)
-        devLabel.BackgroundTransparency = 1
-        devLabel.Text = "👑 Load Config Player Lain (User ID)"
-        devLabel.TextColor3 = C.dev
-        devLabel.Font = Enum.Font.GothamBold
-        devLabel.TextSize = 9
-        devLabel.TextXAlignment = Enum.TextXAlignment.Left
+    local scaleLabel = Instance.new("TextLabel", scaleRow)
+    scaleLabel.Size = UDim2.new(0, 80, 1, 0)
+    scaleLabel.Position = UDim2.new(0, 10, 0, 0)
+    scaleLabel.BackgroundTransparency = 1
+    scaleLabel.Text = ("%.2fx"):format(currentScale)
+    scaleLabel.TextColor3 = C.gold
+    scaleLabel.Font = Enum.Font.GothamBlack
+    scaleLabel.TextSize = 13
+    scaleLabel.TextXAlignment = Enum.TextXAlignment.Left
 
-        local devInput = Instance.new("TextBox", devFrame)
-        devInput.Size = UDim2.new(1, -180, 0, 24)
-        devInput.Position = UDim2.new(0, 8, 0, 22)
-        devInput.BackgroundColor3 = C.card3
-        devInput.PlaceholderText = "User ID | Nama Config"
-        devInput.Text = ""
-        devInput.TextColor3 = C.text
-        devInput.Font = Enum.Font.Gotham
-        devInput.TextSize = 9
-        devInput.ClearTextOnFocus = false
-        corner(devInput, 4)
+    local minusBtn = Instance.new("TextButton", scaleRow)
+    minusBtn.Size = UDim2.new(0, 36, 0, 34)
+    minusBtn.Position = UDim2.new(1, -160, 0.5, -17)
+    minusBtn.BackgroundColor3 = C.card2
+    minusBtn.Text = "−"
+    minusBtn.TextColor3 = C.text
+    minusBtn.Font = Enum.Font.GothamBlack
+    minusBtn.TextSize = 16
+    minusBtn.AutoButtonColor = false
+    corner(minusBtn, 8)
+    pressFX(minusBtn)
+    minusBtn.MouseButton1Click:Connect(function()
+        applyScale(State.SelectedObject, getObjectScale(State.SelectedObject) - 0.1)
+        rebuildUI()
+    end)
 
-        local devLoadBtn = Instance.new("TextButton", devFrame)
-        devLoadBtn.Size = UDim2.new(0, 78, 0, 28)
-        devLoadBtn.Position = UDim2.new(1, -86, 0.5, -8)
-        devLoadBtn.BackgroundColor3 = C.dev
-        devLoadBtn.Text = "Load Player"
-        devLoadBtn.TextColor3 = Color3.fromRGB(10, 10, 10)
-        devLoadBtn.Font = Enum.Font.GothamBold
-        devLoadBtn.TextSize = 9
-        devLoadBtn.AutoButtonColor = false
-        corner(devLoadBtn, 6)
-        pressFX(devLoadBtn)
+    local plusBtn = Instance.new("TextButton", scaleRow)
+    plusBtn.Size = UDim2.new(0, 36, 0, 34)
+    plusBtn.Position = UDim2.new(1, -118, 0.5, -17)
+    plusBtn.BackgroundColor3 = C.card2
+    plusBtn.Text = "+"
+    plusBtn.TextColor3 = C.text
+    plusBtn.Font = Enum.Font.GothamBlack
+    plusBtn.TextSize = 16
+    plusBtn.AutoButtonColor = false
+    corner(plusBtn, 8)
+    pressFX(plusBtn)
+    plusBtn.MouseButton1Click:Connect(function()
+        applyScale(State.SelectedObject, getObjectScale(State.SelectedObject) + 0.1)
+        rebuildUI()
+    end)
 
-        devLoadBtn.MouseButton1Click:Connect(function()
-            local parts = splitPath(devInput.Text, "|")
-            if #parts >= 2 then
-                local userId = tonumber(parts[1]:gsub("%s+", ""))
-                local configName = parts[2]:gsub("^%s+", ""):gsub("%s+$", "")
-                if userId and configName ~= "" then
-                    loadPlayerConfigByUserId(userId, configName)
-                    devInput.Text = ""
-                else
-                    notify("Format: UserID | NamaConfig", C.red)
-                end
-            else
-                notify("Format: UserID | NamaConfig", C.red)
-            end
-        end)
-    end
-
-    return container
+    local resetBtn = Instance.new("TextButton", scaleRow)
+    resetBtn.Size = UDim2.new(0, 68, 0, 34)
+    resetBtn.Position = UDim2.new(1, -76, 0.5, -17)
+    resetBtn.BackgroundColor3 = C.card2
+    resetBtn.Text = "Reset 1x"
+    resetBtn.TextColor3 = C.text2
+    resetBtn.Font = Enum.Font.GothamBold
+    resetBtn.TextSize = 9
+    resetBtn.AutoButtonColor = false
+    corner(resetBtn, 8)
+    pressFX(resetBtn)
+    resetBtn.MouseButton1Click:Connect(function()
+        applyScale(State.SelectedObject, 1)
+        rebuildUI()
+    end)
 end
 
--- ==================== RENDER ACTION BAR ====================
-local function renderActionBar(parent)
-    local bar = Instance.new("Frame", parent)
-    bar.Size = UDim2.new(1, 0, 0, 40)
-    bar.BackgroundColor3 = C.card2
-    bar.LayoutOrder = 3
-    corner(bar, 10)
-    stroke(bar, C.border, 1, 0.3)
+-- ==================== RENDER: SAVE CONFIG ====================
+local function renderSaveConfigSection(order)
+    sectionLabel("SIMPAN CONFIG", order)
 
-    local actionLayout = Instance.new("UIListLayout", bar)
-    actionLayout.FillDirection = Enum.FillDirection.Horizontal
-    actionLayout.Padding = UDim.new(0, 4)
+    local row = Instance.new("Frame", appContent)
+    row.Size = UDim2.new(1, 0, 0, 44)
+    row.BackgroundColor3 = C.card
+    row.LayoutOrder = order + 1
+    corner(row, 12)
+    stroke(row, C.border, 1, 0.3)
 
-    local pad = Instance.new("UIPadding", bar)
-    pad.PaddingLeft = UDim.new(0, 4)
-    pad.PaddingRight = UDim.new(0, 4)
-    pad.PaddingTop = UDim.new(0, 4)
-    pad.PaddingBottom = UDim.new(0, 4)
+    local input = Instance.new("TextBox", row)
+    input.Size = UDim2.new(1, -96, 1, -12)
+    input.Position = UDim2.new(0, 8, 0, 6)
+    input.BackgroundColor3 = C.bg
+    input.PlaceholderText = "Nama config (mis. 'Rumah Kayu')"
+    input.PlaceholderColor3 = C.text3
+    input.Text = ""
+    input.TextColor3 = C.text
+    input.Font = Enum.Font.Gotham
+    input.TextSize = 11
+    input.ClearTextOnFocus = false
+    corner(input, 8)
+    local ip = Instance.new("UIPadding", input)
+    ip.PaddingLeft = UDim.new(0, 8)
 
-    -- Gizmo mode buttons
-    local modes = {
-        {key = "position", label = "📍 Posisi", color = C.accent},
-        {key = "rotation", label = "🔄 Rotasi", color = C.accent2},
-        {key = "resize", label = "📐 Ukuran", color = C.gold},
-    }
+    local saveBtn = Instance.new("TextButton", row)
+    saveBtn.Size = UDim2.new(0, 80, 1, -12)
+    saveBtn.Position = UDim2.new(1, -84, 0, 6)
+    saveBtn.BackgroundColor3 = C.green
+    saveBtn.Text = "SIMPAN"
+    saveBtn.TextColor3 = Color3.new(0, 0, 0)
+    saveBtn.Font = Enum.Font.GothamBlack
+    saveBtn.TextSize = 11
+    saveBtn.AutoButtonColor = false
+    corner(saveBtn, 8)
+    pressFX(saveBtn)
 
-    for _, m in ipairs(modes) do
-        local isActive = (State.gizmoMode == m.key)
-        local btn = Instance.new("TextButton", bar)
-        btn.Size = UDim2.new(0, 0, 1, 0)
-        btn.AutomaticSize = Enum.AutomaticSize.X
-        btn.BackgroundColor3 = isActive and m.color or C.card3
-        btn.Text = ""
-        btn.AutoButtonColor = false
-        corner(btn, 6)
+    local function doSave()
+        local name = input.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if name == "" then
+            Helpers.showDynamicNotification("Isi nama config dulu", C.red)
+            return
+        end
 
-        local p = Instance.new("UIPadding", btn)
-        p.PaddingLeft = UDim.new(0, 8)
-        p.PaddingRight = UDim.new(0, 8)
+        -- Simpan lokal (selalu, sebagai backup offline)
+        local okLocal, msgLocal = saveConfigLocal(name)
 
-        local lbl = Instance.new("TextLabel", btn)
-        lbl.Size = UDim2.new(0, 0, 1, 0)
-        lbl.AutomaticSize = Enum.AutomaticSize.X
-        lbl.BackgroundTransparency = 1
-        lbl.Text = m.label
-        lbl.TextColor3 = isActive and Color3.new(1, 1, 1) or C.text2
-        lbl.Font = Enum.Font.GothamBold
-        lbl.TextSize = 9
-
-        pressFX(btn)
-
-        btn.MouseButton1Click:Connect(function()
-            State.gizmoMode = m.key
-            setupGizmo(Gizmos.Handles, State.gizmoMode)
+        -- Simpan ke Firebase (dev -> visible semua, player biasa -> hanya dirinya)
+        saveConfigFirebase(name, function(okOnline, msgOnline)
+            if okOnline then
+                Helpers.showDynamicNotification(msgOnline, C.green)
+            else
+                Helpers.showDynamicNotification(msgLocal .. " (gagal sync online)", C.gold)
+            end
+            input.Text = ""
             rebuildUI()
         end)
     end
 
-    -- Spacer
-    local spacer = Instance.new("Frame", bar)
-    spacer.Size = UDim2.new(1, -320, 1, 0)
-    spacer.BackgroundTransparency = 1
-
-    -- Delete selected
-    local delBtn = Instance.new("TextButton", bar)
-    delBtn.Size = UDim2.new(0, 48, 1, 0)
-    delBtn.BackgroundColor3 = C.red
-    delBtn.Text = "✕"
-    delBtn.TextColor3 = Color3.new(1, 1, 1)
-    delBtn.Font = Enum.Font.GothamBold
-    delBtn.TextSize = 14
-    delBtn.AutoButtonColor = false
-    corner(delBtn, 6)
-    pressFX(delBtn)
-    delBtn.MouseButton1Click:Connect(deleteSelectedObject)
-
-    -- Clear all
-    local clearBtn = Instance.new("TextButton", bar)
-    clearBtn.Size = UDim2.new(0, 48, 1, 0)
-    clearBtn.BackgroundColor3 = C.border
-    clearBtn.Text = "🗑"
-    clearBtn.TextColor3 = C.text2
-    clearBtn.Font = Enum.Font.GothamBold
-    clearBtn.TextSize = 14
-    clearBtn.AutoButtonColor = false
-    corner(clearBtn, 6)
-    pressFX(clearBtn)
-    clearBtn.MouseButton1Click:Connect(clearAllObjects)
-
-    return bar
+    saveBtn.MouseButton1Click:Connect(doSave)
+    input.FocusLost:Connect(function(enter) if enter then doSave() end end)
 end
 
--- ==================== REBUILD UI ====================
-rebuildUI = function()
-    if not appContent then return end
+-- ==================== RENDER: LOAD CONFIG ====================
+local configListCache = {local_=nil, dev=nil, mine=nil, allPlayers=nil}
+local configListLoading = {mine=false, dev=false, allPlayers=false}
 
-    -- Clear all children
-    for _, child in ipairs(appContent:GetChildren()) do
-        if child:IsA("GuiObject") then
-            child:Destroy()
+local function renderConfigRow(name, sourceLabel, sourceColor, onLoad, onDelete)
+    local row = Instance.new("Frame", appContent)
+    row.Size = UDim2.new(1, 0, 0, 46)
+    row.BackgroundColor3 = C.card
+    row.LayoutOrder = 9999 -- diisi ulang oleh caller lewat urutan penambahan
+    corner(row, 10)
+    stroke(row, C.border, 1, 0.3)
+
+    local nameLbl = Instance.new("TextLabel", row)
+    nameLbl.Size = UDim2.new(1, -160, 0, 20)
+    nameLbl.Position = UDim2.new(0, 10, 0, 5)
+    nameLbl.BackgroundTransparency = 1
+    nameLbl.Text = name
+    nameLbl.TextColor3 = C.text
+    nameLbl.Font = Enum.Font.GothamBold
+    nameLbl.TextSize = 11
+    nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+    nameLbl.TextTruncate = Enum.TextTruncate.AtEnd
+
+    local tagLbl = Instance.new("TextLabel", row)
+    tagLbl.Size = UDim2.new(1, -160, 0, 14)
+    tagLbl.Position = UDim2.new(0, 10, 0, 24)
+    tagLbl.BackgroundTransparency = 1
+    tagLbl.Text = sourceLabel
+    tagLbl.TextColor3 = sourceColor
+    tagLbl.Font = Enum.Font.GothamBold
+    tagLbl.TextSize = 8
+    tagLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+    local loadBtn = Instance.new("TextButton", row)
+    loadBtn.Size = UDim2.new(0, 70, 0, 34)
+    loadBtn.Position = UDim2.new(1, -114, 0.5, -17)
+    loadBtn.BackgroundColor3 = C.accent
+    loadBtn.Text = "LOAD"
+    loadBtn.TextColor3 = Color3.new(1, 1, 1)
+    loadBtn.Font = Enum.Font.GothamBold
+    loadBtn.TextSize = 10
+    loadBtn.AutoButtonColor = false
+    corner(loadBtn, 8)
+    pressFX(loadBtn)
+    loadBtn.MouseButton1Click:Connect(onLoad)
+
+    if onDelete then
+        local delBtn = Instance.new("TextButton", row)
+        delBtn.Size = UDim2.new(0, 34, 0, 34)
+        delBtn.Position = UDim2.new(1, -40, 0.5, -17)
+        delBtn.BackgroundColor3 = C.red
+        delBtn.BackgroundTransparency = 0.85
+        delBtn.Text = "🗑"
+        delBtn.TextColor3 = C.red
+        delBtn.Font = Enum.Font.GothamBold
+        delBtn.TextSize = 12
+        delBtn.AutoButtonColor = false
+        corner(delBtn, 8)
+        pressFX(delBtn)
+        delBtn.MouseButton1Click:Connect(onDelete)
+    end
+
+    return row
+end
+
+local function renderLoadConfigSection(order)
+    sectionLabel("LOAD CONFIG", order)
+
+    -- ===== FILTER TABS =====
+    local tabs = {"Lokal", "Milikku (Online)", "Developer"}
+    if isDeveloper then table.insert(tabs, "Semua Player") end
+
+    local tabRow = Instance.new("Frame", appContent)
+    tabRow.Size = UDim2.new(1, 0, 0, 30)
+    tabRow.BackgroundTransparency = 1
+    tabRow.LayoutOrder = order + 1
+
+    local tabScroll = Instance.new("ScrollingFrame", tabRow)
+    tabScroll.Size = UDim2.new(1, 0, 1, 0)
+    tabScroll.BackgroundTransparency = 1
+    tabScroll.ScrollBarThickness = 0
+    tabScroll.ScrollingDirection = Enum.ScrollingDirection.X
+    tabScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    tabScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
+
+    local tabLayout = Instance.new("UIListLayout", tabScroll)
+    tabLayout.FillDirection = Enum.FillDirection.Horizontal
+    tabLayout.Padding = UDim.new(0, 6)
+
+    for _, tabName in ipairs(tabs) do
+        local isActive = State.ConfigFilter == tabName
+        local chip = Instance.new("TextButton", tabScroll)
+        chip.Size = UDim2.new(0, 0, 1, 0)
+        chip.AutomaticSize = Enum.AutomaticSize.X
+        chip.BackgroundColor3 = isActive and C.accent or C.card
+        chip.Text = ""
+        chip.AutoButtonColor = false
+        corner(chip, 100)
+        stroke(chip, isActive and C.accent or C.border, 1, isActive and 0 or 0.3)
+        pressFX(chip)
+
+        local chipPad = Instance.new("UIPadding", chip)
+        chipPad.PaddingLeft = UDim.new(0, 12); chipPad.PaddingRight = UDim.new(0, 12)
+
+        local chipLbl = Instance.new("TextLabel", chip)
+        chipLbl.Size = UDim2.new(0, 0, 1, 0)
+        chipLbl.AutomaticSize = Enum.AutomaticSize.X
+        chipLbl.BackgroundTransparency = 1
+        chipLbl.Text = tabName
+        chipLbl.TextColor3 = isActive and Color3.new(1, 1, 1) or C.text2
+        chipLbl.Font = Enum.Font.GothamBold
+        chipLbl.TextSize = 9
+
+        chip.MouseButton1Click:Connect(function()
+            State.ConfigFilter = tabName
+            State.BrowsePlayerUserId = nil
+            rebuildUI()
+        end)
+    end
+
+    -- ===== KONTEN SESUAI FILTER =====
+    local baseOrder = order + 2
+
+    if State.ConfigFilter == "Lokal" then
+        local names = {}
+        for name in pairs(LocalConfigs) do table.insert(names, name) end
+        table.sort(names)
+
+        if #names == 0 then
+            local empty = Instance.new("TextLabel", appContent)
+            empty.Size = UDim2.new(1, 0, 0, 30)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Belum ada config lokal tersimpan."
+            empty.TextColor3 = C.text3
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 10
+            empty.LayoutOrder = baseOrder
+        else
+            for i, name in ipairs(names) do
+                local row = renderConfigRow(name, "💾 Lokal (device ini saja)", C.text3,
+                    function()
+                        loadConfigLocal(name, function(ok, msg)
+                            Helpers.showDynamicNotification(msg, ok and C.green or C.red)
+                            rebuildUI()
+                        end)
+                    end,
+                    function()
+                        deleteConfigLocal(name)
+                        Helpers.showDynamicNotification("Config lokal dihapus", C.red)
+                        rebuildUI()
+                    end
+                )
+                row.LayoutOrder = baseOrder + i
+            end
+        end
+
+    elseif State.ConfigFilter == "Milikku (Online)" then
+        if not Firebase then
+            local empty = Instance.new("TextLabel", appContent)
+            empty.Size = UDim2.new(1, 0, 0, 30)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Firebase tidak tersedia."
+            empty.TextColor3 = C.text3
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 10
+            empty.LayoutOrder = baseOrder
+        else
+            local loadingLbl = Instance.new("TextLabel", appContent)
+            loadingLbl.Size = UDim2.new(1, 0, 0, 30)
+            loadingLbl.BackgroundTransparency = 1
+            loadingLbl.Text = "Memuat config online kamu..."
+            loadingLbl.TextColor3 = C.text3
+            loadingLbl.Font = Enum.Font.Gotham
+            loadingLbl.TextSize = 10
+            loadingLbl.LayoutOrder = baseOrder
+
+            if not configListLoading.mine and configListCache.mine == nil then
+                configListLoading.mine = true
+                fetchMyPlayerConfigs(function(list)
+                    configListCache.mine = list or {}
+                    configListLoading.mine = false
+                    rebuildUI()
+                end)
+            end
+
+            if configListCache.mine ~= nil then
+                pcall(function() loadingLbl:Destroy() end)
+                local list = configListCache.mine
+                local names = {}
+                if list and type(list) == "table" then
+                    for configId, data in pairs(list) do table.insert(names, {id = configId, data = data}) end
+                end
+                table.sort(names, function(a, b) return (a.data.name or a.id) < (b.data.name or b.id) end)
+
+                if #names == 0 then
+                    local empty = Instance.new("TextLabel", appContent)
+                    empty.Size = UDim2.new(1, 0, 0, 30)
+                    empty.BackgroundTransparency = 1
+                    empty.Text = "Belum ada config online milikmu."
+                    empty.TextColor3 = C.text3
+                    empty.Font = Enum.Font.Gotham
+                    empty.TextSize = 10
+                    empty.LayoutOrder = baseOrder
+                else
+                    for i, entry in ipairs(names) do
+                        local row = renderConfigRow(entry.data.name or entry.id, "☁️ Online · hanya kamu yang lihat", C.accent2,
+                            function()
+                                loadConfigFromFirebaseData(entry.data, function(ok, msg)
+                                    Helpers.showDynamicNotification(msg, ok and C.green or C.red)
+                                    rebuildUI()
+                                end)
+                            end,
+                            function()
+                                task.spawn(function()
+                                    Firebase.DeletePlayerModel3D(LocalPlayer.UserId, entry.id)
+                                    configListCache.mine = nil
+                                    Helpers.showDynamicNotification("Config online dihapus", C.red)
+                                    rebuildUI()
+                                end)
+                            end
+                        )
+                        row.LayoutOrder = baseOrder + i
+                    end
+                end
+            end
+        end
+
+    elseif State.ConfigFilter == "Developer" then
+        if not Firebase or not DEV_USER_ID then
+            local empty = Instance.new("TextLabel", appContent)
+            empty.Size = UDim2.new(1, 0, 0, 30)
+            empty.BackgroundTransparency = 1
+            empty.Text = "Firebase / Developer ID tidak dikonfigurasi."
+            empty.TextColor3 = C.text3
+            empty.Font = Enum.Font.Gotham
+            empty.TextSize = 10
+            empty.LayoutOrder = baseOrder
+        else
+            local loadingLbl = Instance.new("TextLabel", appContent)
+            loadingLbl.Size = UDim2.new(1, 0, 0, 30)
+            loadingLbl.BackgroundTransparency = 1
+            loadingLbl.Text = "Memuat config dari developer..."
+            loadingLbl.TextColor3 = C.text3
+            loadingLbl.Font = Enum.Font.Gotham
+            loadingLbl.TextSize = 10
+            loadingLbl.LayoutOrder = baseOrder
+
+            if not configListLoading.dev and configListCache.dev == nil then
+                configListLoading.dev = true
+                fetchDevConfigs(function(list)
+                    configListCache.dev = list or {}
+                    configListLoading.dev = false
+                    rebuildUI()
+                end)
+            end
+
+            if configListCache.dev ~= nil then
+                pcall(function() loadingLbl:Destroy() end)
+                local list = configListCache.dev
+                local names = {}
+                if list and type(list) == "table" then
+                    for configId, data in pairs(list) do table.insert(names, {id = configId, data = data}) end
+                end
+                table.sort(names, function(a, b) return (a.data.name or a.id) < (b.data.name or b.id) end)
+
+                if #names == 0 then
+                    local empty = Instance.new("TextLabel", appContent)
+                    empty.Size = UDim2.new(1, 0, 0, 30)
+                    empty.BackgroundTransparency = 1
+                    empty.Text = "Developer belum menyimpan config apapun."
+                    empty.TextColor3 = C.text3
+                    empty.Font = Enum.Font.Gotham
+                    empty.TextSize = 10
+                    empty.LayoutOrder = baseOrder
+                else
+                    for i, entry in ipairs(names) do
+                        local canDelete = isDeveloper
+                        local row = renderConfigRow(entry.data.name or entry.id, "👑 Developer · terlihat semua pemain", C.gold,
+                            function()
+                                loadConfigFromFirebaseData(entry.data, function(ok, msg)
+                                    Helpers.showDynamicNotification(msg, ok and C.green or C.red)
+                                    rebuildUI()
+                                end)
+                            end,
+                            canDelete and function()
+                                task.spawn(function()
+                                    Firebase.DeleteDevModel3D(DEV_USER_ID, entry.id)
+                                    configListCache.dev = nil
+                                    Helpers.showDynamicNotification("Config developer dihapus", C.red)
+                                    rebuildUI()
+                                end)
+                            end or nil
+                        )
+                        row.LayoutOrder = baseOrder + i
+                    end
+                end
+            end
+        end
+
+    elseif State.ConfigFilter == "Semua Player" and isDeveloper then
+        -- Khusus developer: browse config milik player manapun yang pernah menyimpan.
+        if not State.BrowsePlayerUserId then
+            local loadingLbl = Instance.new("TextLabel", appContent)
+            loadingLbl.Size = UDim2.new(1, 0, 0, 30)
+            loadingLbl.BackgroundTransparency = 1
+            loadingLbl.Text = "Memuat daftar player yang punya config..."
+            loadingLbl.TextColor3 = C.text3
+            loadingLbl.Font = Enum.Font.Gotham
+            loadingLbl.TextSize = 10
+            loadingLbl.LayoutOrder = baseOrder
+
+            if not configListLoading.allPlayers and configListCache.allPlayers == nil then
+                configListLoading.allPlayers = true
+                fetchAllPlayerConfigsForDev(function(all)
+                    configListCache.allPlayers = all or {}
+                    configListLoading.allPlayers = false
+                    rebuildUI()
+                end)
+            end
+
+            if configListCache.allPlayers ~= nil then
+                pcall(function() loadingLbl:Destroy() end)
+                local all = configListCache.allPlayers
+                local userIds = {}
+                for uid in pairs(all) do table.insert(userIds, uid) end
+                table.sort(userIds)
+
+                if #userIds == 0 then
+                    local empty = Instance.new("TextLabel", appContent)
+                    empty.Size = UDim2.new(1, 0, 0, 30)
+                    empty.BackgroundTransparency = 1
+                    empty.Text = "Belum ada player yang menyimpan config."
+                    empty.TextColor3 = C.text3
+                    empty.Font = Enum.Font.Gotham
+                    empty.TextSize = 10
+                    empty.LayoutOrder = baseOrder
+                else
+                    for i, uid in ipairs(userIds) do
+                        local configs = all[uid]
+                        local count = 0
+                        local ownerName = uid
+                        if type(configs) == "table" then
+                            for _, c in pairs(configs) do
+                                count = count + 1
+                                if type(c) == "table" and c.ownerName then ownerName = c.ownerName end
+                            end
+                        end
+
+                        local row = Instance.new("Frame", appContent)
+                        row.Size = UDim2.new(1, 0, 0, 46)
+                        row.BackgroundColor3 = C.card
+                        row.LayoutOrder = baseOrder + i
+                        corner(row, 10)
+                        stroke(row, C.border, 1, 0.3)
+
+                        local nameLbl = Instance.new("TextLabel", row)
+                        nameLbl.Size = UDim2.new(1, -90, 0, 20)
+                        nameLbl.Position = UDim2.new(0, 10, 0, 5)
+                        nameLbl.BackgroundTransparency = 1
+                        nameLbl.Text = ownerName
+                        nameLbl.TextColor3 = C.text
+                        nameLbl.Font = Enum.Font.GothamBold
+                        nameLbl.TextSize = 11
+                        nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+                        local tagLbl = Instance.new("TextLabel", row)
+                        tagLbl.Size = UDim2.new(1, -90, 0, 14)
+                        tagLbl.Position = UDim2.new(0, 10, 0, 24)
+                        tagLbl.BackgroundTransparency = 1
+                        tagLbl.Text = "UserId " .. tostring(uid) .. " · " .. count .. " config"
+                        tagLbl.TextColor3 = C.text3
+                        tagLbl.Font = Enum.Font.Gotham
+                        tagLbl.TextSize = 8
+                        tagLbl.TextXAlignment = Enum.TextXAlignment.Left
+
+                        local browseBtn = Instance.new("TextButton", row)
+                        browseBtn.Size = UDim2.new(0, 70, 0, 34)
+                        browseBtn.Position = UDim2.new(1, -78, 0.5, -17)
+                        browseBtn.BackgroundColor3 = C.accent
+                        browseBtn.Text = "BUKA"
+                        browseBtn.TextColor3 = Color3.new(1, 1, 1)
+                        browseBtn.Font = Enum.Font.GothamBold
+                        browseBtn.TextSize = 10
+                        browseBtn.AutoButtonColor = false
+                        corner(browseBtn, 8)
+                        pressFX(browseBtn)
+                        browseBtn.MouseButton1Click:Connect(function()
+                            State.BrowsePlayerUserId = uid
+                            rebuildUI()
+                        end)
+                    end
+                end
+            end
+        else
+            -- Sedang browse config milik 1 player tertentu
+            local backBtn = Instance.new("TextButton", appContent)
+            backBtn.Size = UDim2.new(0, 100, 0, 26)
+            backBtn.BackgroundColor3 = C.card2
+            backBtn.Text = "← Daftar Player"
+            backBtn.TextColor3 = C.text2
+            backBtn.Font = Enum.Font.GothamBold
+            backBtn.TextSize = 9
+            backBtn.AutoButtonColor = false
+            backBtn.LayoutOrder = baseOrder
+            corner(backBtn, 8)
+            pressFX(backBtn)
+            backBtn.MouseButton1Click:Connect(function()
+                State.BrowsePlayerUserId = nil
+                rebuildUI()
+            end)
+
+            local configs = configListCache.allPlayers and configListCache.allPlayers[State.BrowsePlayerUserId]
+            local names = {}
+            if type(configs) == "table" then
+                for configId, data in pairs(configs) do table.insert(names, {id = configId, data = data}) end
+            end
+            table.sort(names, function(a, b) return (a.data.name or a.id) < (b.data.name or b.id) end)
+
+            if #names == 0 then
+                local empty = Instance.new("TextLabel", appContent)
+                empty.Size = UDim2.new(1, 0, 0, 30)
+                empty.BackgroundTransparency = 1
+                empty.Text = "Player ini tidak punya config."
+                empty.TextColor3 = C.text3
+                empty.Font = Enum.Font.Gotham
+                empty.TextSize = 10
+                empty.LayoutOrder = baseOrder + 1
+            else
+                for i, entry in ipairs(names) do
+                    local row = renderConfigRow(entry.data.name or entry.id, "🙋 Milik player · dev bisa load", C.green,
+                        function()
+                            loadConfigFromFirebaseData(entry.data, function(ok, msg)
+                                Helpers.showDynamicNotification(msg, ok and C.green or C.red)
+                                rebuildUI()
+                            end)
+                        end,
+                        nil -- dev tidak menghapus config milik player lain dari sini
+                    )
+                    row.LayoutOrder = baseOrder + 1 + i
+                end
+            end
         end
     end
-
-    -- Create layout
-    local layout = Instance.new("UIListLayout", appContent)
-    layout.Padding = UDim.new(0, 8)
-    layout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    -- Render all sections
-    renderHeader(appContent)
-    renderTabBar(appContent)
-
-    if State.currentTab == "Models" then
-        renderModelsTab(appContent)
-    elseif State.currentTab == "Images" then
-        renderImagesTab(appContent)
-    elseif State.currentTab == "Config" then
-        renderConfigTab(appContent)
-    end
-
-    renderActionBar(appContent)
 end
 
--- ==================== ENTRY POINT ====================
+-- ==================== MAIN REBUILD ====================
+local function clearAppContentLocal()
+    for _, c in ipairs(appContent:GetChildren()) do
+        if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then c:Destroy() end
+    end
+end
+
+rebuildUI = function()
+    clearAppContentLocal()
+    initGizmos()
+
+    renderHeader()
+    renderSpawnModelSection(1)
+    renderSpawnImageSection(3)
+    renderObjectListSection(5)
+    renderGizmoSection(7)
+    renderSaveConfigSection(10)
+    renderLoadConfigSection(12)
+end
+
+-- ==================== BUKA APP ====================
 function _G.openModel3DApp()
-    -- Pastikan gizmo ada
-    if not Gizmos.Handles then
-        createGizmo()
-    end
-
-    -- Setup gizmo sesuai mode
-    setupGizmo(Gizmos.Handles, State.gizmoMode)
-
-    -- Render UI
+    -- Reset cache config online setiap kali app dibuka supaya datanya fresh,
+    -- tapi TIDAK mereset objek yang sudah di-spawn di map (itu persist).
+    configListCache = {local_=nil, dev=nil, mine=nil, allPlayers=nil}
+    configListLoading = {mine=false, dev=false, allPlayers=false}
     rebuildUI()
-
-    notify("🧊 Model3D Studio siap! Load model atau gambar.", C.accent)
 end
 
--- ==================== AUTO INITIALIZE GIZMO ====================
-task.spawn(function()
-    task.wait(0.5)
-    if not Gizmos.Handles then
-        createGizmo()
-    end
-end)
-
-print("[Model3D] Loaded! Developer mode:", isDeveloper)
-
--- [FIX] Mengembalikan fungsi agar tidak error 'nil' saat dipanggil oleh fungsi openApp di LocalScript utama 
-return _G.openModel3DApp
+print("[Model3D] Loaded! Siap spawn model & gambar ke map.")
