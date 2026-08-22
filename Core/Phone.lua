@@ -755,10 +755,11 @@ function _G.openPhone()
         if _G.PhoneState.currentScreen == "home" or _G.PhoneState.currentScreen == nil then
             if _G.goHome then _G.goHome() end
             _G.PhoneState.currentScreen = "home"
+        elseif _G.reopenCurrentApp then
+            -- Pastikan layar app yang sebelumnya aktif benar-benar tampil
+            -- (posisi & background-nya) tanpa memanggil ulang goHome().
+            _G.reopenCurrentApp()
         end
-        -- Jika currentScreen bukan "home", tidak melakukan apa-apa di sini:
-        -- app yang sebelumnya terbuka masih Visible = true di dalam phone frame,
-        -- jadi otomatis langsung terlihat lagi begitu phone.Visible = true.
     end
 end
 
