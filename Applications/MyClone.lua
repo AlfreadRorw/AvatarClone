@@ -1151,11 +1151,11 @@ local function makeInput(placeholder, parent)
     corner(frame, 8)
     stroke(frame, COLORS.Panel3, 1)
 
-    local tb = Instance.new("")
+    local tb = Instance.new("TextBox")
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
-    tb.PlaceholderText = placeholder or ""
+    tb.PlaceholderText = placeholder
     tb.PlaceholderColor3 = COLORS.Gray
     tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
@@ -1265,11 +1265,11 @@ rebuildEditorTab = function()
     selInfo.Position = UDim2.new(0, 10, 0, 24)
     selInfo.Size = UDim2.new(1, -20, 0, 16)
 
-    local renameBox = Instance.new("")
+    local renameBox = Instance.new("TextBox")
     renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
-    renameBox.PlaceholderText = "Ubah nama clone..."
+    renameBox.Placeholder = "Ubah nama clone..."
     renameBox.PlaceholderColor3 = COLORS.DarkGray
     renameBox.TextColor3 = COLORS.White
     renameBox.Font = Enum.Font.Gotham
