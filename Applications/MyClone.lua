@@ -1155,7 +1155,7 @@ local function makeInput(placeholder, parent)
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
-    tb.PlaceholderText = placeholder
+    tb.PlaceholderText = placeholder or ""
     tb.PlaceholderColor3 = COLORS.Gray
     tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
@@ -1269,7 +1269,7 @@ rebuildEditorTab = function()
     renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
-    renameBox.Placeholder = "Ubah nama clone..."
+    renameBox.PlaceholderText = "Ubah nama clone..."
     renameBox.PlaceholderColor3 = COLORS.DarkGray
     renameBox.TextColor3 = COLORS.White
     renameBox.Font = Enum.Font.Gotham

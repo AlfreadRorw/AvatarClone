@@ -112,6 +112,7 @@ local AppList = {
     {path = "Applications/Games.lua", name = "Games"},
     {path = "Applications/Emote.lua", name = "Emote"},
     {path = "Applications/MyClone.lua", name = "MyClone"},
+    {path = "Applications/Model3D.lua", name = "Model3D"},
     
 }
 

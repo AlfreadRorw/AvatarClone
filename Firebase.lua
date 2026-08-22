@@ -369,6 +369,66 @@ function Firebase.RenameSavedAvatar(devUserId, avatarId, newName)
     return Firebase.PatchData("saved_avatars/" .. tostring(devUserId) .. "/" .. avatarId, {name = newName})
 end
 
+-- =======================================================
+-- MODEL 3D SPECIFIC FIREBASE ENDPOINTS
+-- =======================================================
+
+-- Simpan Config Model3D milik Developer (Terlihat oleh SEMUA Player)
+function Firebase.SaveDevModel3DConfig(configName, data, callback)
+    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
+    local path = "model3d_configs/" .. tostring(devUserId) .. "/" .. configName
+    Firebase.SetData(path, data, function(success, res)
+        if callback then callback(success, res) end
+    end)
+end
+
+-- Ambil SEMUA Config Model3D milik Developer
+function Firebase.GetDevModel3DConfigs(callback)
+    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
+    local path = "model3d_configs/" .. tostring(devUserId)
+    Firebase.GetData(path, function(success, data)
+        if success and type(data) == "table" then
+            if callback then callback(true, data) end
+        else
+            if callback then callback(false, {}) end
+        end
+    end)
+end
+
+-- Simpan Config Model3D milik Player (Privat)
+function Firebase.SavePlayerModel3DConfig(configName, data, callback)
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return end
+    local path = "model3d_configs_player/" .. tostring(localPlayer.UserId) .. "/" .. configName
+    Firebase.SetData(path, data, function(success, res)
+        if callback then callback(success, res) end
+    end)
+end
+
+-- Ambil Config Model3D milik Player Tertentu (bisa milik sendiri atau dipanggil Developer via UserId)
+function Firebase.GetPlayerModel3DConfigs(targetUserId, callback)
+    local path = "model3d_configs_player/" .. tostring(targetUserId)
+    Firebase.GetData(path, function(success, data)
+        if success and type(data) == "table" then
+            if callback then callback(true, data) end
+        else
+            if callback then callback(false, {}) end
+        end
+    end)
+end
+
+-- Hapus Config Model3D
+function Firebase.DeleteModel3DConfig(configName, isDevConfig, callback)
+    local localPlayer = Players.LocalPlayer
+    if not localPlayer then return end
+    local devUserId = Config and Config.DEVELOPER_USER_ID or 10164114772
+    local path = isDevConfig and ("model3d_configs/" .. tostring(devUserId) .. "/" .. configName)
+                            or ("model3d_configs_player/" .. tostring(localPlayer.UserId) .. "/" .. configName)
+    Firebase.SetData(path, nil, function(success, res)
+        if callback then callback(success, res) end
+    end)
+end
+
 -- ==================== GATE AKSES PREMIUM.LUA ====================
 function Firebase.IsPermanentUser(userId)
     local uid = tostring(userId)

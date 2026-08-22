@@ -447,4 +447,51 @@ iconBuilders.MyClone = function(p, c)
     arrow.ZIndex = 2
 end
 
+-- ================================================================
+-- 23. MODEL 3D — Dua kotak bertumpuk (Wireframe 3D) dengan node origin
+-- ================================================================
+iconBuilders.Model3D = function(p, c)
+    -- Base tile kotak gelap rounded standar
+    local tile = baseTile(p, 30, 10)
+    
+    -- Kotak Belakang (Kedalaman / Depth)
+    local backBox = Instance.new("Frame", tile)
+    backBox.Size = UDim2.new(0, 10, 0, 10)
+    backBox.AnchorPoint = Vector2.new(0.5, 0.5)
+    backBox.Position = UDim2.new(0.5, 3, 0.5, -4)
+    backBox.BackgroundTransparency = 1
+    backBox.ZIndex = 1
+    Helpers.corner(backBox, 1)
+    Helpers.stroke(backBox, WHITE, 1, 0.6) -- Stroke lebih transparan memberi efek jauh
+    
+    -- Kotak Depan (Wajah utama)
+    local frontBox = Instance.new("Frame", tile)
+    frontBox.Size = UDim2.new(0, 12, 0, 12)
+    frontBox.AnchorPoint = Vector2.new(0.5, 0.5)
+    frontBox.Position = UDim2.new(0.5, -2, 0.5, 1)
+    frontBox.BackgroundTransparency = 1
+    frontBox.ZIndex = 2
+    Helpers.corner(frontBox, 1)
+    Helpers.stroke(frontBox, WHITE, 1.5, 0) -- Stroke solid memberi efek dekat
+    
+    -- Garis penghubung (Memberi ilusi kubus 3D isometrik)
+    local connect = Instance.new("Frame", tile)
+    connect.Size = UDim2.new(0, 1.5, 0, 6)
+    connect.AnchorPoint = Vector2.new(0.5, 0.5)
+    connect.Position = UDim2.new(0.5, 0.5, 0.5, -1.5)
+    connect.BackgroundColor3 = WHITE
+    connect.BackgroundTransparency = 0.5
+    connect.Rotation = -45
+    connect.ZIndex = 1
+    
+    -- Node origin (Titik tengah / merepresentasikan Anchor point gizmo)
+    local origin = Instance.new("Frame", tile)
+    origin.Size = UDim2.new(0, 3, 0, 3)
+    origin.AnchorPoint = Vector2.new(0.5, 0.5)
+    origin.Position = UDim2.new(0.5, -2, 0.5, 1)
+    origin.BackgroundColor3 = WHITE
+    origin.ZIndex = 3
+    Helpers.corner(origin, 100)
+end
+
 return iconBuilders
