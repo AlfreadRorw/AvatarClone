@@ -19,6 +19,7 @@ local HttpService       = Services.HttpService
 local RunService       = Services.RunService
 local UserInputService = Services.UserInputService
 local InsertService    = game:GetService("InsertService")
+local AssetService     = game:GetService("AssetService")
 local CoreGui          = game:GetService("CoreGui")
 
 local corner   = Helpers.corner
@@ -102,63 +103,94 @@ local function tableToCFrame(t)
 end
 
 -- ==================== SPAWN OBJECT: MODEL 3D DARI ASSET ID ====================
+-- CATATAN PENTING: InsertService:LoadAsset() TIDAK BISA dipakai di runtime
+-- game / executor (hanya boleh dari Roblox Studio saat development) — itu
+-- sengaja dikunci Roblox, bukan bug, dan errornya persis "InsertService
+-- cannot be used to load assets". Jadi method itu TIDAK dipakai sama sekali.
+--
+-- Sebagai gantinya kita coba 2 metode berurutan, dari yang paling lengkap:
+--   1) AssetService:LoadAssetAsync(id) — pengganti resmi modern InsertService:
+--      LoadAsset (dirilis Roblox September 2025), mengembalikan Model UTUH
+--      (bisa berisi banyak part/texture, bukan cuma 1 mesh polos). Ini class
+--      berbeda dari InsertService jadi TIDAK ikut kena block yang sama.
+--      Catatan: hasilnya Sandboxed (tanpa script capability) — tidak masalah
+--      untuk objek yang cuma ditampilkan visual seperti di app ini.
+--   2) Kalau (1) gagal (mis. asset third-party dan "Allow Loading Third
+--      Party Assets" belum aktif di game ini) -> fallback ke
+--      InsertService:CreateMeshPartAsync, yang HANYA menghasilkan geometri
+--      mesh polos (tanpa banyak part/texture kompleks) tapi tetap resmi
+--      diizinkan Roblox untuk dipakai di runtime.
 local function spawnModel3D(assetId, atCFrame)
     local id = tonumber(assetId)
     if not id then return nil, "Asset ID tidak valid (harus berupa angka)." end
 
-    local ok, result = pcall(function()
-        return InsertService:LoadAsset(id)
+    local model = nil
+    local errors = {}
+
+    -- ===== METODE 1: AssetService:LoadAssetAsync (paling lengkap) =====
+    local ok1, result1 = pcall(function()
+        return AssetService:LoadAssetAsync(id)
     end)
-    if not ok then
-        return nil, "Gagal load asset " .. tostring(id) .. ": " .. tostring(result)
-    end
-    if not result then
-        return nil, "Asset ID " .. tostring(id) .. " tidak ditemukan atau bukan Model/Mesh yang valid."
-    end
+    if ok1 and result1 then
+        model = result1
+        model.Name = "Model3D_" .. tostring(id)
+        model:SetAttribute("Model3D_Kind", "model")
+        model:SetAttribute("Model3D_AssetId", id)
 
-    -- InsertService:LoadAsset() SELALU mengembalikan sebuah Model pembungkus
-    -- (biasanya bernama "Model") yang isinya bisa berupa: 1 Model utuh,
-    -- 1 MeshPart/Part tunggal, atau beberapa part lepas. Supaya PivotTo()
-    -- selalu berfungsi (PivotTo cuma ada di Model/PVInstance, TIDAK ada
-    -- langsung di BasePart), kita SELALU bungkus isinya ke dalam 1 Model
-    -- baru, apapun bentuk aslinya.
-    local children = result:GetChildren()
-    if #children == 0 then
-        result:Destroy()
-        return nil, "Asset ID " .. tostring(id) .. " kosong (tidak ada isinya)."
-    end
+        -- Kalau hasilnya bukan Model murni (kadang Model pembungkus berisi
+        -- 1 Model lagi di dalamnya), ratakan supaya PivotTo tetap presisi.
+        if model:IsA("Model") then
+            local children = model:GetChildren()
+            if #children == 1 and children[1]:IsA("Model") and not model.PrimaryPart then
+                local inner = children[1]
+                for _, grandchild in ipairs(inner:GetChildren()) do
+                    grandchild.Parent = model
+                end
+                inner:Destroy()
+            end
+        end
 
-    local wrapper = Instance.new("Model")
-    wrapper.Name = "Model3D_" .. tostring(id)
-
-    if #children == 1 and children[1]:IsA("Model") then
-        -- Kasus umum: sudah berupa 1 Model, pindahkan isinya langsung
-        -- supaya struktur tetap rapi (tidak nested Model di dalam Model).
-        for _, grandchild in ipairs(children[1]:GetChildren()) do
-            grandchild.Parent = wrapper
+        if not model.PrimaryPart then
+            local firstPart = model:FindFirstChildWhichIsA("BasePart", true)
+            if firstPart then model.PrimaryPart = firstPart end
         end
     else
-        -- Kasus: MeshPart/Part tunggal, atau beberapa part lepas.
-        for _, child in ipairs(children) do
-            child.Parent = wrapper
+        table.insert(errors, "AssetService:LoadAssetAsync -> " .. tostring(result1))
+    end
+
+    -- ===== METODE 2 (fallback): InsertService:CreateMeshPartAsync =====
+    if not model then
+        local contentId = "rbxassetid://" .. tostring(id)
+        local ok2, result2 = pcall(function()
+            return InsertService:CreateMeshPartAsync(
+                contentId,
+                Enum.CollisionFidelity.Default,
+                Enum.RenderFidelity.Automatic
+            )
+        end)
+        if ok2 and result2 then
+            local meshPart = result2
+            meshPart.Anchored = true
+            meshPart.CanCollide = false
+
+            model = Instance.new("Model")
+            model.Name = "Model3D_" .. tostring(id)
+            model:SetAttribute("Model3D_Kind", "model")
+            model:SetAttribute("Model3D_AssetId", id)
+            meshPart.Parent = model
+            model.PrimaryPart = meshPart
+        else
+            table.insert(errors, "InsertService:CreateMeshPartAsync -> " .. tostring(result2))
         end
     end
-    result:Destroy()
 
-    local model = wrapper
-    model:SetAttribute("Model3D_Kind", "model")
-    model:SetAttribute("Model3D_AssetId", id)
+    if not model then
+        return nil, "Asset ID " .. tostring(id) .. " gagal dimuat dengan semua metode:\n"
+            .. table.concat(errors, "\n")
+    end
 
-    -- Pastikan ada PrimaryPart supaya bisa di-PivotTo dengan akurat.
     if not model.PrimaryPart then
-        local firstPart = model:FindFirstChildWhichIsA("BasePart", true)
-        if firstPart then
-            model.PrimaryPart = firstPart
-        else
-            result:Destroy()
-            wrapper:Destroy()
-            return nil, "Asset ID " .. tostring(id) .. " tidak berisi part apapun yang bisa ditampilkan."
-        end
+        return nil, "Asset ID " .. tostring(id) .. " tidak berisi part apapun yang bisa ditampilkan."
     end
 
     for _, part in ipairs(model:GetDescendants()) do
@@ -178,9 +210,41 @@ local function spawnModel3D(assetId, atCFrame)
     return model, nil
 end
 
--- ==================== SPAWN OBJECT: GAMBAR DARI LINK CATBOX ====================
-local function spawnImage(imageUrl, atCFrame)
-    if not imageUrl or imageUrl == "" then return nil, "Link gambar kosong" end
+-- ==================== SPAWN OBJECT: GAMBAR ====================
+-- CATATAN PENTING: ImageLabel.Image / Decal.Texture di Roblox HANYA menerima
+-- format "rbxassetid://<angka>" (asset yang sudah di-upload & disetujui
+-- Roblox). Roblox TIDAK BISA merender link gambar eksternal (Catbox, Imgur,
+-- dll) secara langsung — itu bukan bug, itu batasan resmi platform Roblox
+-- (rendering gambar HTTPS mentah tidak didukung ImageLabel/Decal apapun).
+--
+-- Jadi fungsi ini menerima 2 macam input:
+--   1) Asset ID Roblox polos (angka) atau "rbxassetid://<angka>" -> langsung
+--      dipakai, ini yang PASTI muncul.
+--   2) Link Catbox/URL lain -> TIDAK bisa langsung dirender. Untuk pakai
+--      gambar dari Catbox, upload dulu gambarnya ke roblox.com/develop
+--      (gratis & instan sebagai Decal), lalu masukkan Asset ID hasil upload
+--      itu ke sini — bukan link Catbox-nya.
+local function normalizeImageId(input)
+    input = tostring(input):gsub("^%s+", ""):gsub("%s+$", "")
+    if input:match("^rbxassetid://%d+$") then
+        return input, nil
+    end
+    if input:match("^%d+$") then
+        return "rbxassetid://" .. input, nil
+    end
+    if input:match("^https?://") then
+        return nil, "Link eksternal (mis. Catbox) tidak bisa langsung ditampilkan Roblox.\n"
+            .. "Upload dulu gambarnya ke roblox.com/develop (gratis, jadi Decal), "
+            .. "lalu masukkan Asset ID hasil upload itu ke sini."
+    end
+    return nil, "Format tidak dikenali. Masukkan Asset ID Roblox (angka) atau rbxassetid://..."
+end
+
+local function spawnImage(imageInput, atCFrame)
+    if not imageInput or imageInput == "" then return nil, "Input gambar kosong" end
+
+    local imageId, err = normalizeImageId(imageInput)
+    if not imageId then return nil, err end
 
     local part = Instance.new("Part")
     part.Name = "Model3D_Image"
@@ -189,7 +253,7 @@ local function spawnImage(imageUrl, atCFrame)
     part.CanCollide = false
     part.Transparency = 1
     part:SetAttribute("Model3D_Kind", "image")
-    part:SetAttribute("Model3D_ImageUrl", imageUrl)
+    part:SetAttribute("Model3D_ImageUrl", imageId)
 
     local gui = Instance.new("SurfaceGui")
     gui.Name = "ImageSurface"
@@ -203,7 +267,7 @@ local function spawnImage(imageUrl, atCFrame)
     img.Name = "Img"
     img.Size = UDim2.new(1, 0, 1, 0)
     img.BackgroundTransparency = 1
-    img.Image = imageUrl
+    img.Image = imageId
     img.ScaleType = Enum.ScaleType.Fit
     img.Parent = gui
 
@@ -211,7 +275,7 @@ local function spawnImage(imageUrl, atCFrame)
     local model = Instance.new("Model")
     model.Name = "Model3D_Image"
     model:SetAttribute("Model3D_Kind", "image")
-    model:SetAttribute("Model3D_ImageUrl", imageUrl)
+    model:SetAttribute("Model3D_ImageUrl", imageId)
     part.Parent = model
     model.PrimaryPart = part
 
@@ -721,7 +785,7 @@ end
 
 -- ==================== RENDER: SPAWN GAMBAR ====================
 local function renderSpawnImageSection(order)
-    sectionLabel("SPAWN GAMBAR (Link Catbox)", order)
+    sectionLabel("SPAWN GAMBAR (Asset ID Roblox)", order)
 
     local row = Instance.new("Frame", appContent)
     row.Size = UDim2.new(1, 0, 0, 44)
@@ -734,7 +798,7 @@ local function renderSpawnImageSection(order)
     input.Size = UDim2.new(1, -96, 1, -12)
     input.Position = UDim2.new(0, 8, 0, 6)
     input.BackgroundColor3 = C.bg
-    input.PlaceholderText = "https://files.catbox.moe/xxxx.png"
+    input.PlaceholderText = "Asset ID (mis. 1818) atau rbxassetid://..."
     input.PlaceholderColor3 = C.text3
     input.Text = ""
     input.TextColor3 = C.text
@@ -780,6 +844,17 @@ local function renderSpawnImageSection(order)
 
     spawnBtn.MouseButton1Click:Connect(doSpawn)
     input.FocusLost:Connect(function(enter) if enter then doSpawn() end end)
+
+    local hint = Instance.new("TextLabel", appContent)
+    hint.Size = UDim2.new(1, 0, 0, 28)
+    hint.BackgroundTransparency = 1
+    hint.Text = "Punya link Catbox? Upload dulu ke roblox.com/develop (gratis, jadi Decal), lalu masukkan Asset ID hasil upload itu di sini."
+    hint.TextColor3 = C.text3
+    hint.Font = Enum.Font.Gotham
+    hint.TextSize = 9
+    hint.TextWrapped = true
+    hint.TextXAlignment = Enum.TextXAlignment.Left
+    hint.LayoutOrder = order + 2
 end
 
 -- ==================== RENDER: DAFTAR OBJEK DI MAP ====================
@@ -1546,10 +1621,10 @@ rebuildUI = function()
     renderHeader()
     renderSpawnModelSection(1)
     renderSpawnImageSection(3)
-    renderObjectListSection(5)
-    renderGizmoSection(7)
-    renderSaveConfigSection(10)
-    renderLoadConfigSection(12)
+    renderObjectListSection(6)
+    renderGizmoSection(8)
+    renderSaveConfigSection(11)
+    renderLoadConfigSection(13)
 end
 
 -- ==================== BUKA APP ====================
