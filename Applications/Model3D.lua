@@ -104,36 +104,61 @@ end
 -- ==================== SPAWN OBJECT: MODEL 3D DARI ASSET ID ====================
 local function spawnModel3D(assetId, atCFrame)
     local id = tonumber(assetId)
-    if not id then return nil, "Asset ID tidak valid" end
+    if not id then return nil, "Asset ID tidak valid (harus berupa angka)." end
 
     local ok, result = pcall(function()
         return InsertService:LoadAsset(id)
     end)
-    if not ok or not result then
-        return nil, "Gagal load asset. Pastikan Asset ID benar & berupa Model/Mesh."
+    if not ok then
+        return nil, "Gagal load asset " .. tostring(id) .. ": " .. tostring(result)
+    end
+    if not result then
+        return nil, "Asset ID " .. tostring(id) .. " tidak ditemukan atau bukan Model/Mesh yang valid."
     end
 
-    local model = result:FindFirstChildOfClass("Model") or result:FindFirstChildOfClass("MeshPart") or result:FindFirstChildOfClass("Part")
-    if not model then
-        -- Kadang assetnya langsung berupa banyak part tanpa Model wrapper,
-        -- jadi kita bungkus semua children jadi 1 Model.
-        local wrapper = Instance.new("Model")
-        wrapper.Name = "Model3D_" .. tostring(id)
-        for _, child in ipairs(result:GetChildren()) do
+    -- InsertService:LoadAsset() SELALU mengembalikan sebuah Model pembungkus
+    -- (biasanya bernama "Model") yang isinya bisa berupa: 1 Model utuh,
+    -- 1 MeshPart/Part tunggal, atau beberapa part lepas. Supaya PivotTo()
+    -- selalu berfungsi (PivotTo cuma ada di Model/PVInstance, TIDAK ada
+    -- langsung di BasePart), kita SELALU bungkus isinya ke dalam 1 Model
+    -- baru, apapun bentuk aslinya.
+    local children = result:GetChildren()
+    if #children == 0 then
+        result:Destroy()
+        return nil, "Asset ID " .. tostring(id) .. " kosong (tidak ada isinya)."
+    end
+
+    local wrapper = Instance.new("Model")
+    wrapper.Name = "Model3D_" .. tostring(id)
+
+    if #children == 1 and children[1]:IsA("Model") then
+        -- Kasus umum: sudah berupa 1 Model, pindahkan isinya langsung
+        -- supaya struktur tetap rapi (tidak nested Model di dalam Model).
+        for _, grandchild in ipairs(children[1]:GetChildren()) do
+            grandchild.Parent = wrapper
+        end
+    else
+        -- Kasus: MeshPart/Part tunggal, atau beberapa part lepas.
+        for _, child in ipairs(children) do
             child.Parent = wrapper
         end
-        model = wrapper
     end
     result:Destroy()
 
-    model.Name = "Model3D_" .. tostring(id)
+    local model = wrapper
     model:SetAttribute("Model3D_Kind", "model")
     model:SetAttribute("Model3D_AssetId", id)
 
-    -- Pastikan ada PrimaryPart supaya bisa di-PivotTo
-    if model:IsA("Model") and not model.PrimaryPart then
+    -- Pastikan ada PrimaryPart supaya bisa di-PivotTo dengan akurat.
+    if not model.PrimaryPart then
         local firstPart = model:FindFirstChildWhichIsA("BasePart", true)
-        if firstPart then model.PrimaryPart = firstPart end
+        if firstPart then
+            model.PrimaryPart = firstPart
+        else
+            result:Destroy()
+            wrapper:Destroy()
+            return nil, "Asset ID " .. tostring(id) .. " tidak berisi part apapun yang bisa ditampilkan."
+        end
     end
 
     for _, part in ipairs(model:GetDescendants()) do
@@ -145,7 +170,10 @@ local function spawnModel3D(assetId, atCFrame)
 
     model.Parent = getFolder()
     local baseCFrame = atCFrame or CFrame.new()
-    pcall(function() model:PivotTo(baseCFrame) end)
+    local pivotOk, pivotErr = pcall(function() model:PivotTo(baseCFrame) end)
+    if not pivotOk then
+        warn("[Model3D] Gagal memposisikan model " .. tostring(id) .. ": " .. tostring(pivotErr))
+    end
 
     return model, nil
 end
@@ -266,7 +294,16 @@ end
 
 local function setGizmoVisibility()
     if Gizmos.Position then Gizmos.Position.Adornee = State.PositionMode and State.SelectedObject or nil end
-    if Gizmos.Rotation then Gizmos.Rotation.Adornee = State.RotationMode and State.SelectedObject or nil end
+    -- ArcHandles.Adornee HANYA menerima BasePart, tidak seperti Handles yang
+    -- juga bisa menerima Model. Kalau dikasih Model langsung, Roblox melempar
+    -- error "Expected BasePart got Model" dan gizmo rotasi gagal tampil.
+    if Gizmos.Rotation then
+        local rotTarget = nil
+        if State.RotationMode and State.SelectedObject then
+            rotTarget = State.SelectedObject.PrimaryPart or State.SelectedObject:FindFirstChildWhichIsA("BasePart", true)
+        end
+        Gizmos.Rotation.Adornee = rotTarget
+    end
     if Gizmos.Scale then Gizmos.Scale.Adornee = State.ScaleMode and State.SelectedObject or nil end
 end
 
