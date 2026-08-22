@@ -292,19 +292,26 @@ local function restoreCameraAfterDrag()
     pcall(function() UserInputService.MouseBehavior = Enum.MouseBehavior.Default end)
 end
 
-local function setGizmoVisibility()
-    if Gizmos.Position then Gizmos.Position.Adornee = State.PositionMode and State.SelectedObject or nil end
-    -- ArcHandles.Adornee HANYA menerima BasePart, tidak seperti Handles yang
-    -- juga bisa menerima Model. Kalau dikasih Model langsung, Roblox melempar
-    -- error "Expected BasePart got Model" dan gizmo rotasi gagal tampil.
-    if Gizmos.Rotation then
-        local rotTarget = nil
-        if State.RotationMode and State.SelectedObject then
-            rotTarget = State.SelectedObject.PrimaryPart or State.SelectedObject:FindFirstChildWhichIsA("BasePart", true)
-        end
-        Gizmos.Rotation.Adornee = rotTarget
+-- Helper: ambil BasePart representatif dari objek yang dipilih (Model).
+-- SEMUA gizmo Roblox (Handles maupun ArcHandles) ternyata di executor ini
+-- hanya menerima BasePart untuk Adornee, TIDAK menerima Model langsung
+-- (walau di beberapa versi Roblox Handles bisa menerima Model, di sini
+-- keduanya melempar "Expected BasePart got Model" kalau dikasih Model).
+-- Jadi semua gizmo di bawah SELALU diberi PrimaryPart, bukan Model.
+local function getAdorneePart(obj)
+    if not obj then return nil end
+    if obj:IsA("BasePart") then return obj end
+    if obj:IsA("Model") then
+        return obj.PrimaryPart or obj:FindFirstChildWhichIsA("BasePart", true)
     end
-    if Gizmos.Scale then Gizmos.Scale.Adornee = State.ScaleMode and State.SelectedObject or nil end
+    return nil
+end
+
+local function setGizmoVisibility()
+    local target = getAdorneePart(State.SelectedObject)
+    if Gizmos.Position then Gizmos.Position.Adornee = State.PositionMode and target or nil end
+    if Gizmos.Rotation then Gizmos.Rotation.Adornee = State.RotationMode and target or nil end
+    if Gizmos.Scale then Gizmos.Scale.Adornee = State.ScaleMode and target or nil end
 end
 
 local function initGizmos()

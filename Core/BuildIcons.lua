@@ -115,6 +115,7 @@ local function clearAppContent()
 end
 
 local currOpener = nil
+local currTitle = nil
 
 function _G.goHome()
     if _G.PhoneState.isLocked then return end
@@ -122,6 +123,11 @@ function _G.goHome()
     appScr.BackgroundTransparency = 1
     Helpers.tween(appScr, {Position = UDim2.new(1, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
     Helpers.tween(Phone.home, {Position = UDim2.new(0, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
+    -- Tandai bahwa kita sedang di Home, supaya Phone.lua tahu tidak perlu
+    -- membuka app apapun ketika phone dibuka lagi lewat FloatingIcon.
+    currOpener = nil
+    currTitle = nil
+    if _G.PhoneState then _G.PhoneState.currentScreen = "home" end
 end
 
 function _G.openApp(title, fn)
@@ -132,16 +138,34 @@ function _G.openApp(title, fn)
     appTitle.Text = title
     clearAppContent()
     currOpener = fn
+    currTitle = title
     fn()
     appScr.Position = UDim2.new(1, 0, 0, 0)
     Helpers.tween(appScr, {Position = UDim2.new(0, 0, 0, 0)}, 0.28, Enum.EasingStyle.Quart)
     _G.showDynamicNotification(title, T.Accent)
+    -- Simpan app mana yang sedang aktif. Phone.lua membaca ini di openPhone()
+    -- supaya saat phone ditutup lewat FloatingIcon lalu dibuka lagi, app yang
+    -- sama tetap tampil (tidak otomatis lompat balik ke Home).
+    if _G.PhoneState then _G.PhoneState.currentScreen = title end
 end
 
 function _G.refreshCurr()
     if currOpener then
         clearAppContent()
         currOpener()
+    end
+end
+
+-- Dipanggil oleh Phone.lua saat openPhone() mendeteksi currentScreen bukan
+-- "home" tapi app-nya belum ter-render ulang (misal setelah ScreenGui sempat
+-- di-reset). Aman dipanggil berkali-kali karena hanya re-run opener terakhir.
+function _G.reopenCurrentApp()
+    if _G.PhoneState.isLocked then return end
+    if currOpener and currTitle then
+        Phone.home.Visible = false
+        appScr.BackgroundTransparency = 0
+        appScr.Position = UDim2.new(0, 0, 0, 0)
+        appTitle.Text = currTitle
     end
 end
 
