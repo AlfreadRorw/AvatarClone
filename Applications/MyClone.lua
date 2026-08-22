@@ -1151,7 +1151,7 @@ local function makeInput(placeholder, parent)
     corner(frame, 8)
     stroke(frame, COLORS.Panel3, 1)
 
-    local tb = Instance.new("TextBox")
+    local tb = Instance.new("")
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
@@ -1265,7 +1265,7 @@ rebuildEditorTab = function()
     selInfo.Position = UDim2.new(0, 10, 0, 24)
     selInfo.Size = UDim2.new(1, -20, 0, 16)
 
-    local renameBox = Instance.new("TextBox")
+    local renameBox = Instance.new("")
     renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
