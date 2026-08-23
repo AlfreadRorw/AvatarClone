@@ -56,6 +56,7 @@ end
 -- ================================================
 local FOLDER_NAME = "MyCloneFolder_V15"
 local CONFIG_FILE = "MyClone_Config.json"
+local CONFIG_SLOTS_FILE = "MyClone_ConfigSlots.json"
 local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
@@ -145,6 +146,18 @@ _G.MyCloneState = _G.MyCloneState or {
     OrbitMode = false,
     PulseGlowMode = false,
     MimicMode = false,
+    -- Config multi-slot
+    ConfigSlots = {},
+    LastConfigSlot = nil,
+    -- Sync upgrade
+    SyncBroadcastMode = false,
+    SyncAutoReconnect = true,
+    -- Prank fitur
+    GhostModeActive = false,
+    RagdollPrankActive = false,
+    RandomSwapActive = false,
+    MemeChatActive = false,
+    MemeChatInterval = 8,
 }
 
 local State = _G.MyCloneState
@@ -159,6 +172,10 @@ local CameraRestoreType = nil
 local CameraRestoreSubject = nil
 local DeleteAllArmed = false
 local DeleteAllFriendsArmed = false
+local GhostModeLoop = nil
+local RagdollPrankLoop = nil
+local RandomSwapLoop = nil
+local MemeChatLoop = nil
 
 local GROQ_MODELS = {
     "llama-3.3-70b-versatile",
@@ -166,6 +183,19 @@ local GROQ_MODELS = {
     "gemma2-9b-it",
     "llama3-70b-8192",
     "llama3-8b-8192",
+}
+
+local MEME_LINES = {
+    "bang, ini aku apa bayangan ya??",
+    "kok jadi ada 2 gini sih ????",
+    "aku juga bingung sebenarnya siapa yang asli",
+    "eh sadar gak sih kita kembar",
+    "udah ku duga bakal ada yang nge-clone",
+    "halo, salam kenal, aku versi 2.0 nya",
+    "kok mirip banget sama aku ya??",
+    "system error: 2 orang sama terdeteksi",
+    "jangan panik, ini cuma efek clone kok",
+    "gimana caranya bisa jadi 2 gini wkwk",
 }
 
 -- References UI
@@ -386,6 +416,36 @@ local function SetupDanceSync()
     StartSyncLoop()
 end
 
+-- Auto-Reconnect: kalau target sync respawn (character lama hancur, yang
+-- baru muncul), CurrentAnimatorConnection yang lama otomatis putus karena
+-- Animator lama ikut hancur. Loop ini memantau itu dan menyambungkan lagi
+-- otomatis tanpa perlu user pencet tombol manapun, asal
+-- State.SyncAutoReconnect masih aktif.
+local SyncWatchdogLoop = nil
+local function StartSyncWatchdog()
+    if SyncWatchdogLoop then return end
+    SyncWatchdogLoop = RunService.Heartbeat:Connect(function()
+        if not State.SyncAutoReconnect then return end
+        if not (State.DanceMode or State.SyncTargetMode) then return end
+        local sourcePlayer = State.SyncTargetMode and State.SyncTargetPlayer or (State.DanceMode and LocalPlayer or nil)
+        if not sourcePlayer then return end
+        -- Kalau target playernya sudah keluar game, matikan sync sepenuhnya.
+        if not sourcePlayer.Parent then
+            State.SyncTargetMode = false
+            State.SyncTargetPlayer = nil
+            StopSyncSystem()
+            pcall(rebuildSyncTab)
+            return
+        end
+        -- Kalau koneksi listener sudah putus (mis. karena respawn) tapi mode
+        -- sync masih aktif, sambungkan ulang.
+        if not CurrentAnimatorConnection or not CurrentAnimatorConnection.Connected then
+            SetupDanceSync()
+        end
+    end)
+end
+StartSyncWatchdog()
+
 local function CreateNameTag(clone, nameText, hide)
     local oldTag = clone:FindFirstChild("NameTag")
     if oldTag then oldTag:Destroy() end
@@ -480,6 +540,172 @@ local function LoadFavPlayers()
             if type(data) == "table" then State.FavoritesPlayersList = data end
         end
     end)
+end
+
+-- ================================================
+-- CONFIG MULTI-SLOT (Simpan & Muat Berdasarkan Nama)
+-- ================================================
+local function SaveConfigSlots()
+    pcall(function()
+        if writefile then writefile(CONFIG_SLOTS_FILE, HttpService:JSONEncode(State.ConfigSlots)) end
+    end)
+end
+
+local function LoadConfigSlots()
+    pcall(function()
+        if isfile and readfile and isfile(CONFIG_SLOTS_FILE) then
+            local data = HttpService:JSONDecode(readfile(CONFIG_SLOTS_FILE))
+            if type(data) == "table" then State.ConfigSlots = data end
+        end
+    end)
+    -- Migrasi otomatis: kalau ada config lama (format single-slot) dan
+    -- belum ada slot bernama apapun, jadikan itu slot pertama supaya
+    -- data lama tidak hilang begitu saja setelah upgrade.
+    if next(State.ConfigSlots) == nil then
+        pcall(function()
+            if isfile and readfile and isfile(CONFIG_FILE) then
+                local oldData = HttpService:JSONDecode(readfile(CONFIG_FILE))
+                if type(oldData) == "table" and #oldData > 0 then
+                    State.ConfigSlots["Config Lama"] = {
+                        savedAt = os.time(),
+                        clones = oldData,
+                    }
+                    SaveConfigSlots()
+                end
+            end
+        end)
+    end
+end
+
+-- Membangun snapshot semua clone yang sedang ada di map jadi 1 tabel data,
+-- dipakai baik untuk slot baru maupun overwrite slot yang sudah ada.
+local function BuildConfigSnapshot()
+    local clonesData = {}
+    local folder = Workspace:FindFirstChild(FOLDER_NAME)
+    if folder then
+        for _, clone in ipairs(folder:GetChildren()) do
+            if clone:IsA("Model") and State.CloneData[clone] then
+                local info = State.CloneData[clone]
+                local primary = clone.PrimaryPart
+                if primary then
+                    local pos = primary.Position
+                    local rot = primary.CFrame - primary.CFrame.Position
+                    local x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33 = rot:GetComponents()
+                    table.insert(clonesData, {
+                        userId = info.UserId,
+                        displayName = info.DisplayName or info.Username,
+                        username = info.Username,
+                        name = clone.Name,
+                        hideName = info.HideName,
+                        position = {pos.X, pos.Y, pos.Z},
+                        rotation = {r11, r12, r13, r21, r22, r23, r31, r32, r33}
+                    })
+                end
+            end
+        end
+    end
+    return clonesData
+end
+
+-- Menghapus semua clone di map lalu spawn ulang sesuai isi 1 slot config.
+local function ApplyConfigSlot(slotName, callback)
+    local slot = State.ConfigSlots[slotName]
+    if not slot or type(slot.clones) ~= "table" then
+        if callback then callback(false, "Slot tidak ditemukan") end
+        return
+    end
+
+    local folder = Workspace:FindFirstChild(FOLDER_NAME)
+    if folder then
+        for _, clone in ipairs(folder:GetChildren()) do
+            if clone:IsA("Model") then
+                State.CloneData[clone] = nil
+                clone:Destroy()
+            end
+        end
+    end
+    if State.SelectedClone then State.SelectedClone = nil end
+
+    local total = #slot.clones
+    local loaded = 0
+    if total == 0 then
+        if callback then callback(true, "Slot ini kosong (tidak ada clone tersimpan).") end
+        return
+    end
+
+    for _, info in ipairs(slot.clones) do
+        task.spawn(function()
+            local userId = info.userId
+            local model = CreateAvatarFromUserId(userId)
+            if model then
+                State.CloneCounter = State.CloneCounter + 1
+                local cloneName = info.name or ("Clone_" .. tostring(State.CloneCounter))
+                model.Name = cloneName
+                PrepareCloneModel(model)
+                local position = info.position
+                local rotData = info.rotation
+                local cf
+                if position and rotData then
+                    local pos = Vector3.new(position[1], position[2], position[3])
+                    local rot = CFrame.new(0,0,0, rotData[1], rotData[2], rotData[3], rotData[4], rotData[5], rotData[6], rotData[7], rotData[8], rotData[9])
+                    cf = CFrame.new(pos) * rot
+                else
+                    cf = GetNextSpawnCFrame()
+                end
+                model:PivotTo(cf)
+                local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+                if rootPart then
+                    rootPart.Anchored = true
+                    rootPart.CanCollide = false
+                    rootPart.Transparency = 1
+                end
+                local cloneData = {
+                    Index = State.CloneCounter,
+                    UserId = userId,
+                    Username = info.username or info.displayName,
+                    DisplayName = info.displayName,
+                    OriginalCFrame = cf,
+                    OriginalRotation = cf - cf.Position,
+                    HideName = info.hideName or false,
+                }
+                State.CloneData[model] = cloneData
+                model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
+                CreateNameTag(model, info.displayName or info.username or cloneName, cloneData.HideName)
+            end
+            loaded = loaded + 1
+            if loaded >= total and callback then
+                callback(true, "Slot '" .. slotName .. "' dimuat (" .. total .. " clone).")
+            end
+        end)
+    end
+end
+
+local function SaveConfigSlot(slotName)
+    if not slotName or slotName == "" then return false, "Nama slot kosong" end
+    local snapshot = BuildConfigSnapshot()
+    State.ConfigSlots[slotName] = {
+        savedAt = os.time(),
+        clones = snapshot,
+    }
+    State.LastConfigSlot = slotName
+    SaveConfigSlots()
+    return true, "Slot '" .. slotName .. "' tersimpan (" .. #snapshot .. " clone)."
+end
+
+local function DeleteConfigSlot(slotName)
+    State.ConfigSlots[slotName] = nil
+    if State.LastConfigSlot == slotName then State.LastConfigSlot = nil end
+    SaveConfigSlots()
+end
+
+local function RenameConfigSlot(oldName, newName)
+    if not State.ConfigSlots[oldName] then return false end
+    if State.ConfigSlots[newName] then return false, "Nama sudah dipakai slot lain" end
+    State.ConfigSlots[newName] = State.ConfigSlots[oldName]
+    State.ConfigSlots[oldName] = nil
+    if State.LastConfigSlot == oldName then State.LastConfigSlot = newName end
+    SaveConfigSlots()
+    return true
 end
 
 local function SaveApiKey()
@@ -1112,6 +1338,174 @@ local function StartMimicMode()
 end
 
 -- ================================================
+-- FITUR PRANK / KONTEN CLONE
+-- ================================================
+
+-- --- GHOST MODE: clone menghilang & muncul lagi berkala (efek jumpscare) ---
+local function StopGhostMode()
+    State.GhostModeActive = false
+    if GhostModeLoop then GhostModeLoop:Disconnect(); GhostModeLoop = nil end
+    -- Pulihkan transparansi semua clone ke normal
+    local clones = GetAllCloneModels()
+    for _, clone in ipairs(clones) do
+        for _, part in ipairs(clone:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                part.Transparency = part:GetAttribute("Model3D_OriginalTransparency") or 0
+            end
+            if part:IsA("Decal") then part.Transparency = 0 end
+        end
+    end
+end
+
+local function StartGhostMode()
+    if GhostModeLoop then return end
+    State.GhostModeActive = true
+    GhostModeLoop = task.spawn(function()
+        while State.GhostModeActive do
+            task.wait(math.random(4, 9))
+            if not State.GhostModeActive then break end
+            local clones = GetAllCloneModels()
+            if #clones == 0 then continue end
+            local target = clones[math.random(1, #clones)]
+
+            -- Fade out cepat
+            for _, part in ipairs(target:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    if part:GetAttribute("Model3D_OriginalTransparency") == nil then
+                        part:SetAttribute("Model3D_OriginalTransparency", part.Transparency)
+                    end
+                    part.Transparency = 1
+                end
+                if part:IsA("Decal") then part.Transparency = 1 end
+            end
+
+            task.wait(math.random(2, 4))
+            if not State.GhostModeActive or not target.Parent then continue end
+
+            -- Fade in lagi (efek "muncul mendadak")
+            for _, part in ipairs(target:GetDescendants()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    part.Transparency = part:GetAttribute("Model3D_OriginalTransparency") or 0
+                end
+                if part:IsA("Decal") then part.Transparency = 0 end
+            end
+        end
+    end)
+end
+
+-- --- RAGDOLL PRANK: clone tiba-tiba jatuh lalu berdiri lagi ---
+local function StopRagdollPrank()
+    State.RagdollPrankActive = false
+    if RagdollPrankLoop then RagdollPrankLoop:Disconnect(); RagdollPrankLoop = nil end
+end
+
+local function StartRagdollPrank()
+    if RagdollPrankLoop then return end
+    State.RagdollPrankActive = true
+    RagdollPrankLoop = task.spawn(function()
+        while State.RagdollPrankActive do
+            task.wait(math.random(6, 12))
+            if not State.RagdollPrankActive then break end
+            local clones = GetAllCloneModels()
+            if #clones == 0 then continue end
+            local target = clones[math.random(1, #clones)]
+            local humanoid = target:FindFirstChildOfClass("Humanoid")
+            if humanoid then
+                pcall(function() humanoid.PlatformStand = true end)
+                -- Sedikit dorongan/tilt biar kelihatan "jatuh"
+                if target.PrimaryPart then
+                    local original = target:GetPivot()
+                    local tiltCF = original * CFrame.Angles(math.rad(85), 0, math.random(-30, 30) * math.pi / 180)
+                    pcall(function() target:PivotTo(tiltCF) end)
+                    task.wait(math.random(2, 3))
+                    if State.RagdollPrankActive and target.Parent then
+                        pcall(function() target:PivotTo(original) end)
+                        pcall(function() humanoid.PlatformStand = false end)
+                    end
+                end
+            end
+        end
+    end)
+end
+
+-- --- RANDOM SWAP: posisi antar clone ditukar acak secara berkala ---
+local function StopRandomSwap()
+    State.RandomSwapActive = false
+    if RandomSwapLoop then RandomSwapLoop:Disconnect(); RandomSwapLoop = nil end
+end
+
+local function StartRandomSwap()
+    if RandomSwapLoop then return end
+    State.RandomSwapActive = true
+    RandomSwapLoop = task.spawn(function()
+        while State.RandomSwapActive do
+            task.wait(math.random(5, 10))
+            if not State.RandomSwapActive then break end
+            local clones = GetAllCloneModels()
+            if #clones < 2 then continue end
+            local a = clones[math.random(1, #clones)]
+            local b
+            repeat b = clones[math.random(1, #clones)] until b ~= a
+            if a.Parent and b.Parent then
+                local cfA, cfB = a:GetPivot(), b:GetPivot()
+                pcall(function() a:PivotTo(cfB) end)
+                pcall(function() b:PivotTo(cfA) end)
+            end
+        end
+    end)
+end
+
+-- --- MEME CHAT: clone auto ngomong random baris lucu secara berkala ---
+local function StopMemeChat()
+    State.MemeChatActive = false
+    if MemeChatLoop then MemeChatLoop:Disconnect(); MemeChatLoop = nil end
+end
+
+local function StartMemeChat()
+    if MemeChatLoop then return end
+    State.MemeChatActive = true
+    MemeChatLoop = task.spawn(function()
+        while State.MemeChatActive do
+            task.wait(State.MemeChatInterval or 8)
+            if not State.MemeChatActive then break end
+            local clones = GetAllCloneModels()
+            if #clones == 0 then continue end
+            local target = clones[math.random(1, #clones)]
+            local line = MEME_LINES[math.random(1, #MEME_LINES)]
+            DisplayCloneBubble(target, line)
+        end
+    end)
+end
+
+-- --- COPY MY OUTFIT: semua clone langsung pakai outfit kamu saat ini ---
+local function CopyMyOutfitToAllClones()
+    local character = LocalPlayer.Character
+    if not character then return false, "Karakter kamu belum siap" end
+
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false, "Humanoid tidak ditemukan" end
+
+    local ok, description = pcall(function() return humanoid:GetAppliedDescription() end)
+    if not ok or not description then return false, "Gagal mengambil outfit kamu" end
+
+    local clones = GetAllCloneModels()
+    if #clones == 0 then return false, "Belum ada clone" end
+
+    local successCount = 0
+    for _, clone in ipairs(clones) do
+        local cloneHumanoid = clone:FindFirstChildOfClass("Humanoid")
+        if cloneHumanoid then
+            local applyOk = pcall(function()
+                cloneHumanoid:ApplyDescription(description)
+            end)
+            if applyOk then successCount = successCount + 1 end
+        end
+    end
+
+    return true, ("Outfit disalin ke %d clone."):format(successCount)
+end
+
+-- ================================================
 -- UI BUILDERS & HELPERS
 -- ================================================
 local function makeLabel(text, size, color, font, parent)
@@ -1425,44 +1819,6 @@ rebuildEditorTab = function()
     end)
 end
 
-rebuildSyncTab = function()
-    clearTabContent()
-
-    local infoLabel = makeLabel("SYNC ANIMASI KE PLAYER LAIN:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
-    infoLabel.LayoutOrder = 1
-
-    local targetInput, targetFrame = makeInput("Username target player...", tabContentFrame)
-    targetFrame.LayoutOrder = 2
-
-    local activateBtn = makeButton("AKTIFKAN GLOBAL SYNC", COLORS.PurpleDark, tabContentFrame)
-    activateBtn.LayoutOrder = 3
-    activateBtn.MouseButton1Click:Connect(function()
-        local targetName = targetInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
-        if targetName == "" then return end
-        local targetPlayer = Players:FindFirstChild(targetName)
-        if not targetPlayer then return end
-        State.SyncTargetPlayer = targetPlayer
-        State.SyncTargetMode = true
-        State.DanceMode = false
-        SetupDanceSync()
-        rebuildSyncTab()
-    end)
-
-    local deactivateBtn = makeButton("NONAKTIFKAN SYNC", COLORS.Red, tabContentFrame)
-    deactivateBtn.LayoutOrder = 4
-    deactivateBtn.MouseButton1Click:Connect(function()
-        State.SyncTargetMode = false
-        State.SyncTargetPlayer = nil
-        StopSyncSystem()
-        rebuildSyncTab()
-    end)
-
-    if State.SyncTargetMode and State.SyncTargetPlayer then
-        local statusLabel = makeLabel("✓ Sync Aktif ke: " .. State.SyncTargetPlayer.Name, 10, COLORS.Green, Enum.Font.GothamBold, tabContentFrame)
-        statusLabel.LayoutOrder = 5
-    end
-end
-
 local function makeSectionHeader(text, parent, layoutOrder, accentColor)
     local holder = Instance.new("Frame")
     holder.Size = UDim2.new(1, 0, 0, 26)
@@ -1490,6 +1846,213 @@ local function makeSectionHeader(text, parent, layoutOrder, accentColor)
     label.Parent = holder
 
     return holder
+end
+
+local function makePremiumCard(parent, layoutOrder, height)
+    local card = Instance.new("Frame")
+    card.Size = UDim2.new(1, 0, 0, height or 0)
+    if not height then card.AutomaticSize = Enum.AutomaticSize.Y end
+    card.BackgroundColor3 = COLORS.Panel
+    card.LayoutOrder = layoutOrder
+    card.Parent = parent
+    corner(card, 12)
+    stroke(card, COLORS.Panel3, 1, 0.4)
+
+    local grad = Instance.new("UIGradient")
+    grad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, COLORS.Panel2),
+        ColorSequenceKeypoint.new(1, COLORS.Panel),
+    })
+    grad.Rotation = 100
+    grad.Parent = card
+
+    return card
+end
+
+rebuildSyncTab = function()
+    clearTabContent()
+
+    makeSectionHeader("SYNC ANIMASI KE CLONE", tabContentFrame, 1, COLORS.Purple)
+
+    -- ===== STATUS CARD =====
+    local statusCard = makePremiumCard(tabContentFrame, 2)
+    local statusPad = Instance.new("UIPadding", statusCard)
+    statusPad.PaddingTop = UDim.new(0, 10); statusPad.PaddingBottom = UDim.new(0, 10)
+    statusPad.PaddingLeft = UDim.new(0, 10); statusPad.PaddingRight = UDim.new(0, 10)
+    local statusLayout = Instance.new("UIListLayout", statusCard)
+    statusLayout.Padding = UDim.new(0, 4)
+
+    local isActive = State.SyncTargetMode or State.DanceMode
+    local statusText
+    if State.SyncBroadcastMode then
+        statusText = "🔴 BROADCAST: semua clone niru player random yang online"
+    elseif State.SyncTargetMode and State.SyncTargetPlayer then
+        statusText = "🟢 Sync aktif ke: " .. State.SyncTargetPlayer.Name
+    elseif State.DanceMode then
+        statusText = "🟢 Sync aktif ke: kamu sendiri (Dance Mode)"
+    else
+        statusText = "⚪ Sync tidak aktif"
+    end
+    local statusLbl = makeLabel(statusText, 11, isActive and COLORS.Green or COLORS.Gray, Enum.Font.GothamBold, statusCard)
+    statusLbl.LayoutOrder = 1
+
+    local reconnectLbl = makeLabel("Auto-Reconnect: " .. (State.SyncAutoReconnect and "ON (nyambung otomatis kalau target respawn)" or "OFF"), 8, COLORS.DarkGray, nil, statusCard)
+    reconnectLbl.LayoutOrder = 2
+
+    -- ===== PILIH PLAYER (PICKER, BUKAN TEXTBOX) =====
+    makeSectionHeader("PILIH PLAYER TARGET", tabContentFrame, 3, COLORS.Blue)
+
+    local otherPlayers = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then table.insert(otherPlayers, player) end
+    end
+
+    if #otherPlayers == 0 then
+        local emptyLbl = makeLabel("Tidak ada player lain di map ini saat ini.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 4
+    else
+        for i, player in ipairs(otherPlayers) do
+            local isSelected = State.SyncTargetMode and State.SyncTargetPlayer == player
+            local card = makePremiumCard(tabContentFrame, 3 + i, 46)
+            if isSelected then stroke(card, COLORS.Purple, 1.5, 0.1) end
+
+            local avatarHolder = Instance.new("Frame", card)
+            avatarHolder.Size = UDim2.new(0, 34, 0, 34)
+            avatarHolder.Position = UDim2.new(0, 6, 0.5, -17)
+            avatarHolder.BackgroundColor3 = COLORS.Panel2
+            corner(avatarHolder, 17)
+            stroke(avatarHolder, COLORS.Purple, 1, 0.4)
+
+            local avatarImg = Instance.new("ImageLabel", avatarHolder)
+            avatarImg.Size = UDim2.new(1, 0, 1, 0)
+            avatarImg.BackgroundTransparency = 1
+            corner(avatarImg, 17)
+            task.spawn(function()
+                local ok, content = pcall(function()
+                    return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+                end)
+                if ok and content and avatarImg.Parent then avatarImg.Image = content end
+            end)
+
+            local nameLbl = makeLabel(player.DisplayName, 11, COLORS.White, Enum.Font.GothamBold, card)
+            nameLbl.Size = UDim2.new(1, -140, 0, 18)
+            nameLbl.Position = UDim2.new(0, 48, 0, 5)
+
+            local subLbl = makeLabel("@" .. player.Name, 8, COLORS.Gray, nil, card)
+            subLbl.Size = UDim2.new(1, -140, 0, 14)
+            subLbl.Position = UDim2.new(0, 48, 0, 24)
+
+            local syncBtn = makeButton(isSelected and "AKTIF ✓" or "SYNC", isSelected and COLORS.PurpleDark or COLORS.Panel2, card, UDim2.new(0, 70, 0, 34))
+            syncBtn.Position = UDim2.new(1, -78, 0.5, -17)
+            syncBtn.MouseButton1Click:Connect(function()
+                if isSelected then
+                    State.SyncTargetMode = false
+                    State.SyncTargetPlayer = nil
+                    StopSyncSystem()
+                else
+                    State.SyncTargetPlayer = player
+                    State.SyncTargetMode = true
+                    State.DanceMode = false
+                    State.SyncBroadcastMode = false
+                    SetupDanceSync()
+                end
+                rebuildSyncTab()
+            end)
+        end
+    end
+
+    local nextOrder = 4 + #otherPlayers
+
+    -- ===== NONAKTIFKAN SEMUA =====
+    local deactivateBtn = makeButton("⏹ NONAKTIFKAN SYNC", COLORS.Red, tabContentFrame)
+    deactivateBtn.LayoutOrder = nextOrder + 1
+    deactivateBtn.MouseButton1Click:Connect(function()
+        State.SyncTargetMode = false
+        State.SyncTargetPlayer = nil
+        State.DanceMode = false
+        State.SyncBroadcastMode = false
+        StopSyncSystem()
+        rebuildSyncTab()
+    end)
+
+    -- ===== FITUR TAMBAHAN =====
+    makeSectionHeader("FITUR SYNC LAINNYA", tabContentFrame, nextOrder + 2, COLORS.Gold)
+
+    local broadcastBtn = makeButton(State.SyncBroadcastMode and "📡 BROADCAST: ON" or "📡 SYNC KE SEMUA PLAYER ONLINE (Broadcast)", State.SyncBroadcastMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    broadcastBtn.LayoutOrder = nextOrder + 3
+    broadcastBtn.MouseButton1Click:Connect(function()
+        if State.SyncBroadcastMode then
+            State.SyncBroadcastMode = false
+            State.SyncTargetMode = false
+            State.SyncTargetPlayer = nil
+            StopSyncSystem()
+        else
+            local candidates = {}
+            for _, player in ipairs(Players:GetPlayers()) do
+                if player ~= LocalPlayer then table.insert(candidates, player) end
+            end
+            if #candidates > 0 then
+                State.SyncBroadcastMode = true
+                State.SyncTargetPlayer = candidates[math.random(1, #candidates)]
+                State.SyncTargetMode = true
+                State.DanceMode = false
+                SetupDanceSync()
+            end
+        end
+        rebuildSyncTab()
+    end)
+
+    local autoReconnectBtn = makeButton("🔄 AUTO-RECONNECT: " .. (State.SyncAutoReconnect and "ON" or "OFF"), State.SyncAutoReconnect and COLORS.Emerald or COLORS.Panel, tabContentFrame)
+    autoReconnectBtn.LayoutOrder = nextOrder + 4
+    autoReconnectBtn.MouseButton1Click:Connect(function()
+        State.SyncAutoReconnect = not State.SyncAutoReconnect
+        rebuildSyncTab()
+    end)
+
+    -- ===== KONTEN / PRANK =====
+    makeSectionHeader("FITUR KONTEN & PRANK CLONE", tabContentFrame, nextOrder + 5, COLORS.Red)
+
+    local outfitBtn = makeButton("👕 SAMAKAN OUTFIT SEMUA CLONE KE AKU", COLORS.Blue, tabContentFrame)
+    outfitBtn.LayoutOrder = nextOrder + 6
+    outfitBtn.MouseButton1Click:Connect(function()
+        local ok, msg = CopyMyOutfitToAllClones()
+        outfitBtn.Text = ok and ("✓ " .. msg) or ("✗ " .. tostring(msg))
+        task.delay(2.5, function()
+            if outfitBtn and outfitBtn.Parent then outfitBtn.Text = "👕 SAMAKAN OUTFIT SEMUA CLONE KE AKU" end
+        end)
+    end)
+
+    local ghostBtn = makeButton(State.GhostModeActive and "👻 GHOST MODE: ON" or "👻 GHOST MODE (Muncul-Hilang Acak)", State.GhostModeActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    ghostBtn.LayoutOrder = nextOrder + 7
+    ghostBtn.MouseButton1Click:Connect(function()
+        if State.GhostModeActive then StopGhostMode() else StartGhostMode() end
+        rebuildSyncTab()
+    end)
+
+    local ragdollBtn = makeButton(State.RagdollPrankActive and "🤸 RAGDOLL PRANK: ON" or "🤸 RAGDOLL PRANK (Jatuh Acak)", State.RagdollPrankActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    ragdollBtn.LayoutOrder = nextOrder + 8
+    ragdollBtn.MouseButton1Click:Connect(function()
+        if State.RagdollPrankActive then StopRagdollPrank() else StartRagdollPrank() end
+        rebuildSyncTab()
+    end)
+
+    local swapBtn = makeButton(State.RandomSwapActive and "🔀 RANDOM SWAP: ON" or "🔀 RANDOM SWAP (Tukar Posisi Acak)", State.RandomSwapActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    swapBtn.LayoutOrder = nextOrder + 9
+    swapBtn.MouseButton1Click:Connect(function()
+        if State.RandomSwapActive then StopRandomSwap() else StartRandomSwap() end
+        rebuildSyncTab()
+    end)
+
+    local memeBtn = makeButton(State.MemeChatActive and "💬 MEME CHAT: ON" or "💬 MEME CHAT (Auto Ngomong Lucu)", State.MemeChatActive and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
+    memeBtn.LayoutOrder = nextOrder + 10
+    memeBtn.MouseButton1Click:Connect(function()
+        if State.MemeChatActive then StopMemeChat() else StartMemeChat() end
+        rebuildSyncTab()
+    end)
+
+    local hint = makeLabel("Tips: gabungkan Ghost Mode + Ragdoll Prank + Meme Chat bareng-bareng buat konten yang lebih seru!", 8, COLORS.DarkGray, nil, tabContentFrame)
+    hint.LayoutOrder = nextOrder + 11
+    hint.TextWrapped = true
 end
 
 rebuildAIChatTab = function()
@@ -1643,95 +2206,99 @@ end
 local function rebuildConfigTab()
     clearTabContent()
 
-    local saveBtn = makeButton("SIMPAN CONFIGURASI", COLORS.Green, tabContentFrame)
-    saveBtn.LayoutOrder = 1
+    local slotCount = 0
+    for _ in pairs(State.ConfigSlots) do slotCount = slotCount + 1 end
+
+    makeSectionHeader("CONFIG TERSIMPAN (" .. slotCount .. ")", tabContentFrame, 1, COLORS.Gold)
+
+    -- ===== SIMPAN CONFIG BARU (dengan nama) =====
+    local saveCard = makePremiumCard(tabContentFrame, 2)
+    local savePad = Instance.new("UIPadding", saveCard)
+    savePad.PaddingTop = UDim.new(0, 10); savePad.PaddingBottom = UDim.new(0, 10)
+    savePad.PaddingLeft = UDim.new(0, 10); savePad.PaddingRight = UDim.new(0, 10)
+    local saveLayout = Instance.new("UIListLayout", saveCard)
+    saveLayout.Padding = UDim.new(0, 6)
+    saveLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    local saveTitle = makeLabel("SIMPAN CONFIG BARU", 10, COLORS.Gray, Enum.Font.GothamBold, saveCard)
+    saveTitle.LayoutOrder = 1
+
+    local nameInput, nameFrame = makeInput("Nama config (contoh: Squad Perang)", saveCard)
+    nameFrame.LayoutOrder = 2
+
+    local saveBtn = makeButton("💾 SIMPAN DENGAN NAMA INI", COLORS.Green, saveCard)
+    saveBtn.LayoutOrder = 3
     saveBtn.MouseButton1Click:Connect(function()
-        local data = {}
-        local folder = Workspace:FindFirstChild(FOLDER_NAME)
-        if folder then
-            for _, clone in ipairs(folder:GetChildren()) do
-                if clone:IsA("Model") and State.CloneData[clone] then
-                    local info = State.CloneData[clone]
-                    local primary = clone.PrimaryPart
-                    if primary then
-                        local pos = primary.Position
-                        local rot = primary.CFrame - primary.CFrame.Position
-                        local x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33 = rot:GetComponents()
-                        table.insert(data, {
-                            userId = info.UserId,
-                            displayName = info.DisplayName or info.Username,
-                            username = info.Username,
-                            name = clone.Name,
-                            hideName = info.HideName,
-                            position = {pos.X, pos.Y, pos.Z},
-                            rotation = {r11, r12, r13, r21, r22, r23, r31, r32, r33}
-                        })
-                    end
-                end
-            end
-        end
-        pcall(function() writefile(CONFIG_FILE, HttpService:JSONEncode(data)) end)
-        if Storage and Storage.appSettings then
-            Storage.appSettings.mycloneConfig = data
-            if Storage.persistSettings then pcall(Storage.persistSettings) end
-        end
+        local slotName = nameInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if slotName == "" then return end
+        local ok, msg = SaveConfigSlot(slotName)
+        nameInput.Text = ""
+        rebuildConfigTab()
     end)
 
-    local loadBtn = makeButton("MUAT CONFIGURASI", COLORS.Blue, tabContentFrame)
-    loadBtn.LayoutOrder = 2
-    loadBtn.MouseButton1Click:Connect(function()
-        local data = nil
-        pcall(function()
-            if isfile and readfile and isfile(CONFIG_FILE) then
-                data = HttpService:JSONDecode(readfile(CONFIG_FILE))
-            end
+    -- ===== QUICK SAVE (ke slot terakhir dipakai) =====
+    if State.LastConfigSlot and State.ConfigSlots[State.LastConfigSlot] then
+        local quickSaveBtn = makeButton("⚡ QUICK SAVE -> '" .. State.LastConfigSlot .. "'", COLORS.Blue, tabContentFrame)
+        quickSaveBtn.LayoutOrder = 3
+        quickSaveBtn.MouseButton1Click:Connect(function()
+            SaveConfigSlot(State.LastConfigSlot)
+            rebuildConfigTab()
         end)
-        if not data and Storage and Storage.appSettings and Storage.appSettings.mycloneConfig then
-            data = Storage.appSettings.mycloneConfig
-        end
-        if type(data) ~= "table" then return end
-        for _, info in ipairs(data) do
-            task.spawn(function()
-                local userId = info.userId
-                local model = CreateAvatarFromUserId(userId)
-                if model then
-                    State.CloneCounter = State.CloneCounter + 1
-                    local cloneName = info.name or ("Clone_" .. tostring(State.CloneCounter))
-                    model.Name = cloneName
-                    PrepareCloneModel(model)
-                    local position = info.position
-                    local rotData = info.rotation
-                    local cf
-                    if position and rotData then
-                        local pos = Vector3.new(position[1], position[2], position[3])
-                        local rot = CFrame.new(0,0,0, rotData[1], rotData[2], rotData[3], rotData[4], rotData[5], rotData[6], rotData[7], rotData[8], rotData[9])
-                        cf = CFrame.new(pos) * rot
-                    else
-                        cf = GetNextSpawnCFrame()
-                    end
-                    model:PivotTo(cf)
-                    local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-                    if rootPart then
-                        rootPart.Anchored = true
-                        rootPart.CanCollide = false
-                        rootPart.Transparency = 1
-                    end
-                    local cloneData = {
-                        Index = State.CloneCounter,
-                        UserId = userId,
-                        Username = info.username or info.displayName,
-                        DisplayName = info.displayName,
-                        OriginalCFrame = cf,
-                        OriginalRotation = cf - cf.Position,
-                        HideName = info.hideName or false,
-                    }
-                    State.CloneData[model] = cloneData
-                    model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
-                    CreateNameTag(model, info.displayName or info.username or cloneName, cloneData.HideName)
-                end
+    end
+
+    -- ===== DAFTAR SEMUA SLOT CONFIG =====
+    makeSectionHeader("PILIH CONFIG UNTUK DIMUAT", tabContentFrame, 4, COLORS.Blue)
+
+    local slotNames = {}
+    for name in pairs(State.ConfigSlots) do table.insert(slotNames, name) end
+    table.sort(slotNames)
+
+    if #slotNames == 0 then
+        local emptyLbl = makeLabel("Belum ada config tersimpan. Simpan config pertama kamu di atas.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 5
+        emptyLbl.TextWrapped = true
+    else
+        for i, slotName in ipairs(slotNames) do
+            local slot = State.ConfigSlots[slotName]
+            local cloneCount = (slot and slot.clones) and #slot.clones or 0
+            local isActive = State.LastConfigSlot == slotName
+
+            local card = makePremiumCard(tabContentFrame, 4 + i, 56)
+            if isActive then stroke(card, COLORS.Gold, 1.5, 0.1) end
+
+            local nameLbl = makeLabel((isActive and "★ " or "") .. slotName, 12, COLORS.White, Enum.Font.GothamBold, card)
+            nameLbl.Size = UDim2.new(1, -160, 0, 20)
+            nameLbl.Position = UDim2.new(0, 10, 0, 6)
+
+            local savedDate = slot and slot.savedAt and os.date("%d/%m/%Y %H:%M", slot.savedAt) or "-"
+            local subLbl = makeLabel(cloneCount .. " clone · " .. savedDate, 8, COLORS.Gray, nil, card)
+            subLbl.Size = UDim2.new(1, -160, 0, 14)
+            subLbl.Position = UDim2.new(0, 10, 0, 26)
+
+            local loadBtn = makeButton("MUAT", COLORS.Blue, card, UDim2.new(0, 56, 0, 40))
+            loadBtn.Position = UDim2.new(1, -160, 0.5, -20)
+            loadBtn.MouseButton1Click:Connect(function()
+                ApplyConfigSlot(slotName, function(ok, msg)
+                    State.LastConfigSlot = slotName
+                    rebuildConfigTab()
+                end)
+            end)
+
+            local overwriteBtn = makeButton("↻", COLORS.Orange, card, UDim2.new(0, 40, 0, 40))
+            overwriteBtn.Position = UDim2.new(1, -98, 0.5, -20)
+            overwriteBtn.MouseButton1Click:Connect(function()
+                SaveConfigSlot(slotName)
+                rebuildConfigTab()
+            end)
+
+            local deleteBtn = makeButton("🗑", COLORS.Delete, card, UDim2.new(0, 40, 0, 40))
+            deleteBtn.Position = UDim2.new(1, -50, 0.5, -20)
+            deleteBtn.MouseButton1Click:Connect(function()
+                DeleteConfigSlot(slotName)
+                rebuildConfigTab()
             end)
         end
-    end)
+    end
 end
 
 rebuildHistoryTab = function()
@@ -2300,6 +2867,7 @@ function _G.openMyCloneApp()
     LoadHistory()
     LoadFavorites()
     LoadFavPlayers()
+    LoadConfigSlots()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
         local folder = Instance.new("Folder")
