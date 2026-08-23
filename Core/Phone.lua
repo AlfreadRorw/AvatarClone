@@ -372,6 +372,21 @@ corner(ksBuyBtn, 10)
 stroke(ksBuyBtn, Color3.fromRGB(255,255,255), 1, 0.6)
 pressFX(ksBuyBtn)
 
+-- Free trial 24 jam button
+local ksTrialBtn = Instance.new("TextButton", ksContent)
+ksTrialBtn.Size = UDim2.new(1,0,0,40)
+ksTrialBtn.BackgroundColor3 = Color3.fromRGB(0,200,140)
+ksTrialBtn.BackgroundTransparency = 0.85
+ksTrialBtn.Text = "COBA GRATIS 24 JAM"
+ksTrialBtn.TextColor3 = Color3.fromRGB(0,255,180)
+ksTrialBtn.Font = Enum.Font.GothamBold
+ksTrialBtn.TextSize = 13
+ksTrialBtn.AutoButtonColor = false
+ksTrialBtn.LayoutOrder = 7; ksTrialBtn.ZIndex = 84
+corner(ksTrialBtn, 10)
+stroke(ksTrialBtn, Color3.fromRGB(0,255,180), 1, 0.5)
+pressFX(ksTrialBtn)
+
 -- Build info
 local ksBuild = Instance.new("TextLabel", ksContent)
 ksBuild.Size = UDim2.new(1,0,0,16)
@@ -380,7 +395,7 @@ ksBuild.Text = "Build v2.1.0 | © 2025 " .. (Config.DEVELOPER_USERNAME or "Alfre
 ksBuild.TextColor3 = Color3.fromRGB(80,80,100)
 ksBuild.Font = Enum.Font.Gotham
 ksBuild.TextSize = 8
-ksBuild.LayoutOrder = 7; ksBuild.ZIndex = 83
+ksBuild.LayoutOrder = 8; ksBuild.ZIndex = 83
 
 -- ==================== CHAT NOTIFICATION BANNER ====================
 -- Notif banner masuk dari atas layar dengan tombol balas
@@ -677,6 +692,65 @@ ksBuyBtn.MouseButton1Click:Connect(function()
     else
         _G.showDynamicNotification("Link disalin! Paste di browser kamu.", Color3.fromRGB(255,180,50))
     end
+end)
+
+-- ==================== FREE TRIAL 24 JAM ====================
+local ksTrialChecking = false
+
+ksTrialBtn.MouseButton1Click:Connect(function()
+    if ksTrialChecking or ksChecking then return end
+
+    if not Firebase or not Firebase.ClaimTrialKey then
+        ksStatus.Text = "Fitur trial tidak tersedia saat ini."
+        ksStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+        return
+    end
+
+    ksTrialChecking = true
+    ksTrialBtn.Text = "Checking..."
+    ksStatus.Text = "Mengecek status trial kamu..."
+    ksStatus.TextColor3 = Color3.fromRGB(200,200,220)
+
+    task.spawn(function()
+        -- Wrap dua return value ke tabel supaya pcall tidak kehilangan
+        -- nilai kedua di beberapa executor (sama seperti doSubmitKey).
+        local ok, res = pcall(function()
+            local v, m, k = Firebase.ClaimTrialKey(
+                LocalPlayer.UserId,
+                LocalPlayer.DisplayName,
+                LocalPlayer.Name
+            )
+            return {valid = v, msg = m, key = k}
+        end)
+
+        ksTrialChecking = false
+        ksTrialBtn.Text = "COBA GRATIS 24 JAM"
+
+        if ok and res and res.valid then
+            ksStatus.Text = res.msg or "Trial 24 Jam aktif!"
+            ksStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
+
+            -- Simpan key trial ke penyimpanan lokal, sama seperti key biasa,
+            -- supaya auto-login berikutnya tetap terbaca oleh CheckSavedKey.
+            if Storage then
+                if Storage.saveKey then
+                    pcall(Storage.saveKey, res.key)
+                elseif Storage.appSettings then
+                    Storage.appSettings.savedKey = res.key
+                    pcall(function()
+                        if Storage.persistSettings then Storage.persistSettings() end
+                    end)
+                end
+            end
+
+            task.wait(0.8)
+            _G.unlock()
+        else
+            local msg = (ok and res and res.msg) or "Gagal mengaktifkan trial. Coba lagi."
+            ksStatus.Text = msg
+            ksStatus.TextColor3 = Color3.fromRGB(255, 80, 80)
+        end
+    end)
 end)
 
 -- ==================== PHONE STATE ====================

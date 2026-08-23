@@ -80,7 +80,7 @@ function Firebase.DeleteData(path)
 end
 
 -- ==================== HELPERS ====================
-local DURATION_SECS = {["3d"] = 259200, ["7d"] = 604800, ["30d"] = 2592000}
+local DURATION_SECS = {["3d"] = 259200, ["7d"] = 604800, ["30d"] = 2592000, ["trial24h"] = 86400}
 local PERMANENT_EXPIRY = 4102444800 -- 2099-12-31 00:00:00 UTC
 
 local function getExpiry(data)
@@ -275,7 +275,80 @@ function Firebase.GetFullKeyInfo(userId)
     }
 end
 
--- ==================== ONLINE SYSTEM ====================
+-- ==================== FREE TRIAL 24 JAM ====================
+-- Setiap userId cuma boleh klaim trial SEKALI SELAMANYA. Status klaim
+-- disimpan terpisah di trial_claims/{userId} supaya tetap tercatat
+-- walaupun key trial-nya sendiri sudah expired dan dihapus dari
+-- user_keys, sehingga user tidak bisa "reset" jatah trial dengan cara
+-- apapun dari sisi client (semua pengecekan dilakukan di server/Firebase).
+local TRIAL_DURATION_SECS = 86400 -- 24 jam
+
+function Firebase.HasClaimedTrial(userId)
+    local uid = tostring(userId)
+    local data = Firebase.GetData("trial_claims/" .. uid)
+    return data ~= nil and type(data) == "table"
+end
+
+function Firebase.ClaimTrialKey(userId, playerDisplayName, playerUsername)
+    local uid = tostring(userId)
+
+    -- Cek dulu apakah user ini sudah pernah klaim trial sebelumnya.
+    local existing = Firebase.GetData("trial_claims/" .. uid)
+    if existing and type(existing) == "table" then
+        return false, "Kamu sudah pernah pakai Free Trial sebelumnya. Trial hanya bisa diklaim 1x per akun."
+    end
+
+    local now = os.time()
+    local exp = now + TRIAL_DURATION_SECS
+    local trialKey = "TRIAL-" .. uid .. "-" .. tostring(now)
+
+    -- Simpan key trial ini di 'keys/' sama seperti key biasa, supaya semua
+    -- fungsi lain (CheckSavedKey, GetKeyTimeRemaining, GetFullKeyInfo) yang
+    -- sudah ada otomatis bisa membaca & menghitung sisa waktunya tanpa
+    -- perlu kode terpisah.
+    local okKey = Firebase.SetData("keys/" .. trialKey, {
+        duration       = "trial24h",
+        durationLabel  = "Trial 24 Jam",
+        createdAt      = now,
+        created        = now,
+        used           = true,
+        usedBy         = uid,
+        boundUserId    = uid,
+        playerName     = playerDisplayName or "Unknown",
+        playerUsername = playerUsername or "Unknown",
+        activatedAt    = now,
+        expiresAt      = exp,
+        expires        = exp,
+        isTrial        = true,
+    })
+    if not okKey then
+        return false, "Gagal membuat key trial. Coba lagi."
+    end
+
+    local okUserKey = Firebase.SetData("user_keys/" .. uid, {
+        key           = trialKey,
+        expiresAt     = exp,
+        expires       = exp,
+        durationLabel = "Trial 24 Jam",
+        activatedAt   = now,
+    })
+    if not okUserKey then
+        return false, "Gagal menyimpan key trial ke akun kamu. Coba lagi."
+    end
+
+    -- Catat permanen bahwa userId ini sudah pernah klaim trial, terlepas
+    -- dari key trial-nya sendiri nanti expired/dihapus.
+    Firebase.SetData("trial_claims/" .. uid, {
+        claimedAt      = now,
+        key            = trialKey,
+        playerName     = playerDisplayName or "Unknown",
+        playerUsername = playerUsername or "Unknown",
+    })
+
+    return true, "Trial 24 Jam aktif! " .. fmtRemaining(exp - now, false), trialKey
+end
+
+
 function Firebase.SetOnline(userId, playerData)
     return Firebase.SetData("online/" .. tostring(userId), playerData)
 end
@@ -396,66 +469,6 @@ function Firebase.IsPermanentUser(userId)
     end
 
     return result
-end
-
--- ==================== MODEL3D CONFIGS ====================
--- Struktur data di Firebase:
---   model3d_dev/{devUserId}/{configId}        -> config milik DEVELOPER.
---       Bisa dibaca oleh SEMUA pengguna script (siapapun boleh GET),
---       tapi HANYA developer sendiri yang boleh PUSH/DELETE (dicek di
---       Model3D.lua lewat Config.DEVELOPER_USER_ID sebelum manggil fungsi ini).
---   model3d_player/{ownerUserId}/{configId}   -> config milik PLAYER biasa.
---       Hanya kelihatan oleh: (1) pemilik config itu sendiri, dan
---       (2) developer (yang boleh browse config semua player).
---       Player lain yang BUKAN pemilik dan BUKAN dev tidak akan
---       memanggil path milik orang lain sama sekali dari sisi UI,
---       jadi tidak pernah kelihatan confignya (client tidak expose
---       userId orang lain untuk di-browse kecuali oleh dev).
---
--- configData = {
---   name        = "Nama Config",
---   ownerUserId = <userId pembuat>,
---   ownerName   = "DisplayName",
---   createdAt   = os.time(),
---   items       = { { kind="model", assetId=123, cframe={...}, size={...} },
---                   { kind="image", url="https://files.catbox.moe/xxxx.png", cframe={...}, size={...} }, ... }
--- }
-
-function Firebase.SaveDevModel3D(devUserId, configId, configData)
-    if not configId or configId == "" then
-        return Firebase.PushData("model3d_dev/" .. tostring(devUserId), configData)
-    end
-    return Firebase.SetData("model3d_dev/" .. tostring(devUserId) .. "/" .. configId, configData) and configId or nil
-end
-
-function Firebase.GetDevModel3DList(devUserId)
-    return Firebase.GetData("model3d_dev/" .. tostring(devUserId))
-end
-
-function Firebase.DeleteDevModel3D(devUserId, configId)
-    return Firebase.DeleteData("model3d_dev/" .. tostring(devUserId) .. "/" .. configId)
-end
-
-function Firebase.SavePlayerModel3D(ownerUserId, configId, configData)
-    if not configId or configId == "" then
-        return Firebase.PushData("model3d_player/" .. tostring(ownerUserId), configData)
-    end
-    return Firebase.SetData("model3d_player/" .. tostring(ownerUserId) .. "/" .. configId, configData) and configId or nil
-end
-
-function Firebase.GetPlayerModel3DList(ownerUserId)
-    return Firebase.GetData("model3d_player/" .. tostring(ownerUserId))
-end
-
-function Firebase.DeletePlayerModel3D(ownerUserId, configId)
-    return Firebase.DeleteData("model3d_player/" .. tostring(ownerUserId) .. "/" .. configId)
-end
-
--- Dipakai developer untuk lihat daftar SEMUA player yang pernah menyimpan
--- minimal 1 config, supaya dev bisa browse/pilih lalu load config milik
--- player manapun. Mengembalikan tabel {[userIdString] = {configId=data,...}, ...}
-function Firebase.GetAllPlayerModel3D()
-    return Firebase.GetData("model3d_player")
 end
 
 return Firebase
