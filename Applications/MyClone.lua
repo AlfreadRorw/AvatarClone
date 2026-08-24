@@ -25,6 +25,32 @@ local CoreGui = Services.CoreGui
 local TextChatService = Services.TextChatService
 local CaptureService = Services.CaptureService
 
+
+-- Safe notification helper.
+-- The previous build called toast() without defining it, which caused:
+-- "attempt to call a nil value" at the Visual Clone button handler.
+local StarterGui = Services.StarterGui or game:GetService("StarterGui")
+local function toast(title, message, duration)
+    duration = tonumber(duration) or 3
+    title = tostring(title or "MyClone")
+    message = tostring(message or "")
+
+    local ok = pcall(function()
+        StarterGui:SetCore("SendNotification", {
+            Title = title,
+            Text = message,
+            Duration = duration
+        })
+    end)
+
+    -- Executor/UI fallback: never let notifications crash the script.
+    if not ok then
+        pcall(function()
+            warn(string.format("[%s] %s", title, message))
+        end)
+    end
+end
+
 local LocalPlayer = Players.LocalPlayer
 local T = _G.T or {}
 local Helpers = _G.Helpers or {}
