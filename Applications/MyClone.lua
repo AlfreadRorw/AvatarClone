@@ -1,6 +1,8 @@
 -- ================================================
 -- MyClone.lua - MyClone App (Phone UI Enhanced & Fixed)
 -- Fixed: State persistence on close, UI Overflow, App Reload Memory
+-- Added: Clone Diri Sendiri (tanpa TextBox), Morph ke Clone Terpilih,
+--        Hapus TextBox di tab Clones
 -- ================================================
 
 local Services = _G.Services or {
@@ -1575,20 +1577,15 @@ end
 rebuildClonesTab = function()
     clearTabContent()
 
-    local inputLabel = makeLabel("MASUKKAN USERNAME / USER ID:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
-    inputLabel.LayoutOrder = 1
-    local inputBox, inputFrame = makeInput("Ketik target avatar...", tabContentFrame)
-    inputFrame.LayoutOrder = 2
-
-    local cloneBtn = makeButton("CLONE TARGET", COLORS.Red, tabContentFrame)
-    cloneBtn.LayoutOrder = 3
-    cloneBtn.MouseButton1Click:Connect(function()
-        CreateCloneFromInput(inputBox.Text)
-        inputBox.Text = ""
+    -- Tombol Clone Diri Sendiri (tanpa TextBox)
+    local cloneSelfBtn = makeButton("🙋 CLONE DIRI SENDIRI", COLORS.Purple, tabContentFrame)
+    cloneSelfBtn.LayoutOrder = 1
+    cloneSelfBtn.MouseButton1Click:Connect(function()
+        CreateCloneFromUserId(LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name)
     end)
 
     local cloneAllBtn = makeButton("CLONE SEMUA PLAYER", COLORS.Green, tabContentFrame)
-    cloneAllBtn.LayoutOrder = 4
+    cloneAllBtn.LayoutOrder = 2
     cloneAllBtn.MouseButton1Click:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then
@@ -1598,11 +1595,11 @@ rebuildClonesTab = function()
     end)
 
     local clonesLabel = makeLabel("DAFTAR CLONE AKTIF:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
-    clonesLabel.LayoutOrder = 5
+    clonesLabel.LayoutOrder = 3
 
     local folder = Workspace:FindFirstChild(FOLDER_NAME)
     if folder then
-        local index = 6
+        local index = 4
         local cloneList = folder:GetChildren()
         if #cloneList == 0 then
             local emptyInfo = makeLabel("Belum ada clone yang dibuat.", 10, COLORS.DarkGray, nil, tabContentFrame)
@@ -1703,9 +1700,66 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
+    -- MORPH KE CLONE INI (Jadikan LocalPlayer seperti clone terpilih)
+    local morphBtn = makeButton("🪞 JADIKAN AKU SEPERTI CLONE INI", COLORS.Purple, tabContentFrame)
+    morphBtn.LayoutOrder = 4
+    morphBtn.MouseButton1Click:Connect(function()
+        if not State.SelectedClone then
+            morphBtn.Text = "❌ Pilih clone dulu"
+            task.delay(2, function()
+                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+            end)
+            return
+        end
+        local cloneHumanoid = State.SelectedClone:FindFirstChildOfClass("Humanoid")
+        if not cloneHumanoid then
+            morphBtn.Text = "❌ Clone tidak punya Humanoid"
+            task.delay(2, function()
+                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+            end)
+            return
+        end
+
+        local desc = cloneHumanoid:GetAppliedDescription()
+        if not desc then
+            local cData = State.CloneData[State.SelectedClone]
+            if cData and cData.UserId then
+                local ok, fetched = pcall(function()
+                    return Players:GetHumanoidDescriptionFromUserIdAsync(cData.UserId)
+                end)
+                if ok and fetched then desc = fetched end
+            end
+        end
+
+        if not desc then
+            morphBtn.Text = "❌ Gagal ambil outfit clone"
+            task.delay(2, function()
+                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+            end)
+            return
+        end
+
+        local myChar = LocalPlayer.Character
+        local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
+        if myHumanoid then
+            pcall(function()
+                myHumanoid:ApplyDescription(desc)
+            end)
+            morphBtn.Text = "✅ SUDAH BERUBAH"
+            task.delay(2, function()
+                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+            end)
+        else
+            morphBtn.Text = "❌ Karakter belum siap"
+            task.delay(2, function()
+                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+            end)
+        end
+    end)
+
     -- Position Mode
     local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
-    posBtn.LayoutOrder = 4
+    posBtn.LayoutOrder = 5
     posBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.PositionMode = not State.PositionMode
@@ -1716,7 +1770,7 @@ rebuildEditorTab = function()
 
     -- Rotation Mode
     local rotBtn = makeButton(State.RotationMode and "GIZMO ROTASI: ON" or "GIZMO ROTASI: OFF", State.RotationMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
-    rotBtn.LayoutOrder = 5
+    rotBtn.LayoutOrder = 6
     rotBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.RotationMode = not State.RotationMode
@@ -1727,7 +1781,7 @@ rebuildEditorTab = function()
 
     -- Dance Mode
     local danceBtn = makeButton(State.DanceMode and "DANCE SYNC (SELECTED): ON" or "DANCE SYNC (SELECTED): OFF", State.DanceMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
-    danceBtn.LayoutOrder = 6
+    danceBtn.LayoutOrder = 7
     danceBtn.MouseButton1Click:Connect(function()
         State.DanceMode = not State.DanceMode
         State.SyncTargetMode = false
@@ -1741,7 +1795,7 @@ rebuildEditorTab = function()
 
     -- Teleport to LocalPlayer
     local bringBtn = makeButton("TELEPORT KE SAYA", COLORS.Blue, tabContentFrame)
-    bringBtn.LayoutOrder = 7
+    bringBtn.LayoutOrder = 8
     bringBtn.MouseButton1Click:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
@@ -1755,7 +1809,7 @@ rebuildEditorTab = function()
 
     -- Reset position & rotation
     local resetPosBtn = makeButton("RESET POSISI", COLORS.Orange, tabContentFrame)
-    resetPosBtn.LayoutOrder = 8
+    resetPosBtn.LayoutOrder = 9
     resetPosBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1766,7 +1820,7 @@ rebuildEditorTab = function()
     end)
 
     local resetRotBtn = makeButton("RESET ROTASI", COLORS.Orange, tabContentFrame)
-    resetRotBtn.LayoutOrder = 9
+    resetRotBtn.LayoutOrder = 10
     resetRotBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1777,7 +1831,7 @@ rebuildEditorTab = function()
 
     -- Delete Selected
     local delBtn = makeButton("HAPUS CLONE INI", COLORS.Delete, tabContentFrame)
-    delBtn.LayoutOrder = 10
+    delBtn.LayoutOrder = 11
     delBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone then return end
         local target = State.SelectedClone
@@ -1790,7 +1844,7 @@ rebuildEditorTab = function()
 
     -- Delete All
     local delAllBtn = makeButton("HAPUS SEMUA CLONE", COLORS.Delete, tabContentFrame)
-    delAllBtn.LayoutOrder = 11
+    delAllBtn.LayoutOrder = 12
     delAllBtn.MouseButton1Click:Connect(function()
         if not DeleteAllArmed then
             DeleteAllArmed = true
