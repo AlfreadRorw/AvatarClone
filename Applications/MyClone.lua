@@ -212,6 +212,8 @@ local SavedPlayerJumpHeight = nil
 local SavedPlayerAutoRotate = nil
 local SavedCameraType = nil
 local SavedCameraSubject = nil
+local RecordingSpotPart = nil
+local RecordingSpotLabel = nil
 local VisualCharacterAddedConnection = nil
 
 local GROQ_MODELS = {
@@ -671,21 +673,38 @@ local function ApplyVisualDescriptionToCharacter(description, character)
 
     -- Reset variant lebih konsisten untuk mengganti seluruh avatar,
     -- bukan hanya bagian yang berbeda.
+    local verification = nil
+    pcall(function()
+        verification = Enum.AssetTypeVerification.Default
+    end)
+
     if type(humanoid.ApplyDescriptionResetAsync) == "function" then
         ok, err = pcall(function()
-            humanoid:ApplyDescriptionResetAsync(description)
+            if verification then
+                humanoid:ApplyDescriptionResetAsync(description, verification)
+            else
+                humanoid:ApplyDescriptionResetAsync(description)
+            end
         end)
     end
 
     if not ok and type(humanoid.ApplyDescriptionAsync) == "function" then
         ok, err = pcall(function()
-            humanoid:ApplyDescriptionAsync(description)
+            if verification then
+                humanoid:ApplyDescriptionAsync(description, verification)
+            else
+                humanoid:ApplyDescriptionAsync(description)
+            end
         end)
     end
 
     if not ok and type(humanoid.ApplyDescription) == "function" then
         ok, err = pcall(function()
-            humanoid:ApplyDescription(description)
+            if verification then
+                humanoid:ApplyDescription(description, verification)
+            else
+                humanoid:ApplyDescription(description)
+            end
         end)
     end
 
@@ -1078,6 +1097,114 @@ VisualCharacterAddedConnection = LocalPlayer.CharacterAdded:Connect(function(cha
     end)
 end)
 
+local function DestroyRecordingSpotPart()
+    if RecordingSpotPart then
+        pcall(function() RecordingSpotPart:Destroy() end)
+        RecordingSpotPart = nil
+    end
+    RecordingSpotLabel = nil
+end
+
+local function GetSelectedRecordingSpot()
+    if not State.SelectedRecordingSpot then return nil end
+    for _, spot in ipairs(State.RecordingSpots or {}) do
+        if spot.name == State.SelectedRecordingSpot then
+            return spot
+        end
+    end
+    return nil
+end
+
+local function ShowRecordingSpotPart(spot)
+    DestroyRecordingSpotPart()
+    local cf = GetSpotCFrame(spot)
+    if not cf then return false end
+
+    local part = Instance.new("Part")
+    part.Name = "MyClone_RecordingSpot"
+    part.Size = Vector3.new(3.5, 0.2, 3.5)
+    part.CFrame = cf
+    part.Anchored = true
+    part.CanCollide = false
+    part.CanTouch = false
+    part.CanQuery = false
+    part.CastShadow = false
+    part.Material = Enum.Material.Neon
+    part.Transparency = 0.18
+    part.Color = State.RecordingActive and Color3.fromRGB(80,255,110) or Color3.fromRGB(255,70,70)
+    part.Parent = Workspace
+
+    local box = Instance.new("SelectionBox")
+    box.Name = "RecordingSpotOutline"
+    box.Adornee = part
+    box.LineThickness = 0.045
+    box.SurfaceTransparency = 0.86
+    box.Color3 = part.Color
+    box.Parent = part
+
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "RecordingSpotLabel"
+    bill.Size = UDim2.fromOffset(150, 28)
+    bill.StudsOffset = Vector3.new(0, 2.25, 0)
+    bill.AlwaysOnTop = true
+    bill.Parent = part
+
+    local label = Instance.new("TextLabel")
+    label.BackgroundTransparency = 1
+    label.Size = UDim2.fromScale(1,1)
+    label.Font = Enum.Font.GothamBold
+    label.TextSize = 11
+    label.Text = (State.RecordingActive and "RECORDING  •  "..tostring(spot.name) or "RECORD SPOT  •  "..tostring(spot.name))
+    label.TextColor3 = Color3.fromRGB(255,255,255)
+    label.TextStrokeTransparency = 0.25
+    label.Parent = bill
+
+    RecordingSpotPart = part
+    RecordingSpotLabel = label
+    return true
+end
+
+local function RefreshRecordingSpotPart()
+    local spot = GetSelectedRecordingSpot()
+    if spot then
+        ShowRecordingSpotPart(spot)
+    else
+        DestroyRecordingSpotPart()
+    end
+end
+
+local function SetRecordingSpotState(isRecording)
+    if not RecordingSpotPart then
+        RefreshRecordingSpotPart()
+        return
+    end
+    local c = isRecording and Color3.fromRGB(80,255,110) or Color3.fromRGB(255,70,70)
+    RecordingSpotPart.Color = c
+    local box = RecordingSpotPart:FindFirstChild("RecordingSpotOutline")
+    if box then
+        box.Color3 = c
+    end
+    if RecordingSpotLabel then
+        local spot = GetSelectedRecordingSpot()
+        RecordingSpotLabel.Text = (isRecording and "RECORDING  •  " or "RECORD SPOT  •  ") .. tostring(spot and spot.name or "Spot")
+    end
+end
+
+local function ApplyRecordingCameraSpot()
+    local spot = GetSelectedRecordingSpot()
+    local camera = Workspace.CurrentCamera
+    if not spot or not camera then
+        return false, "Recording spot belum dipilih"
+    end
+    local cf = GetSpotCFrame(spot)
+    if not cf then
+        return false, "Data recording spot rusak"
+    end
+    camera.CameraType = Enum.CameraType.Scriptable
+    camera.CFrame = cf
+    return true
+end
+
 local function SaveRecordingSpots()
     WriteJsonFile(RECORDING_SPOTS_FILE, State.RecordingSpots or {})
 end
@@ -1102,7 +1229,9 @@ local function RecordSpot(name)
     table.insert(State.RecordingSpots, spot)
     State.SelectedRecordingSpot = spot.name
     SaveRecordingSpots()
-    return true, "Recording spot disimpan"
+    ShowRecordingSpotPart(spot)
+    SetRecordingSpotState(false)
+    return true, "Recording spot disimpan di posisi camera saat ini"
 end
 
 local function GetSpotCFrame(spot)
@@ -1116,7 +1245,12 @@ local function DeleteRecordingSpot(name)
     for i=#State.RecordingSpots,1,-1 do
         if State.RecordingSpots[i].name == name then table.remove(State.RecordingSpots,i) end
     end
-    if State.SelectedRecordingSpot == name then State.SelectedRecordingSpot=nil end
+    if State.SelectedRecordingSpot == name then
+        State.SelectedRecordingSpot=nil
+        DestroyRecordingSpotPart()
+    else
+        RefreshRecordingSpotPart()
+    end
     SaveRecordingSpots()
 end
 
@@ -1139,6 +1273,27 @@ local function StartRecording()
         return false, "Camera tidak tersedia"
     end
 
+    local selectedSpot = GetSelectedRecordingSpot()
+    if not selectedSpot then
+        return false, "Pilih recording spot terlebih dahulu"
+    end
+
+    -- Simpan kondisi kamera user. Saat recording dimulai kamera berpindah
+    -- ke spot tersimpan; kamera user boleh berada di tempat lain sebelum itu.
+    SavedCameraType = camera.CameraType
+    SavedCameraSubject = camera.CameraSubject
+    State.RecordingSavedCameraCFrame = camera.CFrame
+
+    local spotCF = GetSpotCFrame(selectedSpot)
+    if not spotCF then
+        return false, "CFrame recording spot tidak valid"
+    end
+
+    camera.CameraType = Enum.CameraType.Scriptable
+    camera.CFrame = spotCF
+    ShowRecordingSpotPart(selectedSpot)
+    SetRecordingSpotState(true)
+
     -- Recording tidak lagi bergantung pada VisualCloneModel.
     -- Visual Clone 2.0 = LocalPlayer itu sendiri.
     if State.VisualCloneMode and State.VisualCloneData then
@@ -1146,20 +1301,6 @@ local function StartRecording()
         if desc then
             -- Pastikan avatar target sudah benar sebelum kamera mulai merekam.
             ApplyVisualDescriptionToCharacter(desc, LocalPlayer.Character)
-        end
-    end
-
-    -- Apply recording spot sebelum capture.
-    if State.SelectedRecordingSpot then
-        for _, spot in ipairs(State.RecordingSpots) do
-            if spot.name == State.SelectedRecordingSpot then
-                local spotCF = GetSpotCFrame(spot)
-                if spotCF then
-                    camera.CameraType = Enum.CameraType.Scriptable
-                    camera.CFrame = spotCF
-                end
-                break
-            end
         end
     end
 
@@ -1207,12 +1348,21 @@ local function StartRecording()
         -- Kembalikan camera ke mode Roblox normal setelah capture selesai.
         local currentCamera = Workspace.CurrentCamera
         if currentCamera then
-            currentCamera.CameraType = Enum.CameraType.Custom
-            local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid then
-                currentCamera.CameraSubject = humanoid
+            currentCamera.CameraType = SavedCameraType or Enum.CameraType.Custom
+            if State.RecordingSavedCameraCFrame then
+                currentCamera.CFrame = State.RecordingSavedCameraCFrame
+            end
+            if SavedCameraSubject and SavedCameraSubject.Parent then
+                currentCamera.CameraSubject = SavedCameraSubject
+            else
+                local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid then currentCamera.CameraSubject = humanoid end
             end
         end
+        SetRecordingSpotState(false)
+        State.RecordingSavedCameraCFrame = nil
+        SavedCameraType = nil
+        SavedCameraSubject = nil
 
         if State.RecordingSession then
             State.RecordingSession.endedAt = os.time()
@@ -1308,12 +1458,21 @@ local function StopRecording()
 
     local camera = Workspace.CurrentCamera
     if camera then
-        camera.CameraType = Enum.CameraType.Custom
-        local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if humanoid then
-            camera.CameraSubject = humanoid
+        camera.CameraType = SavedCameraType or Enum.CameraType.Custom
+        if State.RecordingSavedCameraCFrame then
+            camera.CFrame = State.RecordingSavedCameraCFrame
+        end
+        if SavedCameraSubject and SavedCameraSubject.Parent then
+            camera.CameraSubject = SavedCameraSubject
+        else
+            local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+            if humanoid then camera.CameraSubject = humanoid end
         end
     end
+    SetRecordingSpotState(false)
+    State.RecordingSavedCameraCFrame = nil
+    SavedCameraType = nil
+    SavedCameraSubject = nil
 
     if State.RecordingSession then
         State.RecordingSession.endedAt = os.time()
@@ -2448,12 +2607,6 @@ local function makeInput(placeholder, parent)
     -- Placeholder hanya petunjuk; user tidak perlu menghapusnya secara manual.
     -- ClearTextOnFocus hanya memengaruhi TextBox yang memang sudah memiliki Text.
     tb.ClearTextOnFocus = true
-    tb.Focused:Connect(function()
-        -- Pastikan teks placeholder/teks bantuan tidak pernah menjadi isi input.
-        if tb.Text == (placeholder or "") then
-            tb.Text = ""
-        end
-    end)
     tb.TextXAlignment = Enum.TextXAlignment.Left
     tb.Parent = frame
     return tb, frame
@@ -3774,25 +3927,42 @@ rebuildVisualTab = function()
             local btn=makeButton("CLONE",COLORS.Panel2,card,UDim2.new(0,72,0,32))
             btn.Position=UDim2.new(1,-79,0.5,-16)
             btn.MouseButton1Click:Connect(function()
+                if btn:GetAttribute("Busy") then return end
+                btn:SetAttribute("Busy", true)
                 btn.Active = false
-                btn.Text = "MEMUAT..."
+                btn.Text = "MENGAMBIL AVATAR..."
 
-                local ok, msg = CapturePlayerAsVisualClone(player)
-                if ok then
-                    local applied, applyMsg = StartVisualClone()
-                    if not applied then
-                        ok = false
-                        msg = applyMsg
-                    else
-                        msg = "@" .. player.Name .. " berhasil menjadi Visual Clone LocalPlayer."
+                task.spawn(function()
+                    local ok, msg = CapturePlayerAsVisualClone(player)
+                    if ok then
+                        btn.Text = "MENERAPKAN..."
+                        local applied, applyMsg = StartVisualClone()
+                        if not applied then
+                            ok = false
+                            msg = applyMsg
+                        else
+                            msg = "@" .. player.Name .. " sekarang menjadi avatar Visual Clone LocalPlayer."
+                        end
                     end
-                end
 
-                toast(ok and "VISUAL CLONE AKTIF" or "VISUAL CLONE GAGAL", msg or "Tidak diketahui", 3500)
+                    if not ok and btn.Parent then
+                        btn.Text = "COBA LAGI"
+                        task.delay(2, function()
+                            if btn and btn.Parent then
+                                btn.Text = "CLONE"
+                                btn.Active = true
+                                btn:SetAttribute("Busy", false)
+                            end
+                        end)
+                    end
 
-                task.delay(0.15, function()
-                    if tabContentFrame and tabContentFrame.Parent then
-                        rebuildVisualTab()
+                    toast(ok and "VISUAL CLONE AKTIF" or "VISUAL CLONE GAGAL", tostring(msg or "Gagal tanpa pesan"), 4000)
+
+                    if ok then
+                        task.wait(0.35)
+                        if tabContentFrame and tabContentFrame.Parent then
+                            rebuildVisualTab()
+                        end
                     end
                 end)
             end)
@@ -3853,6 +4023,7 @@ end
 rebuildRecordingTab = function()
     clearTabContent()
     makeSectionHeader("RECORDING STUDIO", tabContentFrame, 1, COLORS.White)
+    RefreshRecordingSpotPart()
     local note=makeLabel("Recording menggunakan CaptureService Roblox. Video maksimal 30 detik per capture dan hasilnya diproses melalui Captures gallery Roblox. Spot dan metadata dapat disimpan lokal jika writefile tersedia.",9,COLORS.Gray,nil,tabContentFrame)
     note.LayoutOrder=2; note.TextWrapped=true
 
@@ -3874,8 +4045,8 @@ rebuildRecordingTab = function()
             local label=makeLabel(spot.name,10,COLORS.White,Enum.Font.GothamBold,row); label.Position=UDim2.new(0,8,0,5); label.Size=UDim2.new(1,-150,0,16)
             local date=makeLabel(os.date("%d %b %Y %H:%M",spot.savedAt or os.time()),7,COLORS.Gray,nil,row); date.Position=UDim2.new(0,8,0,23); date.Size=UDim2.new(1,-150,0,13)
             choose.MouseButton1Click:Connect(function()
-                State.SelectedRecordingSpot=spot.name
-                local cf=GetSpotCFrame(spot); if cf and Workspace.CurrentCamera then Workspace.CurrentCamera.CFrame=cf end
+                State.SelectedRecordingSpot = spot.name
+                RefreshRecordingSpotPart()
                 rebuildRecordingTab()
             end)
             local del=makeButton("X",COLORS.Delete,row,UDim2.new(0,30,0,30)); del.Position=UDim2.new(1,-104,0.5,-15)
