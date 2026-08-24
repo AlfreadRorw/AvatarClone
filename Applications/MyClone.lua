@@ -1,8 +1,8 @@
 -- ================================================
 -- MyClone.lua - MyClone App (Phone UI Enhanced & Fixed)
 -- Fixed: State persistence on close, UI Overflow, App Reload Memory
--- Added: Clone Diri Sendiri (tanpa TextBox), Morph ke Clone Terpilih,
---        Hapus TextBox di tab Clones
+-- Added: Clone Visual to Self, Clone Visual Tab, config stores exact appearance
+-- Removed annoying TextBox in Clones tab
 -- ================================================
 
 local Services = _G.Services or {
@@ -210,7 +210,7 @@ local Gizmos = _G.MyCloneGizmos
 
 -- Forward Declarations
 local rebuildCurrentTab, rebuildEditorTab, rebuildClonesTab, rebuildHistoryTab, rebuildSyncTab, rebuildAIChatTab
-local rebuildVariasiTab, rebuildPlayersTab
+local rebuildVariasiTab, rebuildPlayersTab, rebuildCloneVisualTab
 
 -- ================================================
 -- UTILITY FUNCTIONS
@@ -579,6 +579,156 @@ local function LoadConfigSlots()
     end
 end
 
+-- Helper serialize/deserialize HumanoidDescription for config
+local function serializeColor3(c)
+    return {r = c.R, g = c.G, b = c.B}
+end
+
+local function deserializeColor3(t)
+    if type(t) == "table" and t.r and t.g and t.b then
+        return Color3.new(t.r, t.g, t.b)
+    end
+    return Color3.new(0.5, 0.5, 0.5)
+end
+
+local function serializeHumanoidDescription(desc)
+    if not desc then return nil end
+    local data = {
+        headColor = serializeColor3(desc.HeadColor),
+        torsoColor = serializeColor3(desc.TorsoColor),
+        leftArmColor = serializeColor3(desc.LeftArmColor),
+        rightArmColor = serializeColor3(desc.RightArmColor),
+        leftLegColor = serializeColor3(desc.LeftLegColor),
+        rightLegColor = serializeColor3(desc.RightLegColor),
+        shirt = desc.Shirt,
+        pants = desc.Pants,
+        shirtGraphic = desc.ShirtGraphic,
+        pantsGraphic = desc.PantsGraphic,
+        face = desc.Face,
+        head = desc.Head,
+        bodyType = desc.BodyType,
+        scale = desc.Scale,
+        width = desc.Width,
+        height = desc.Height,
+        headScale = desc.HeadScale,
+        depth = desc.Depth,
+        proportion = desc.Proportion,
+        torso = desc.Torso,
+        leftArm = desc.LeftArm,
+        rightArm = desc.RightArm,
+        leftLeg = desc.LeftLeg,
+        rightLeg = desc.RightLeg,
+        accessories = {}
+    }
+    local accs = desc:GetAccessories()
+    for _, acc in ipairs(accs) do
+        table.insert(data.accessories, {
+            assetId = acc.AssetId,
+            accessoryType = acc.AccessoryType
+        })
+    end
+    return data
+end
+
+local function deserializeHumanoidDescription(data)
+    if type(data) ~= "table" then return nil end
+    local desc = Instance.new("HumanoidDescription")
+    desc.HeadColor = deserializeColor3(data.headColor)
+    desc.TorsoColor = deserializeColor3(data.torsoColor)
+    desc.LeftArmColor = deserializeColor3(data.leftArmColor)
+    desc.RightArmColor = deserializeColor3(data.rightArmColor)
+    desc.LeftLegColor = deserializeColor3(data.leftLegColor)
+    desc.RightLegColor = deserializeColor3(data.rightLegColor)
+    desc.Shirt = data.shirt or ""
+    desc.Pants = data.pants or ""
+    desc.ShirtGraphic = data.shirtGraphic or ""
+    desc.PantsGraphic = data.pantsGraphic or ""
+    desc.Face = data.face or ""
+    desc.Head = data.head or ""
+    if data.bodyType then desc.BodyType = data.bodyType end
+    if data.scale then desc.Scale = data.scale end
+    if data.width then desc.Width = data.width end
+    if data.height then desc.Height = data.height end
+    if data.headScale then desc.HeadScale = data.headScale end
+    if data.depth then desc.Depth = data.depth end
+    if data.proportion then desc.Proportion = data.proportion end
+    if data.torso then desc.Torso = data.torso end
+    if data.leftArm then desc.LeftArm = data.leftArm end
+    if data.rightArm then desc.RightArm = data.rightArm end
+    if data.leftLeg then desc.LeftLeg = data.leftLeg end
+    if data.rightLeg then desc.RightLeg = data.rightLeg end
+    if data.accessories and #data.accessories > 0 then
+        local accs = {}
+        for _, accData in ipairs(data.accessories) do
+            table.insert(accs, {
+                AssetId = accData.assetId,
+                AccessoryType = accData.accessoryType
+            })
+        end
+        pcall(function() desc:SetAccessories(accs) end)
+    end
+    return desc
+end
+
+-- Get HumanoidDescription from any model (clone or player character)
+local function getHumanoidDescriptionFromModel(model)
+    if not model then return nil end
+    local humanoid = model:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        local success, desc = pcall(function() return humanoid:GetAppliedDescription() end)
+        if success and desc then return desc end
+    end
+    -- Fallback: build from parts
+    local desc = Instance.new("HumanoidDescription")
+    local bodyColors = model:FindFirstChild("BodyColors")
+    if bodyColors then
+        desc.HeadColor = bodyColors.HeadColor
+        desc.TorsoColor = bodyColors.TorsoColor
+        desc.LeftArmColor = bodyColors.LeftArmColor
+        desc.RightArmColor = bodyColors.RightArmColor
+        desc.LeftLegColor = bodyColors.LeftLegColor
+        desc.RightLegColor = bodyColors.RightLegColor
+    end
+    local shirt = model:FindFirstChild("Shirt")
+    if shirt then desc.Shirt = shirt.ShirtTemplate end
+    local pants = model:FindFirstChild("Pants")
+    if pants then desc.Pants = pants.PantsTemplate end
+    local face = model:FindFirstChild("Face")
+    if face then desc.Face = face.Texture end
+    local accessories = {}
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("Accessory") then
+            table.insert(accessories, {AssetId = child.AccessoryId, AccessoryType = child.AccessoryType})
+        end
+    end
+    if #accessories > 0 then pcall(function() desc:SetAccessories(accessories) end) end
+    return desc
+end
+
+-- Apply description to local player's character
+local function applyDescriptionToSelf(desc)
+    local character = LocalPlayer.Character
+    if not character then return false, "Karakter kamu belum siap" end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false, "Humanoid tidak ditemukan" end
+    local success, err = pcall(function()
+        humanoid:ApplyDescription(desc)
+    end)
+    if success then
+        return true, "Penampilan berhasil diubah!"
+    else
+        return false, "Gagal apply penampilan: " .. tostring(err)
+    end
+end
+
+-- Clone visual from a model (clone or player character) to self
+local function cloneVisualFromModel(model)
+    if not model then return false, "Model tidak ditemukan" end
+    local desc = getHumanoidDescriptionFromModel(model)
+    if not desc then return false, "Gagal mengambil data penampilan" end
+    return applyDescriptionToSelf(desc)
+end
+
 -- Membangun snapshot semua clone yang sedang ada di map jadi 1 tabel data,
 -- dipakai baik untuk slot baru maupun overwrite slot yang sudah ada.
 local function BuildConfigSnapshot()
@@ -593,6 +743,9 @@ local function BuildConfigSnapshot()
                     local pos = primary.Position
                     local rot = primary.CFrame - primary.CFrame.Position
                     local x, y, z, r11, r12, r13, r21, r22, r23, r31, r32, r33 = rot:GetComponents()
+                    -- Extract appearance
+                    local desc = getHumanoidDescriptionFromModel(clone)
+                    local appearanceData = serializeHumanoidDescription(desc)
                     table.insert(clonesData, {
                         userId = info.UserId,
                         displayName = info.DisplayName or info.Username,
@@ -600,7 +753,8 @@ local function BuildConfigSnapshot()
                         name = clone.Name,
                         hideName = info.HideName,
                         position = {pos.X, pos.Y, pos.Z},
-                        rotation = {r11, r12, r13, r21, r22, r23, r31, r32, r33}
+                        rotation = {r11, r12, r13, r21, r22, r23, r31, r32, r33},
+                        appearance = appearanceData
                     })
                 end
             end
@@ -644,6 +798,16 @@ local function ApplyConfigSlot(slotName, callback)
                 local cloneName = info.name or ("Clone_" .. tostring(State.CloneCounter))
                 model.Name = cloneName
                 PrepareCloneModel(model)
+                -- Apply stored appearance if available
+                if info.appearance then
+                    local desc = deserializeHumanoidDescription(info.appearance)
+                    if desc then
+                        local humanoid = model:FindFirstChildOfClass("Humanoid")
+                        if humanoid then
+                            pcall(function() humanoid:ApplyDescription(desc) end)
+                        end
+                    end
+                end
                 local position = info.position
                 local rotData = info.rotation
                 local cf
@@ -1507,72 +1671,6 @@ local function CopyMyOutfitToAllClones()
     return true, ("Outfit disalin ke %d clone."):format(successCount)
 end
 
--- Tambahkan fungsi ini di dekat fungsi lainnya (sebelum UI builders)
-local function MorphLocalPlayerToClone(clone)
-    local cData = State.CloneData[clone]
-    if not cData then return false, "Tidak ada data clone" end
-    
-    local description = nil
-    
-    -- Coba ambil description dari clone humanoid
-    local cloneHumanoid = clone:FindFirstChildOfClass("Humanoid")
-    if cloneHumanoid then
-        local ok, desc = pcall(function()
-            return cloneHumanoid:GetAppliedDescription()
-        end)
-        if ok and desc then
-            description = desc
-        end
-    end
-    
-    -- Fallback: ambil dari UserId
-    if not description and cData.UserId then
-        local ok, desc = pcall(function()
-            return Players:GetHumanoidDescriptionFromUserIdAsync(cData.UserId)
-        end)
-        if ok and desc then
-            description = desc
-        end
-    end
-    
-    if not description then return false, "Gagal ambil description" end
-    
-    -- Simpan posisi sekarang
-    local myChar = LocalPlayer.Character
-    local oldPos = nil
-    if myChar and myChar:FindFirstChild("HumanoidRootPart") then
-        oldPos = myChar.HumanoidRootPart.CFrame
-    end
-    
-    -- Method 1: Coba ApplyDescription dulu
-    local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    if myHumanoid then
-        local ok, err = pcall(function()
-            myHumanoid:ApplyDescription(description)
-        end)
-        if ok then
-            return true, "Berhasil apply description"
-        end
-    end
-    
-    -- Method 2: Force load character baru
-    local ok2, err2 = pcall(function()
-        LocalPlayer:LoadCharacterWithHumanoidDescription(description)
-    end)
-    
-    if ok2 then
-        -- Tunggu karakter baru muncul
-        task.wait(1)
-        local newChar = LocalPlayer.Character
-        if newChar and newChar:FindFirstChild("HumanoidRootPart") and oldPos then
-            newChar:PivotTo(oldPos)
-        end
-        return true, "Berhasil load karakter baru"
-    end
-    
-    return false, "Semua method gagal: " .. tostring(err2)
-end
-
 -- ================================================
 -- UI BUILDERS & HELPERS
 -- ================================================
@@ -1643,15 +1741,11 @@ end
 rebuildClonesTab = function()
     clearTabContent()
 
-    -- Tombol Clone Diri Sendiri (tanpa TextBox)
-    local cloneSelfBtn = makeButton("🙋 CLONE DIRI SENDIRI", COLORS.Purple, tabContentFrame)
-    cloneSelfBtn.LayoutOrder = 1
-    cloneSelfBtn.MouseButton1Click:Connect(function()
-        CreateCloneFromUserId(LocalPlayer.UserId, LocalPlayer.DisplayName, LocalPlayer.Name)
-    end)
+    -- REMOVED: TextBox input for username (annoying)
+    -- Instead, use Players tab to select and clone players.
 
     local cloneAllBtn = makeButton("CLONE SEMUA PLAYER", COLORS.Green, tabContentFrame)
-    cloneAllBtn.LayoutOrder = 2
+    cloneAllBtn.LayoutOrder = 1
     cloneAllBtn.MouseButton1Click:Connect(function()
         for _, player in ipairs(Players:GetPlayers()) do
             if player ~= LocalPlayer then
@@ -1661,14 +1755,14 @@ rebuildClonesTab = function()
     end)
 
     local clonesLabel = makeLabel("DAFTAR CLONE AKTIF:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
-    clonesLabel.LayoutOrder = 3
+    clonesLabel.LayoutOrder = 2
 
     local folder = Workspace:FindFirstChild(FOLDER_NAME)
     if folder then
-        local index = 4
+        local index = 3
         local cloneList = folder:GetChildren()
         if #cloneList == 0 then
-            local emptyInfo = makeLabel("Belum ada clone yang dibuat.", 10, COLORS.DarkGray, nil, tabContentFrame)
+            local emptyInfo = makeLabel("Belum ada clone yang dibuat. Gunakan tab Players atau History untuk clone.", 10, COLORS.DarkGray, nil, tabContentFrame)
             emptyInfo.LayoutOrder = index
         else
             for _, clone in ipairs(cloneList) do
@@ -1685,6 +1779,61 @@ rebuildClonesTab = function()
                 end
             end
         end
+    end
+end
+
+-- New Clone Visual Tab
+rebuildCloneVisualTab = function()
+    clearTabContent()
+
+    makeSectionHeader("CLONE DARI CLONE AKTIF", tabContentFrame, 1, COLORS.Purple)
+
+    local clones = GetAllCloneModels()
+    if #clones == 0 then
+        local emptyLbl = makeLabel("Belum ada clone. Buat dulu di tab Players.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 2
+    else
+        for i, clone in ipairs(clones) do
+            local btn = makeButton("🎭 " .. clone.Name .. " → Terapkan ke Aku", COLORS.Panel2, tabContentFrame)
+            btn.LayoutOrder = 1 + i
+            btn.MouseButton1Click:Connect(function()
+                local ok, msg = cloneVisualFromModel(clone)
+                btn.Text = ok and ("✓ " .. msg) or ("✗ " .. msg)
+                task.delay(2, function()
+                    if btn and btn.Parent then
+                        btn.Text = "🎭 " .. clone.Name .. " → Terapkan ke Aku"
+                    end
+                end)
+            end)
+        end
+    end
+
+    makeSectionHeader("CLONE DARI PLAYER DI MAP", tabContentFrame, 2 + #clones, COLORS.Blue)
+
+    local playerList = Players:GetPlayers()
+    local idx = 3 + #clones
+    local anyOther = false
+    for _, player in ipairs(playerList) do
+        if player ~= LocalPlayer then
+            anyOther = true
+            local btn = makeButton("👤 " .. player.DisplayName .. " → Terapkan ke Aku", COLORS.Blue, tabContentFrame)
+            btn.LayoutOrder = idx
+            idx = idx + 1
+            btn.MouseButton1Click:Connect(function()
+                local ok, msg = cloneVisualFromModel(player.Character)
+                btn.Text = ok and ("✓ " .. msg) or ("✗ " .. msg)
+                task.delay(2, function()
+                    if btn and btn.Parent then
+                        btn.Text = "👤 " .. player.DisplayName .. " → Terapkan ke Aku"
+                    end
+                end)
+            end)
+        end
+    end
+
+    if not anyOther then
+        local emptyLbl = makeLabel("Tidak ada player lain di map ini.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = idx
     end
 end
 
@@ -1766,40 +1915,9 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
--- MORPH KE CLONE INI
-local morphBtn = makeButton("🪞 JADIKAN AKU SEPERTI CLONE INI", COLORS.Purple, tabContentFrame)
-morphBtn.LayoutOrder = 4
-morphBtn.MouseButton1Click:Connect(function()
-    if not State.SelectedClone then
-        morphBtn.Text = "❌ Pilih clone dulu"
-        task.delay(2, function()
-            if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-        end)
-        return
-    end
-    
-    morphBtn.Text = "⏳ MENGUBAH..."
-    
-    task.spawn(function()
-        local ok, msg = MorphLocalPlayerToClone(State.SelectedClone)
-        
-        if ok then
-            morphBtn.Text = "✅ " .. msg
-        else
-            morphBtn.Text = "❌ " .. msg
-        end
-        
-        task.delay(3, function()
-            if morphBtn and morphBtn.Parent then
-                morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI"
-            end
-        end)
-    end)
-end)
-
     -- Position Mode
     local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
-    posBtn.LayoutOrder = 5
+    posBtn.LayoutOrder = 4
     posBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.PositionMode = not State.PositionMode
@@ -1810,7 +1928,7 @@ end)
 
     -- Rotation Mode
     local rotBtn = makeButton(State.RotationMode and "GIZMO ROTASI: ON" or "GIZMO ROTASI: OFF", State.RotationMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
-    rotBtn.LayoutOrder = 6
+    rotBtn.LayoutOrder = 5
     rotBtn.MouseButton1Click:Connect(function()
         if not State.EditMode then return end
         State.RotationMode = not State.RotationMode
@@ -1821,7 +1939,7 @@ end)
 
     -- Dance Mode
     local danceBtn = makeButton(State.DanceMode and "DANCE SYNC (SELECTED): ON" or "DANCE SYNC (SELECTED): OFF", State.DanceMode and COLORS.PurpleDark or COLORS.Panel, tabContentFrame)
-    danceBtn.LayoutOrder = 7
+    danceBtn.LayoutOrder = 6
     danceBtn.MouseButton1Click:Connect(function()
         State.DanceMode = not State.DanceMode
         State.SyncTargetMode = false
@@ -1835,7 +1953,7 @@ end)
 
     -- Teleport to LocalPlayer
     local bringBtn = makeButton("TELEPORT KE SAYA", COLORS.Blue, tabContentFrame)
-    bringBtn.LayoutOrder = 8
+    bringBtn.LayoutOrder = 7
     bringBtn.MouseButton1Click:Connect(function()
         local character = LocalPlayer.Character
         if not character then return end
@@ -1849,7 +1967,7 @@ end)
 
     -- Reset position & rotation
     local resetPosBtn = makeButton("RESET POSISI", COLORS.Orange, tabContentFrame)
-    resetPosBtn.LayoutOrder = 9
+    resetPosBtn.LayoutOrder = 8
     resetPosBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1860,7 +1978,7 @@ end)
     end)
 
     local resetRotBtn = makeButton("RESET ROTASI", COLORS.Orange, tabContentFrame)
-    resetRotBtn.LayoutOrder = 10
+    resetRotBtn.LayoutOrder = 9
     resetRotBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone or not State.CloneData[State.SelectedClone] then return end
         local cData = State.CloneData[State.SelectedClone]
@@ -1871,7 +1989,7 @@ end)
 
     -- Delete Selected
     local delBtn = makeButton("HAPUS CLONE INI", COLORS.Delete, tabContentFrame)
-    delBtn.LayoutOrder = 11
+    delBtn.LayoutOrder = 10
     delBtn.MouseButton1Click:Connect(function()
         if not State.SelectedClone then return end
         local target = State.SelectedClone
@@ -1884,7 +2002,7 @@ end)
 
     -- Delete All
     local delAllBtn = makeButton("HAPUS SEMUA CLONE", COLORS.Delete, tabContentFrame)
-    delAllBtn.LayoutOrder = 12
+    delAllBtn.LayoutOrder = 11
     delAllBtn.MouseButton1Click:Connect(function()
         if not DeleteAllArmed then
             DeleteAllArmed = true
@@ -2934,6 +3052,10 @@ end
 rebuildCurrentTab = function()
     if State.CurrentTab == "Clones" then
         rebuildClonesTab()
+    elseif State.CurrentTab == "Players" then
+        rebuildPlayersTab()
+    elseif State.CurrentTab == "Clone Visual" then
+        rebuildCloneVisualTab()
     elseif State.CurrentTab == "Editor" then
         rebuildEditorTab()
     elseif State.CurrentTab == "Sync" then
@@ -2944,8 +3066,6 @@ rebuildCurrentTab = function()
         rebuildConfigTab()
     elseif State.CurrentTab == "History" then
         rebuildHistoryTab()
-    elseif State.CurrentTab == "Players" then
-        rebuildPlayersTab()
     elseif State.CurrentTab == "Variasi" then
         rebuildVariasiTab()
     end
@@ -2994,7 +3114,7 @@ function _G.openMyCloneApp()
     tabLayout.Padding = UDim.new(0, 6)
     tabLayout.Parent = tabBarFrame
 
-    local tabs = {"Clones", "Players", "Editor", "Sync", "Variasi", "AI Chat", "Config", "History"}
+    local tabs = {"Clones", "Players", "Clone Visual", "Editor", "Sync", "Variasi", "AI Chat", "Config", "History"}
     for i, tabName in ipairs(tabs) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 75, 1, 0)
