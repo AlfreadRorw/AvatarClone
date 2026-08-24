@@ -1,13 +1,13 @@
 -- ================================================
--- PHONE GUI - Full Rewrite
--- Fix: pcall key validation, auto-login, notif reply, chat muncul sekali
+-- PHONE GUI - Full Rewrite (With Dynamic Horizontal Scaling)
+-- Fix: pcall key validation, auto-login, notif reply, chat muncul sekali, responsive landscape
 -- ================================================
 
 local Services    = _G.Services
 local T           = _G.T or {}
 local Helpers     = _G.Helpers or {}
 local Config      = _G.Config or {}
-local LocalPlayer = _G.LocalPlayer
+local LocalPlayer = _G.LocalPlayer or game:GetService("Players").LocalPlayer
 local Storage     = _G.Storage
 local Firebase    = _G.Firebase
 
@@ -63,7 +63,7 @@ local function getGuiParent()
 end
 gui.Parent = getGuiParent()
 
--- ==================== PHONE FRAME ====================
+-- ==================== PHONE FRAME & DYNAMIC SCALING ====================
 local phone = Instance.new("Frame", gui)
 phone.Size = UDim2.new(0, 0, 0, 0)
 phone.Position = UDim2.new(0.5, 0, 0.52, 0)
@@ -75,13 +75,27 @@ phone.ClipsDescendants = true
 corner(phone, 38)
 stroke(phone, T.Accent or Color3.fromRGB(30, 30, 30), 2, 0.15)
 
-local PHONE_SIZE = UDim2.new(0, 320, 0, 560)
-
 local function isPortrait()
-    local cam = Services.Workspace.CurrentCamera
+    local cam = workspace.CurrentCamera
     if not cam then return true end
     return cam.ViewportSize.Y >= cam.ViewportSize.X
 end
+
+local function getPhoneSize()
+    local cam = workspace.CurrentCamera
+    if cam and cam.ViewportSize.Y > 0 then
+        if not isPortrait() then
+            -- Mode Horizontal / Landscape: Kecilkan phone agar pas di tinggi layar
+            local maxHeight = math.floor(cam.ViewportSize.Y * 0.88)
+            local targetH = math.clamp(maxHeight, 280, 560)
+            local targetW = math.floor(targetH * (320 / 560))
+            return UDim2.new(0, math.max(200, targetW), 0, targetH)
+        end
+    end
+    return UDim2.new(0, 320, 0, 560)
+end
+
+local PHONE_SIZE = getPhoneSize()
 
 local function getGridIconSize()
     return isPortrait() and UDim2.new(0, 72, 0, 86) or UDim2.new(0, 68, 0, 78)
@@ -222,6 +236,19 @@ gridLayout.CellPadding = UDim2.new(0, 10, 0, 12)
 gridLayout.SortOrder = Enum.SortOrder.LayoutOrder
 gridLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
 gridLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+
+-- Auto update ukuran saat resolusi / orientasi layar berubah
+local camera = workspace.CurrentCamera
+if camera then
+    camera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
+        if gridLayout then
+            gridLayout.CellSize = getGridIconSize()
+        end
+        if phone and phone.Visible then
+            tween(phone, {Size = getPhoneSize()}, 0.25)
+        end
+    end)
+end
 
 -- ==================== KEY SCREEN ====================
 local keyScreen = Instance.new("Frame", sa)
@@ -398,7 +425,6 @@ ksBuild.TextSize = 8
 ksBuild.LayoutOrder = 8; ksBuild.ZIndex = 83
 
 -- ==================== CHAT NOTIFICATION BANNER ====================
--- Notif banner masuk dari atas layar dengan tombol balas
 local chatNotifBanner = nil
 local chatNotifQueue = {}
 local chatNotifBusy  = false
@@ -504,7 +530,7 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
         local isReplying = false
         local replyBox = Instance.new("Frame", banner)
         replyBox.Size = UDim2.new(1, -20, 0, 34)
-        replyBox.Position = UDim2.new(0, 10, 1, 4)  -- tersembunyi di bawah
+        replyBox.Position = UDim2.new(0, 10, 1, 4)
         replyBox.BackgroundColor3 = Color3.fromRGB(28, 28, 36)
         replyBox.ZIndex = 1002
         corner(replyBox, 10)
@@ -538,7 +564,6 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
         local function expandReply()
             if isReplying then return end
             isReplying = true
-            -- Perluas banner ke bawah
             tween(banner, {Size = UDim2.new(1,-20,0,136)}, 0.25, Enum.EasingStyle.Quart)
             tween(replyBox, {Position = UDim2.new(0,10,0,94)}, 0.25, Enum.EasingStyle.Quart)
             task.wait(0.3)
@@ -549,7 +574,6 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
             local txt = replyInput.Text
             if txt == "" or txt:match("^%s*$") then return end
             replyInput.Text = ""
-            -- Kirim ke Firebase sebagai reply dari player
             if Firebase and Firebase.SendChat then
                 pcall(function()
                     Firebase.SendChat(
@@ -557,8 +581,8 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
                         LocalPlayer.DisplayName,
                         LocalPlayer.Name,
                         txt,
-                        chatId,         -- replyToId
-                        fromName        -- replyToName
+                        chatId,
+                        fromName
                     )
                 end)
             end
@@ -572,7 +596,6 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
         sendReplyBtn.MouseButton1Click:Connect(doSendReply)
         replyInput.FocusLost:Connect(function(enter) if enter then doSendReply() end end)
 
-        -- Auto dismiss setelah 8 detik kalau tidak dibalas
         task.delay(8, function()
             if chatNotifBanner == banner and not isReplying then
                 dismissChatNotif()
@@ -587,7 +610,6 @@ local function showChatNotifBanner(fromName, messageText, chatId, replyCallback)
     end
 end
 
--- Expose ke global supaya Messages.lua bisa pakai
 _G.showChatNotif = showChatNotifBanner
 
 -- ==================== KEY SUBMIT LOGIC ====================
@@ -604,7 +626,6 @@ local function doSubmitKey()
     end
 
     if not Firebase or not Firebase.ValidateKey then
-        -- Fallback testing: langsung unlock
         _G.unlock()
         return
     end
@@ -616,8 +637,6 @@ local function doSubmitKey()
     ksStatus.TextColor3 = Color3.fromRGB(200,200,220)
 
     task.spawn(function()
-        -- PENTING: wrap dua return value ke tabel
-        -- supaya pcall tidak kehilangan nilai kedua di beberapa executor
         local ok, res = pcall(function()
             local v, m = Firebase.ValidateKey(
                 key,
@@ -636,7 +655,6 @@ local function doSubmitKey()
             ksStatus.Text = res.msg or "Key valid!"
             ksStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
 
-            -- Simpan key
             if Storage then
                 if Storage.saveKey then
                     pcall(Storage.saveKey, key)
@@ -663,10 +681,6 @@ keyInput.FocusLost:Connect(function(enter) if enter then doSubmitKey() end end)
 ksBuyBtn.MouseButton1Click:Connect(function()
     local url = Config.BUY_KEY_URL or "https://google.com"
 
-    -- Tidak ada API resmi Roblox untuk membuka browser dari script biasa.
-    -- Ini mencoba beberapa fungsi non-standar yang disediakan sebagian
-    -- executor (tidak semua punya, makanya dibungkus pcall satu-satu).
-    -- Kalau semua gagal, fallback ke copy clipboard + instruksi jelas.
     local opened = false
 
     local tryFns = {
@@ -681,8 +695,6 @@ ksBuyBtn.MouseButton1Click:Connect(function()
         if ok then opened = true; break end
     end
 
-    -- Selalu salin ke clipboard juga, apapun hasilnya di atas,
-    -- supaya user selalu punya cara pasti mengakses link.
     if Helpers.copyToClipboard then
         pcall(Helpers.copyToClipboard, url)
     end
@@ -712,8 +724,6 @@ ksTrialBtn.MouseButton1Click:Connect(function()
     ksStatus.TextColor3 = Color3.fromRGB(200,200,220)
 
     task.spawn(function()
-        -- Wrap dua return value ke tabel supaya pcall tidak kehilangan
-        -- nilai kedua di beberapa executor (sama seperti doSubmitKey).
         local ok, res = pcall(function()
             local v, m, k = Firebase.ClaimTrialKey(
                 LocalPlayer.UserId,
@@ -730,8 +740,6 @@ ksTrialBtn.MouseButton1Click:Connect(function()
             ksStatus.Text = res.msg or "Trial 24 Jam aktif!"
             ksStatus.TextColor3 = Color3.fromRGB(0, 255, 100)
 
-            -- Simpan key trial ke penyimpanan lokal, sama seperti key biasa,
-            -- supaya auto-login berikutnya tetap terbaca oleh CheckSavedKey.
             if Storage then
                 if Storage.saveKey then
                     pcall(Storage.saveKey, res.key)
@@ -759,12 +767,9 @@ _G.PhoneState = {
     isLocked       = true,
     isCloning      = false,
     toolEquipped   = true,
-    currentScreen  = "home", -- "home" atau nama app yang sedang terbuka (mis. "MyClone")
+    currentScreen  = "home",
 }
 
--- Dipanggil oleh setiap module app (MyClone, dsb) saat app itu dibuka,
--- supaya Phone tahu app mana yang sedang aktif dan tidak auto-balik ke Home
--- ketika phone ditutup lalu dibuka lagi lewat FloatingIcon.
 function _G.setCurrentScreen(screenName)
     _G.PhoneState.currentScreen = screenName or "home"
 end
@@ -800,10 +805,11 @@ function _G.openPhone()
     if phone.Visible then return end
     phone.Visible = true
     phone.Size = UDim2.new(0,0,0,0)
-    tween(phone, {Size=PHONE_SIZE}, 0.32, Enum.EasingStyle.Back)
+    
+    local targetSize = getPhoneSize()
+    tween(phone, {Size=targetSize}, 0.32, Enum.EasingStyle.Back)
 
     if _G.PhoneState.isLocked then
-        -- Cek auto-login
         task.spawn(function()
             if Firebase and Firebase.CheckSavedKey then
                 local ok, isValid = pcall(function()
@@ -822,16 +828,10 @@ function _G.openPhone()
             _G.showKeyEntry()
         end)
     else
-        -- PENTING: Jangan otomatis lompat ke Home kalau sebelumnya user
-        -- sedang membuka sebuah app (mis. MyClone). Phone yang ditutup lewat
-        -- FloatingIcon lalu dibuka lagi harus tetap menampilkan app yang sama,
-        -- bukan reset ke Home tiap kali dibuka.
         if _G.PhoneState.currentScreen == "home" or _G.PhoneState.currentScreen == nil then
             if _G.goHome then _G.goHome() end
             _G.PhoneState.currentScreen = "home"
         elseif _G.reopenCurrentApp then
-            -- Pastikan layar app yang sebelumnya aktif benar-benar tampil
-            -- (posisi & background-nya) tanpa memanggil ulang goHome().
             _G.reopenCurrentApp()
         end
     end
@@ -920,6 +920,7 @@ return {
     keyScreen        = keyScreen,
     isPortrait       = isPortrait,
     getGridIconSize  = getGridIconSize,
+    getPhoneSize     = getPhoneSize,
     PHONE_SIZE       = PHONE_SIZE,
     setCurrentScreen = _G.setCurrentScreen,
     getCurrentScreen = _G.getCurrentScreen,
