@@ -662,33 +662,56 @@ local function ApplyVisualDescriptionToCharacter(description, character)
 
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then
-        humanoid = character:WaitForChild("Humanoid", 5)
+        humanoid = character:WaitForChild("Humanoid", 8)
     end
     if not humanoid then return false, "Humanoid tidak ditemukan" end
 
     local oldPivot = character:GetPivot()
-    local ok, err = pcall(function()
-        -- ApplyDescriptionAsync adalah API modern.
-        humanoid:ApplyDescriptionAsync(description, Enum.AssetTypeVerification.Default)
-    end)
+    local ok, err = false, nil
 
-    if not ok then
-        -- Fallback untuk client yang masih expose API lama.
+    -- Reset variant lebih konsisten untuk mengganti seluruh avatar,
+    -- bukan hanya bagian yang berbeda.
+    if type(humanoid.ApplyDescriptionResetAsync) == "function" then
         ok, err = pcall(function()
-            humanoid:ApplyDescription(description, Enum.AssetTypeVerification.Default)
+            humanoid:ApplyDescriptionResetAsync(description)
+        end)
+    end
+
+    if not ok and type(humanoid.ApplyDescriptionAsync) == "function" then
+        ok, err = pcall(function()
+            humanoid:ApplyDescriptionAsync(description)
+        end)
+    end
+
+    if not ok and type(humanoid.ApplyDescription) == "function" then
+        ok, err = pcall(function()
+            humanoid:ApplyDescription(description)
         end)
     end
 
     if not ok then
-        return false, "Gagal menerapkan avatar: " .. tostring(err)
+        return false, "Roblox gagal menerapkan avatar: " .. tostring(err)
     end
 
-    -- ApplyDescription dapat mengubah/mengganti body parts. Beri waktu satu frame.
-    task.wait()
-    pcall(function() character:PivotTo(oldPivot) end)
+    -- ApplyDescription dapat mengganti body parts dan Animate.
+    task.wait(0.15)
 
-    StopVisualAnimationTracks(character)
-    RefreshVisualCloneAnimations(character, description)
+    local currentCharacter = LocalPlayer.Character or character
+    pcall(function()
+        currentCharacter:PivotTo(oldPivot)
+    end)
+
+    local currentHumanoid = currentCharacter:FindFirstChildOfClass("Humanoid")
+    if not currentHumanoid then
+        return false, "Humanoid hilang setelah avatar diterapkan"
+    end
+
+    -- Tunggu Animator dan Animate tersedia agar idle/walk tidak kaku.
+    currentHumanoid:WaitForChild("Animator", 5)
+    task.wait(0.15)
+
+    StopVisualAnimationTracks(currentCharacter)
+    RefreshVisualCloneAnimations(currentCharacter, description)
 
     State.VisualCloneAnimationSource = {
         idle = tonumber(description.IdleAnimation) or 0,
@@ -700,7 +723,7 @@ local function ApplyVisualDescriptionToCharacter(description, character)
         swim = tonumber(description.SwimAnimation) or 0,
     }
 
-    return true
+    return true, "Avatar visual berhasil diterapkan"
 end
 
 local function SaveOriginalVisualAvatar()
@@ -918,26 +941,38 @@ end
 local function CapturePlayerAsVisualClone(player)
     if not player then return false, "Player tidak ditemukan" end
 
-    local character = player.Character
-    local description = CaptureDescriptionFromCharacter(character)
+    local description
+    local errors = {}
 
-    if not description then
+    -- Jalur utama: ambil HumanoidDescription langsung dari UserId.
+    -- Ini lebih stabil daripada membaca Character yang sedang streaming.
+    do
         local ok, desc = pcall(function()
             return Players:GetHumanoidDescriptionFromUserIdAsync(player.UserId)
         end)
         if ok and desc then
             description = SerializeHumanoidDescription(desc)
+        else
+            table.insert(errors, "GetHumanoidDescriptionFromUserIdAsync gagal")
+        end
+    end
+
+    -- Fallback: baca description dari Character target.
+    if not description and player.Character then
+        description = CaptureDescriptionFromCharacter(player.Character)
+        if not description then
+            table.insert(errors, "Character target belum memiliki Humanoid")
         end
     end
 
     if not description then
-        return false, "Avatar player tidak tersedia"
+        return false, "Gagal mengambil avatar target. " .. table.concat(errors, "; ")
     end
 
     State.VisualCloneData = {
-        version = 2,
+        version = 3,
         mode = "LOCALPLAYER_VISUAL",
-        label = "Visual: " .. player.DisplayName,
+        label = "Visual: " .. tostring(player.DisplayName),
         sourceType = "player",
         sourceUserId = player.UserId,
         sourceName = player.Name,
@@ -946,31 +981,57 @@ local function CapturePlayerAsVisualClone(player)
     }
 
     SaveVisualCloneSnapshot()
-    return true, "Avatar player tersimpan sebagai snapshot visual"
+
+    -- Simpan status yang bisa ditampilkan UI.
+    State.VisualCloneLastError = nil
+    State.VisualCloneLastSource = player.Name
+
+    return true, "Avatar @" .. player.Name .. " berhasil disimpan. Tekan AKTIFKAN VISUAL CLONE."
 end
 
 local function StartVisualClone()
     if not State.VisualCloneData then
         LoadVisualCloneSnapshot()
     end
-    if not State.VisualCloneData then
-        return false, "Belum ada snapshot visual"
+
+    if not State.VisualCloneData or not State.VisualCloneData.description then
+        return false, "Belum ada snapshot visual. Pilih player lalu tekan CLONE."
     end
 
-    -- Simpan avatar asli hanya sekali sebelum avatar LocalPlayer diubah.
-    SaveOriginalVisualAvatar()
-
-    local model, err = SpawnVisualCloneFromData(State.VisualCloneData)
-    if not model then
-        return false, err
+    local character = LocalPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if not character or not humanoid then
+        return false, "Character LocalPlayer belum siap"
     end
 
-    local ok, msg = EnterVisualControl()
+    -- Simpan avatar asli hanya sekali.
+    if not State.VisualCloneMode then
+        SaveOriginalVisualAvatar()
+    end
+
+    local desc = DeserializeHumanoidDescription(State.VisualCloneData.description)
+    if not desc then
+        return false, "Data snapshot rusak/tidak bisa dibaca"
+    end
+
+    local ok, msg = ApplyVisualDescriptionToCharacter(desc, character)
     if not ok then
         return false, msg
     end
 
-    return true, "LocalPlayer sekarang memakai visual snapshot target"
+    State.VisualCloneMode = true
+    State.VisualCloneControlEnabled = true
+    State.VisualCloneModel = LocalPlayer.Character
+    State.VisualCloneAppliedAt = os.time()
+
+    -- Kamera tetap mengikuti LocalPlayer secara normal.
+    if State.VisualCloneSpectator then
+        task.defer(function()
+            SetVisualCloneCameraFollow(true)
+        end)
+    end
+
+    return true, "Visual Clone aktif: avatar LocalPlayer sekarang memakai snapshot target."
 end
 
 local function RespawnSavedVisualClone()
@@ -1630,6 +1691,9 @@ local function CreateCloneFromUserId(userId, displayName, username)
 end
 
 local function CreateCloneFromInput(inputText)
+    inputText = tostring(inputText or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if inputText == "" then return end
+
     local userId, isSelf = ResolveUserId(inputText)
     if not userId then return end
     local dispName = nil
@@ -2381,7 +2445,15 @@ local function makeInput(placeholder, parent)
     tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
     tb.TextSize = 11
-    tb.ClearTextOnFocus = false
+    -- Placeholder hanya petunjuk; user tidak perlu menghapusnya secara manual.
+    -- ClearTextOnFocus hanya memengaruhi TextBox yang memang sudah memiliki Text.
+    tb.ClearTextOnFocus = true
+    tb.Focused:Connect(function()
+        -- Pastikan teks placeholder/teks bantuan tidak pernah menjadi isi input.
+        if tb.Text == (placeholder or "") then
+            tb.Text = ""
+        end
+    end)
     tb.TextXAlignment = Enum.TextXAlignment.Left
     tb.Parent = frame
     return tb, frame
@@ -3702,12 +3774,27 @@ rebuildVisualTab = function()
             local btn=makeButton("CLONE",COLORS.Panel2,card,UDim2.new(0,72,0,32))
             btn.Position=UDim2.new(1,-79,0.5,-16)
             btn.MouseButton1Click:Connect(function()
-                local ok,msg=CapturePlayerAsVisualClone(player)
+                btn.Active = false
+                btn.Text = "MEMUAT..."
+
+                local ok, msg = CapturePlayerAsVisualClone(player)
                 if ok then
-                    StartVisualClone()
+                    local applied, applyMsg = StartVisualClone()
+                    if not applied then
+                        ok = false
+                        msg = applyMsg
+                    else
+                        msg = "@" .. player.Name .. " berhasil menjadi Visual Clone LocalPlayer."
+                    end
                 end
-                toast(ok and "Visual Clone" or "Error",msg,2500)
-                rebuildVisualTab()
+
+                toast(ok and "VISUAL CLONE AKTIF" or "VISUAL CLONE GAGAL", msg or "Tidak diketahui", 3500)
+
+                task.delay(0.15, function()
+                    if tabContentFrame and tabContentFrame.Parent then
+                        rebuildVisualTab()
+                    end
+                end)
             end)
         end
     end
@@ -3717,8 +3804,14 @@ rebuildVisualTab = function()
     local startBtn=makeButton(State.VisualCloneMode and "RELOAD VISUAL CLONE" or "AKTIFKAN VISUAL CLONE", COLORS.Panel, tabContentFrame)
     startBtn.LayoutOrder=order; order+=1
     startBtn.MouseButton1Click:Connect(function()
-        if not State.VisualCloneData then toast("Visual Clone","Simpan snapshot avatar terlebih dahulu",2500); return end
-        local ok,msg=StartVisualClone(); toast(ok and "Visual Clone" or "Error",msg,2500); rebuildVisualTab()
+        if not State.VisualCloneData then
+            toast("VISUAL CLONE", "Pilih player dan tekan CLONE terlebih dahulu.", 3000)
+            return
+        end
+
+        local ok, msg = StartVisualClone()
+        toast(ok and "VISUAL CLONE AKTIF" or "VISUAL CLONE GAGAL", msg, 3500)
+        rebuildVisualTab()
     end)
 
     local controlBtn=makeButton(State.VisualCloneControlEnabled and "LOCALPLAYER MOVEMENT: ON" or "LOCALPLAYER MOVEMENT: OFF", State.VisualCloneControlEnabled and COLORS.White or COLORS.Panel2, tabContentFrame)
