@@ -1507,6 +1507,72 @@ local function CopyMyOutfitToAllClones()
     return true, ("Outfit disalin ke %d clone."):format(successCount)
 end
 
+-- Tambahkan fungsi ini di dekat fungsi lainnya (sebelum UI builders)
+local function MorphLocalPlayerToClone(clone)
+    local cData = State.CloneData[clone]
+    if not cData then return false, "Tidak ada data clone" end
+    
+    local description = nil
+    
+    -- Coba ambil description dari clone humanoid
+    local cloneHumanoid = clone:FindFirstChildOfClass("Humanoid")
+    if cloneHumanoid then
+        local ok, desc = pcall(function()
+            return cloneHumanoid:GetAppliedDescription()
+        end)
+        if ok and desc then
+            description = desc
+        end
+    end
+    
+    -- Fallback: ambil dari UserId
+    if not description and cData.UserId then
+        local ok, desc = pcall(function()
+            return Players:GetHumanoidDescriptionFromUserIdAsync(cData.UserId)
+        end)
+        if ok and desc then
+            description = desc
+        end
+    end
+    
+    if not description then return false, "Gagal ambil description" end
+    
+    -- Simpan posisi sekarang
+    local myChar = LocalPlayer.Character
+    local oldPos = nil
+    if myChar and myChar:FindFirstChild("HumanoidRootPart") then
+        oldPos = myChar.HumanoidRootPart.CFrame
+    end
+    
+    -- Method 1: Coba ApplyDescription dulu
+    local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
+    if myHumanoid then
+        local ok, err = pcall(function()
+            myHumanoid:ApplyDescription(description)
+        end)
+        if ok then
+            return true, "Berhasil apply description"
+        end
+    end
+    
+    -- Method 2: Force load character baru
+    local ok2, err2 = pcall(function()
+        LocalPlayer:LoadCharacterWithHumanoidDescription(description)
+    end)
+    
+    if ok2 then
+        -- Tunggu karakter baru muncul
+        task.wait(1)
+        local newChar = LocalPlayer.Character
+        if newChar and newChar:FindFirstChild("HumanoidRootPart") and oldPos then
+            newChar:PivotTo(oldPos)
+        end
+        return true, "Berhasil load karakter baru"
+    end
+    
+    return false, "Semua method gagal: " .. tostring(err2)
+end
+
 -- ================================================
 -- UI BUILDERS & HELPERS
 -- ================================================
@@ -1700,62 +1766,36 @@ rebuildEditorTab = function()
         rebuildEditorTab()
     end)
 
-    -- MORPH KE CLONE INI (Jadikan LocalPlayer seperti clone terpilih)
-    local morphBtn = makeButton("🪞 JADIKAN AKU SEPERTI CLONE INI", COLORS.Purple, tabContentFrame)
-    morphBtn.LayoutOrder = 4
-    morphBtn.MouseButton1Click:Connect(function()
-        if not State.SelectedClone then
-            morphBtn.Text = "❌ Pilih clone dulu"
-            task.delay(2, function()
-                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-            end)
-            return
-        end
-        local cloneHumanoid = State.SelectedClone:FindFirstChildOfClass("Humanoid")
-        if not cloneHumanoid then
-            morphBtn.Text = "❌ Clone tidak punya Humanoid"
-            task.delay(2, function()
-                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-            end)
-            return
-        end
-
-        local desc = cloneHumanoid:GetAppliedDescription()
-        if not desc then
-            local cData = State.CloneData[State.SelectedClone]
-            if cData and cData.UserId then
-                local ok, fetched = pcall(function()
-                    return Players:GetHumanoidDescriptionFromUserIdAsync(cData.UserId)
-                end)
-                if ok and fetched then desc = fetched end
-            end
-        end
-
-        if not desc then
-            morphBtn.Text = "❌ Gagal ambil outfit clone"
-            task.delay(2, function()
-                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-            end)
-            return
-        end
-
-        local myChar = LocalPlayer.Character
-        local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
-        if myHumanoid then
-            pcall(function()
-                myHumanoid:ApplyDescription(desc)
-            end)
-            morphBtn.Text = "✅ SUDAH BERUBAH"
-            task.delay(2, function()
-                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-            end)
+-- MORPH KE CLONE INI
+local morphBtn = makeButton("🪞 JADIKAN AKU SEPERTI CLONE INI", COLORS.Purple, tabContentFrame)
+morphBtn.LayoutOrder = 4
+morphBtn.MouseButton1Click:Connect(function()
+    if not State.SelectedClone then
+        morphBtn.Text = "❌ Pilih clone dulu"
+        task.delay(2, function()
+            if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
+        end)
+        return
+    end
+    
+    morphBtn.Text = "⏳ MENGUBAH..."
+    
+    task.spawn(function()
+        local ok, msg = MorphLocalPlayerToClone(State.SelectedClone)
+        
+        if ok then
+            morphBtn.Text = "✅ " .. msg
         else
-            morphBtn.Text = "❌ Karakter belum siap"
-            task.delay(2, function()
-                if morphBtn and morphBtn.Parent then morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI" end
-            end)
+            morphBtn.Text = "❌ " .. msg
         end
+        
+        task.delay(3, function()
+            if morphBtn and morphBtn.Parent then
+                morphBtn.Text = "🪞 JADIKAN AKU SEPERTI CLONE INI"
+            end
+        end)
     end)
+end)
 
     -- Position Mode
     local posBtn = makeButton(State.PositionMode and "GIZMO POSISI: ON" or "GIZMO POSISI: OFF", State.PositionMode and COLORS.RedDark or COLORS.Panel, tabContentFrame)
