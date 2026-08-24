@@ -185,6 +185,7 @@ _G.MyCloneState = _G.MyCloneState or {
     RecordingRestoreCFrame = nil,
     RecordingRestoreCameraType = nil,
     RecordingRestoreCameraSubject = nil,
+    RecordingSpotFolder = nil,
 }
 
 local State = _G.MyCloneState
@@ -205,6 +206,7 @@ local RandomSwapLoop = nil
 local MemeChatLoop = nil
 local VisualCloneControlLoop = nil
 local VisualCloneCameraLoop = nil
+local VisualCloneAnimationLoop = nil
 local RecordingCameraLoop = nil
 local SavedPlayerWalkSpeed = nil
 local SavedPlayerJumpPower = nil
@@ -372,7 +374,8 @@ local function PlayTrackOnClone(clone, sourceTrack)
     if not success or not cloneTrack then return end
     cloneTrack.Priority = sourceTrack.Priority
     cloneTrack.Looped = sourceTrack.Looped
-    cloneTrack:Play(0.1, 1, math.max(sourceTrack.Speed, 0.1))
+    cloneTrack:Play(0.05, 1, math.max(sourceTrack.Speed, 0.05))
+    pcall(function() cloneTrack.TimePosition = sourceTrack.TimePosition end)
     return cloneTrack
 end
 
@@ -589,12 +592,90 @@ local function CaptureDescriptionFromCharacter(character)
     return SerializeHumanoidDescription(desc)
 end
 
+local function GetVisualAnimationSourcePlayer()
+    local sourceUserId = State.VisualCloneData and State.VisualCloneData.sourceUserId
+    if sourceUserId then
+        for _, player in ipairs(Players:GetPlayers()) do
+            if player.UserId == sourceUserId then
+                return player
+            end
+        end
+    end
+    return LocalPlayer
+end
+
+local function SyncVisualCloneAnimations()
+    local clone = State.VisualCloneModel
+    if not clone or not clone.Parent then return end
+
+    local sourcePlayer = GetVisualAnimationSourcePlayer()
+    local sourceCharacter = sourcePlayer and sourcePlayer.Character
+    local sourceAnimator = GetAnimator(sourceCharacter)
+    local cloneAnimator = GetAnimator(clone)
+    if not sourceAnimator or not cloneAnimator then return end
+
+    local active = {}
+    for _, sourceTrack in ipairs(sourceAnimator:GetPlayingAnimationTracks()) do
+        local animation = sourceTrack.Animation
+        local animationId = animation and animation.AnimationId
+        if sourceTrack.IsPlaying and animationId and animationId ~= '' then
+            active[animationId] = sourceTrack
+            local cloneTrack = PlayTrackOnClone(clone, sourceTrack)
+            if cloneTrack then
+                pcall(function() cloneTrack:AdjustSpeed(sourceTrack.Speed) end)
+                -- Jangan reset TimePosition setiap frame; hanya koreksi kalau
+                -- clone baru mulai/tertinggal jauh dari source.
+                if math.abs((cloneTrack.TimePosition or 0) - (sourceTrack.TimePosition or 0)) > 0.35 then
+                    pcall(function() cloneTrack.TimePosition = sourceTrack.TimePosition end)
+                end
+            end
+        end
+    end
+
+    for _, cloneTrack in ipairs(cloneAnimator:GetPlayingAnimationTracks()) do
+        local animation = cloneTrack.Animation
+        local animationId = animation and animation.AnimationId
+        if animationId and not active[animationId] then
+            pcall(function() cloneTrack:Stop(0.12) end)
+        end
+    end
+end
+
+local function StartVisualCloneAnimationSync()
+    if VisualCloneAnimationLoop then
+        VisualCloneAnimationLoop:Disconnect()
+        VisualCloneAnimationLoop = nil
+    end
+    if not State.VisualCloneModel then return end
+
+    -- Jalankan sekali langsung agar clone tidak sempat berdiri T-pose/kaku.
+    SyncVisualCloneAnimations()
+    VisualCloneAnimationLoop = RunService.Heartbeat:Connect(function()
+        if not State.VisualCloneMode or not State.VisualCloneModel or not State.VisualCloneModel.Parent then
+            if VisualCloneAnimationLoop then
+                VisualCloneAnimationLoop:Disconnect()
+                VisualCloneAnimationLoop = nil
+            end
+            return
+        end
+        SyncVisualCloneAnimations()
+    end)
+end
+
+local function StopVisualCloneAnimationSync()
+    if VisualCloneAnimationLoop then
+        VisualCloneAnimationLoop:Disconnect()
+        VisualCloneAnimationLoop = nil
+    end
+end
+
 local function DestroyVisualClone()
     State.VisualCloneMode = false
     State.VisualCloneSpectator = false
     State.VisualCloneFollowCamera = false
     if VisualCloneControlLoop then VisualCloneControlLoop:Disconnect(); VisualCloneControlLoop=nil end
     if VisualCloneCameraLoop then VisualCloneCameraLoop:Disconnect(); VisualCloneCameraLoop=nil end
+    StopVisualCloneAnimationSync()
     local model = State.VisualCloneModel
     if model and model.Parent then model:Destroy() end
     State.VisualCloneModel = nil
@@ -750,6 +831,7 @@ local function SpawnVisualCloneFromData(data)
 
     State.VisualCloneModel = model
     State.VisualCloneMode = true
+    StartVisualCloneAnimationSync()
     return model
 end
 
@@ -819,13 +901,100 @@ local function RespawnSavedVisualClone()
     return model ~= nil
 end
 
+local GetSpotCFrame
+
+local function GetRecordingSpotFolder()
+    local folder = Workspace:FindFirstChild(FOLDER_NAME)
+    if not folder then
+        folder = Instance.new('Folder')
+        folder.Name = FOLDER_NAME
+        folder.Parent = Workspace
+    end
+    local spotsFolder = folder:FindFirstChild('RecordingSpots')
+    if not spotsFolder then
+        spotsFolder = Instance.new('Folder')
+        spotsFolder.Name = 'RecordingSpots'
+        spotsFolder.Parent = folder
+    end
+    State.RecordingSpotFolder = spotsFolder
+    return spotsFolder
+end
+
+local function SetRecordingSpotPartVisual(spot, isActive)
+    if not spot then return end
+    local spotsFolder = GetRecordingSpotFolder()
+    local part
+    for _, child in ipairs(spotsFolder:GetChildren()) do
+        if child:IsA('BasePart') and child:GetAttribute('SpotName') == spot.name then
+            part = child
+            break
+        end
+    end
+    if not part then
+        local cf = GetSpotCFrame(spot)
+        if not cf then return end
+        part = Instance.new('Part')
+        part.Name = 'RecordingSpot_' .. tostring(#spotsFolder:GetChildren() + 1)
+        part.Size = Vector3.new(0.9, 0.9, 0.9)
+        part.Shape = Enum.PartType.Ball
+        part.Anchored = true
+        part.CanCollide = false
+        part.CanTouch = false
+        part.CanQuery = false
+        part.Material = Enum.Material.Neon
+        part:SetAttribute('SpotName', spot.name)
+        part.Parent = spotsFolder
+
+        local gui = Instance.new('BillboardGui')
+        gui.Name = 'SpotLabel'
+        gui.Size = UDim2.new(0, 150, 0, 30)
+        gui.StudsOffset = Vector3.new(0, 1.4, 0)
+        gui.AlwaysOnTop = true
+        gui.MaxDistance = 250
+        gui.Adornee = part
+        gui.Parent = part
+
+        local label = Instance.new('TextLabel')
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.Text = '● ' .. tostring(spot.name)
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 11
+        label.TextStrokeTransparency = 0.45
+        label.TextColor3 = COLORS.Red
+        label.Parent = gui
+    end
+
+    local color = isActive and COLORS.Green or COLORS.Red
+    part.Color = color
+    local gui = part:FindFirstChild('SpotLabel')
+    local label = gui and gui:FindFirstChildOfClass('TextLabel')
+    if label then label.TextColor3 = color end
+end
+
+local function RefreshRecordingSpotParts()
+    local spotsFolder = GetRecordingSpotFolder()
+    local validNames = {}
+    for _, spot in ipairs(State.RecordingSpots or {}) do
+        validNames[spot.name] = true
+        SetRecordingSpotPartVisual(spot, State.RecordingActive and State.SelectedRecordingSpot == spot.name)
+    end
+    for _, child in ipairs(spotsFolder:GetChildren()) do
+        if child:IsA('BasePart') then
+            local spotName = child:GetAttribute('SpotName')
+            if spotName and not validNames[spotName] then child:Destroy() end
+        end
+    end
+end
+
 local function SaveRecordingSpots()
     WriteJsonFile(RECORDING_SPOTS_FILE, State.RecordingSpots or {})
 end
 
 local function LoadRecordingSpots()
     local data = ReadJsonFile(RECORDING_SPOTS_FILE)
-    if type(data) == "table" then State.RecordingSpots = data end
+    if type(data) == 'table' then State.RecordingSpots = data end
+    RefreshRecordingSpotParts()
 end
 
 local function SaveRecordingSessions()
@@ -850,10 +1019,11 @@ local function RecordSpot(name)
     table.insert(State.RecordingSpots, spot)
     State.SelectedRecordingSpot = spot.name
     SaveRecordingSpots()
-    return true, "Recording spot disimpan"
+    RefreshRecordingSpotParts()
+    return true, "Recording spot disimpan — part spot dibuat"
 end
 
-local function GetSpotCFrame(spot)
+GetSpotCFrame = function(spot)
     if not spot or type(spot.cframe) ~= "table" then return nil end
     local cf = spot.cframe
     if #cf < 12 then return nil end
@@ -878,6 +1048,7 @@ local function DeleteRecordingSpot(name)
         State.SelectedRecordingSpot = nil
     end
     SaveRecordingSpots()
+    RefreshRecordingSpotParts()
 end
 
 local function RestoreRecordingCamera()
@@ -926,22 +1097,24 @@ local function StartRecording()
     State.RecordingRestoreCameraSubject = camera.CameraSubject
 
     local lockedSpot = nil
-    if State.SelectedRecordingSpot then
-        for _,spot in ipairs(State.RecordingSpots) do
-            if spot.name == State.SelectedRecordingSpot then
+    local lockedSpotName = State.SelectedRecordingSpot
+    if lockedSpotName then
+        for _, spot in ipairs(State.RecordingSpots) do
+            if spot.name == lockedSpotName then
                 lockedSpot = GetSpotCFrame(spot)
                 break
             end
         end
     end
 
-    -- Bila belum ada spot terpilih, otomatis bekukan posisi camera saat ini.
+    -- Kalau user belum menyimpan spot, buat spot otomatis dari posisi camera
+    -- sekarang sekaligus membuat Part merah yang bisa dilihat di map.
     if not lockedSpot then
         lockedSpot = camera.CFrame
-        local autoName = "Auto Spot " .. tostring(os.time())
-        State.SelectedRecordingSpot = autoName
+        lockedSpotName = 'Auto Spot ' .. tostring(os.time())
+        State.SelectedRecordingSpot = lockedSpotName
         table.insert(State.RecordingSpots, {
-            name = autoName,
+            name = lockedSpotName,
             cframe = {lockedSpot:GetComponents()},
             savedAt = os.time(),
             auto = true,
@@ -954,12 +1127,15 @@ local function StartRecording()
     State.RecordingCaptureStartedAt = os.time()
     State.RecordingSession = {
         startedAt = State.RecordingCaptureStartedAt,
-        spot = State.SelectedRecordingSpot,
+        spot = lockedSpotName,
         trackClone = State.RecordingTrackClone,
-        cloneSource = State.VisualCloneData and State.VisualCloneData.label or "Unknown",
+        cloneSource = State.VisualCloneData and State.VisualCloneData.label or 'Unknown',
     }
     SaveRecordingSessions()
+    RefreshRecordingSpotParts()
 
+    -- Kamera benar-benar fixed. Tidak mengikuti posisi clone dan tidak ikut
+    -- berubah saat user menggerakkan camera/character.
     pcall(function()
         camera.CameraType = Enum.CameraType.Scriptable
         camera.CFrame = lockedSpot
@@ -968,34 +1144,21 @@ local function StartRecording()
     DisconnectRecordingCameraLoop()
     RecordingCameraLoop = RunService.RenderStepped:Connect(function()
         if not State.RecordingActive then return end
-
         local cam = Workspace.CurrentCamera
         local fixed = State.RecordingLockedCFrame
-        if not cam or not fixed then return end
-
-        local finalCFrame = fixed
-
-        -- Track Clone hanya mengubah arah pandang. Posisi camera tetap
-        -- terkunci di spot sehingga player boleh jalan jauh.
-        if State.RecordingTrackClone then
-            local mdl = State.VisualCloneModel
-            local root = mdl and (mdl:FindFirstChild("HumanoidRootPart") or mdl.PrimaryPart)
-            if root and root.Parent then
-                local target = root.Position + Vector3.new(0, 1.6, 0)
-                finalCFrame = CFrame.lookAt(fixed.Position, target, fixed.UpVector)
-            end
+        if cam and fixed then
+            pcall(function()
+                cam.CameraType = Enum.CameraType.Scriptable
+                cam.CFrame = fixed
+            end)
         end
-
-        pcall(function()
-            cam.CameraType = Enum.CameraType.Scriptable
-            cam.CFrame = finalCFrame
-        end)
     end)
 
     local ok, result = pcall(function()
         return CaptureService:StartVideoCaptureAsync(function(videoResult, videoCapture)
             State.RecordingActive = false
             DisconnectRecordingCameraLoop()
+            RefreshRecordingSpotParts()
 
             if State.RecordingSession then
                 State.RecordingSession.endedAt = os.time()
@@ -1021,6 +1184,7 @@ local function StartRecording()
     if not ok or result ~= Enum.VideoCaptureStartedResult.Success then
         State.RecordingActive = false
         DisconnectRecordingCameraLoop()
+        RefreshRecordingSpotParts()
         RestoreRecordingCamera()
         return false, "Video capture gagal dimulai"
     end
@@ -1037,6 +1201,7 @@ local function StopRecording()
 
     State.RecordingActive = false
     DisconnectRecordingCameraLoop()
+    RefreshRecordingSpotParts()
 
     if State.RecordingSession then
         State.RecordingSession.endedAt = os.time()
@@ -3571,7 +3736,7 @@ rebuildRecordingTab = function()
         end
     end
 
-    local track=makeButton(State.RecordingTrackClone and "TRACK CLONE: ON" or "TRACK CLONE: OFF", State.RecordingTrackClone and COLORS.White or COLORS.Panel2,tabContentFrame)
+    local track=makeButton(State.RecordingTrackClone and "TRACK CLONE ANIMASI: ON" or "TRACK CLONE ANIMASI: OFF", State.RecordingTrackClone and COLORS.White or COLORS.Panel2,tabContentFrame)
     track.LayoutOrder=order; order+=1; track.TextColor3=State.RecordingTrackClone and COLORS.Background or COLORS.White
     track.MouseButton1Click:Connect(function() State.RecordingTrackClone=not State.RecordingTrackClone; rebuildRecordingTab() end)
 
@@ -3591,7 +3756,7 @@ rebuildRecordingTab = function()
         toast(ok and "Recording" or "Error",msg,3000); rebuildRecordingTab()
     end)
 
-    local hint=makeLabel("Tip: simpan spot saat camera berada di posisi favorit. Saat recording dimulai, camera akan terkunci di spot itu meskipun character/camera kamu bergerak jauh. Track Clone hanya mengubah arah pandang ke clone, bukan posisi camera.",8,COLORS.DarkGray,nil,tabContentFrame)
+    local hint=makeLabel("Tip: tekan SIMPAN SPOT CAMERA untuk membuat Part merah di posisi camera. Saat START, Part berubah hijau dan camera terkunci 100% di spot itu. Setelah STOP, Part langsung kembali merah. Clone tetap bergerak/beranimasi tanpa memindahkan camera.",8,COLORS.DarkGray,nil,tabContentFrame)
     hint.LayoutOrder=order; hint.TextWrapped=true
 end
 
