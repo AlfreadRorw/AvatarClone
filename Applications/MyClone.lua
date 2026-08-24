@@ -12,7 +12,6 @@ local Services = _G.Services or {
     RunService = game:GetService("RunService"),
     CoreGui = game:GetService("CoreGui"),
     TextChatService = game:GetService("TextChatService"),
-    CaptureService = game:GetService("CaptureService"),
 }
 
 local Players = Services.Players
@@ -23,7 +22,6 @@ local HttpService = Services.HttpService
 local RunService = Services.RunService
 local CoreGui = Services.CoreGui
 local TextChatService = Services.TextChatService
-local CaptureService = Services.CaptureService
 
 local LocalPlayer = Players.LocalPlayer
 local T = _G.T or {}
@@ -59,13 +57,11 @@ end
 local FOLDER_NAME = "MyCloneFolder_V15"
 local CONFIG_FILE = "MyClone_Config.json"
 local CONFIG_SLOTS_FILE = "MyClone_ConfigSlots.json"
+local VISUAL_CLONE_FILE = "MyClone_VisualClones.json"
 local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
 local FAV_PLAYERS_FILE = "MyClone_FavPlayers.json"
-local VISUAL_CLONE_FILE = "MyClone_VisualClone.json"
-local RECORDING_SPOTS_FILE = "MyClone_RecordingSpots.json"
-local RECORDING_SESSIONS_FILE = "MyClone_RecordingSessions.json"
 
 local COLORS = {
     Background = Color3.fromRGB(10, 11, 16),
@@ -163,29 +159,9 @@ _G.MyCloneState = _G.MyCloneState or {
     RandomSwapActive = false,
     MemeChatActive = false,
     MemeChatInterval = 8,
-    -- Visual Clone
-    VisualCloneData = nil,
-    VisualCloneModel = nil,
-    VisualCloneMode = false,
-    VisualCloneSourceType = nil,
-    VisualCloneSourceId = nil,
-    VisualCloneSourceName = nil,
-    VisualCloneSpectator = false,
-    VisualCloneFollowCamera = false,
-    VisualCloneControlEnabled = false,
-    VisualCloneSaved = false,
-    -- Recording
-    RecordingSpots = {},
-    SelectedRecordingSpot = nil,
-    RecordingActive = false,
-    RecordingTrackClone = true,
-    RecordingCaptureStartedAt = nil,
-    RecordingSession = nil,
-    RecordingLockedCFrame = nil,
-    RecordingRestoreCFrame = nil,
-    RecordingRestoreCameraType = nil,
-    RecordingRestoreCameraSubject = nil,
-    RecordingSpotFolder = nil,
+    -- Clone Visual (snapshot avatar, bukan gandakan diri)
+    VisualCloneSlots = {},
+    VisualCloneTarget = "Diri Sendiri", -- "Diri Sendiri" atau nama player
 }
 
 local State = _G.MyCloneState
@@ -204,16 +180,6 @@ local GhostModeLoop = nil
 local RagdollPrankLoop = nil
 local RandomSwapLoop = nil
 local MemeChatLoop = nil
-local VisualCloneControlLoop = nil
-local VisualCloneCameraLoop = nil
-local VisualCloneAnimationLoop = nil
-local RecordingCameraLoop = nil
-local SavedPlayerWalkSpeed = nil
-local SavedPlayerJumpPower = nil
-local SavedPlayerJumpHeight = nil
-local SavedPlayerAutoRotate = nil
-local SavedCameraType = nil
-local SavedCameraSubject = nil
 
 local GROQ_MODELS = {
     "llama-3.3-70b-versatile",
@@ -246,7 +212,7 @@ local Gizmos = _G.MyCloneGizmos
 
 -- Forward Declarations
 local rebuildCurrentTab, rebuildEditorTab, rebuildClonesTab, rebuildHistoryTab, rebuildSyncTab, rebuildAIChatTab
-local rebuildVariasiTab, rebuildPlayersTab, rebuildVisualTab, rebuildRecordingTab
+local rebuildVariasiTab, rebuildPlayersTab, rebuildVisualCloneTab
 
 -- ================================================
 -- UTILITY FUNCTIONS
@@ -303,6 +269,104 @@ local function PrepareCloneModel(model)
         if part then model.PrimaryPart = part end
     end
     pcall(function() model:MakeJoints() end)
+end
+
+-- ================================================
+-- CLONE VISUAL (Snapshot Avatar — BUKAN menggandakan diri,
+-- tapi "membekukan" tampilan avatar di satu momen tertentu supaya
+-- clone-nya selalu pakai tampilan itu, walau avatar aslinya nanti
+-- berubah — misal habis pakai kode Catalog terus pindah map).
+-- ================================================
+
+-- Daftar lengkap properti HumanoidDescription yang bisa disimpan & dimuat
+-- ulang. Roblox TIDAK punya cara otomatis untuk serialize instance ini,
+-- jadi setiap properti didaftarkan manual di sini.
+local HUMANOID_DESC_PROPERTIES = {
+    -- Aset pakaian & tubuh
+    "Shirt", "Pants", "GraphicTShirt", "Face",
+    "HatAccessory", "HairAccessory", "FaceAccessory", "NeckAccessory",
+    "ShouldersAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory",
+    "ClimbAnimation", "FallAnimation", "IdleAnimation", "JumpAnimation",
+    "RunAnimation", "SwimAnimation", "WalkAnimation", "MoodAnimation",
+    "Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg",
+    -- Warna body part
+    "HeadColor", "TorsoColor", "LeftArmColor", "RightArmColor",
+    "LeftLegColor", "RightLegColor",
+    -- Skala tubuh
+    "HeightScale", "WidthScale", "HeadScale", "BodyTypeScale",
+    "ProportionScale", "DepthScale",
+    -- Info dasar
+    "GraphicTShirt",
+}
+
+-- Serialize sebuah HumanoidDescription instance menjadi tabel biasa
+-- (bisa di-JSONEncode) supaya bisa disimpan ke file / Firebase.
+local function SerializeHumanoidDescription(description)
+    if not description then return nil end
+    local data = {}
+    for _, propName in ipairs(HUMANOID_DESC_PROPERTIES) do
+        local ok, value = pcall(function() return description[propName] end)
+        if ok then
+            if typeof(value) == "Color3" then
+                data[propName] = {value.R, value.G, value.B}
+            else
+                data[propName] = value
+            end
+        end
+    end
+    -- Simpan juga jenis rig (R6/R15) supaya bentuk badan konsisten
+    local rigOk, rigValue = pcall(function() return description.RigType end)
+    if rigOk and rigValue then
+        data.RigType = rigValue.Name
+    end
+    return data
+end
+
+-- Kebalikan dari SerializeHumanoidDescription: membangun ulang instance
+-- HumanoidDescription dari tabel data yang tersimpan.
+local function DeserializeHumanoidDescription(data)
+    if not data then return nil end
+    local description = Instance.new("HumanoidDescription")
+    for _, propName in ipairs(HUMANOID_DESC_PROPERTIES) do
+        local value = data[propName]
+        if value ~= nil then
+            pcall(function()
+                if type(value) == "table" and #value == 3 then
+                    description[propName] = Color3.new(value[1], value[2], value[3])
+                else
+                    description[propName] = value
+                end
+            end)
+        end
+    end
+    return description, (data.RigType == "R6" and Enum.HumanoidRigType.R6 or Enum.HumanoidRigType.R15)
+end
+
+-- Mengambil snapshot tampilan avatar SEKARANG dari sebuah karakter
+-- (diri sendiri atau player lain yang sedang berada di map). Ini membaca
+-- tampilan yang BENAR-BENAR sedang dipakai saat ini (termasuk kode
+-- Catalog/UGC yang lagi aktif dicoba), bukan data tersimpan di server.
+local function CaptureCharacterAppearance(character)
+    if not character then return nil, "Karakter tidak ditemukan" end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return nil, "Humanoid tidak ditemukan" end
+    local ok, description = pcall(function() return humanoid:GetAppliedDescription() end)
+    if not ok or not description then return nil, "Gagal mengambil tampilan avatar" end
+    return SerializeHumanoidDescription(description), nil
+end
+
+-- Membuat sebuah Model baru dari data snapshot yang tersimpan (bukan dari
+-- userId — ini kuncinya, supaya tampilannya TIDAK ikut berubah walau
+-- avatar asli si pemilik sudah berganti outfit / pindah map).
+local function CreateAvatarFromSnapshot(snapshotData)
+    if not snapshotData then return nil, "Data snapshot kosong" end
+    local description, rigType = DeserializeHumanoidDescription(snapshotData)
+    if not description then return nil, "Gagal membangun ulang tampilan avatar" end
+    local ok, model = pcall(function()
+        return Players:CreateHumanoidModelFromDescriptionAsync(description, rigType or Enum.HumanoidRigType.R15, Enum.AssetTypeVerification.Default)
+    end)
+    if not ok or not model then return nil, "Gagal membuat model dari snapshot" end
+    return model, nil
 end
 
 local function GetNextSpawnCFrame()
@@ -374,8 +438,7 @@ local function PlayTrackOnClone(clone, sourceTrack)
     if not success or not cloneTrack then return end
     cloneTrack.Priority = sourceTrack.Priority
     cloneTrack.Looped = sourceTrack.Looped
-    cloneTrack:Play(0.05, 1, math.max(sourceTrack.Speed, 0.05))
-    pcall(function() cloneTrack.TimePosition = sourceTrack.TimePosition end)
+    cloneTrack:Play(0.1, 1, math.max(sourceTrack.Speed, 0.1))
     return cloneTrack
 end
 
@@ -485,739 +548,6 @@ local function StartSyncWatchdog()
 end
 StartSyncWatchdog()
 
-
--- ============================================================
--- VISUAL CLONE SNAPSHOT / CONTROL / SPECTATOR
--- ============================================================
-local VISUAL_DESCRIPTION_PROPERTIES = {
-    "BodyTypeScale","DepthScale","HeadScale","HeightScale","ProportionScale","WidthScale",
-    "Head","Torso","LeftArm","RightArm","LeftLeg","RightLeg",
-    "LeftArmColor","RightArmColor","LeftLegColor","RightLegColor","HeadColor","TorsoColor",
-    "Shirt","Pants","GraphicTShirt",
-    "BackAccessory","FaceAccessory","FrontAccessory","HairAccessory","HatAccessory","NeckAccessory","ShouldersAccessory","WaistAccessory",
-    "ClimbAnimation","FallAnimation","IdleAnimation","JumpAnimation","RunAnimation","SwimAnimation","WalkAnimation",
-    "MoodAnimation","UseAvatarSettings","StaticFacialAnimation",
-}
-
-local COLOR_PROPERTIES = {
-    LeftArmColor=true, RightArmColor=true, LeftLegColor=true, RightLegColor=true,
-    HeadColor=true, TorsoColor=true,
-}
-
-local function ColorToData(c)
-    if typeof(c) ~= "Color3" then return nil end
-    return {r=c.R,g=c.G,b=c.B}
-end
-
-local function DataToColor(v)
-    if type(v) ~= "table" then return nil end
-    return Color3.new(tonumber(v.r) or 0.5, tonumber(v.g) or 0.5, tonumber(v.b) or 0.5)
-end
-
-local function SerializeHumanoidDescription(desc)
-    if not desc then return nil end
-    local out = {version=1, properties={}, accessories=nil, emotes=nil, equippedEmotes=nil}
-    for _, prop in ipairs(VISUAL_DESCRIPTION_PROPERTIES) do
-        local ok, value = pcall(function() return desc[prop] end)
-        if ok then
-            if COLOR_PROPERTIES[prop] then
-                out.properties[prop] = ColorToData(value)
-            else
-                out.properties[prop] = value
-            end
-        end
-    end
-    pcall(function() out.accessories = desc:GetAccessories(true) end)
-    pcall(function() out.emotes = desc:GetEmotes() end)
-    pcall(function() out.equippedEmotes = desc:GetEquippedEmotes() end)
-    return out
-end
-
-local function DeserializeHumanoidDescription(data)
-    if type(data) ~= "table" or type(data.properties) ~= "table" then return nil end
-    local desc = Instance.new("HumanoidDescription")
-    for prop, value in pairs(data.properties) do
-        local ok = pcall(function()
-            desc[prop] = COLOR_PROPERTIES[prop] and DataToColor(value) or value
-        end)
-    end
-    if type(data.accessories) == "table" then
-        pcall(function() desc:SetAccessories(data.accessories, true) end)
-    end
-    if type(data.emotes) == "table" then
-        pcall(function() desc:SetEmotes(data.emotes) end)
-    end
-    if type(data.equippedEmotes) == "table" then
-        pcall(function() desc:SetEquippedEmotes(data.equippedEmotes) end)
-    end
-    return desc
-end
-
-local function WriteJsonFile(path, value)
-    if not writefile then return false, "writefile tidak tersedia" end
-    local ok, encoded = pcall(function() return HttpService:JSONEncode(value) end)
-    if not ok then return false, "JSON encode gagal" end
-    local wok = pcall(function() writefile(path, encoded) end)
-    return wok, wok and nil or "gagal menulis file"
-end
-
-local function ReadJsonFile(path)
-    if not isfile or not readfile or not isfile(path) then return nil end
-    local ok, raw = pcall(function() return readfile(path) end)
-    if not ok then return nil end
-    local dok, data = pcall(function() return HttpService:JSONDecode(raw) end)
-    return dok and data or nil
-end
-
-local function SaveVisualCloneSnapshot()
-    if not State.VisualCloneData then return false end
-    local ok = WriteJsonFile(VISUAL_CLONE_FILE, State.VisualCloneData)
-    State.VisualCloneSaved = ok
-    return ok
-end
-
-local function LoadVisualCloneSnapshot()
-    local data = ReadJsonFile(VISUAL_CLONE_FILE)
-    if type(data) == "table" and data.description then
-        State.VisualCloneData = data
-        State.VisualCloneSaved = true
-    end
-end
-
-local function CaptureDescriptionFromCharacter(character)
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return nil end
-    local ok, desc = pcall(function() return humanoid:GetAppliedDescription() end)
-    if not ok or not desc then return nil end
-    return SerializeHumanoidDescription(desc)
-end
-
-local function GetVisualAnimationSourcePlayer()
-    local sourceUserId = State.VisualCloneData and State.VisualCloneData.sourceUserId
-    if sourceUserId then
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player.UserId == sourceUserId then
-                return player
-            end
-        end
-    end
-    return LocalPlayer
-end
-
-local function SyncVisualCloneAnimations()
-    local clone = State.VisualCloneModel
-    if not clone or not clone.Parent then return end
-
-    local sourcePlayer = GetVisualAnimationSourcePlayer()
-    local sourceCharacter = sourcePlayer and sourcePlayer.Character
-    local sourceAnimator = GetAnimator(sourceCharacter)
-    local cloneAnimator = GetAnimator(clone)
-    if not sourceAnimator or not cloneAnimator then return end
-
-    local active = {}
-    for _, sourceTrack in ipairs(sourceAnimator:GetPlayingAnimationTracks()) do
-        local animation = sourceTrack.Animation
-        local animationId = animation and animation.AnimationId
-        if sourceTrack.IsPlaying and animationId and animationId ~= '' then
-            active[animationId] = sourceTrack
-            local cloneTrack = PlayTrackOnClone(clone, sourceTrack)
-            if cloneTrack then
-                pcall(function() cloneTrack:AdjustSpeed(sourceTrack.Speed) end)
-                -- Jangan reset TimePosition setiap frame; hanya koreksi kalau
-                -- clone baru mulai/tertinggal jauh dari source.
-                if math.abs((cloneTrack.TimePosition or 0) - (sourceTrack.TimePosition or 0)) > 0.35 then
-                    pcall(function() cloneTrack.TimePosition = sourceTrack.TimePosition end)
-                end
-            end
-        end
-    end
-
-    for _, cloneTrack in ipairs(cloneAnimator:GetPlayingAnimationTracks()) do
-        local animation = cloneTrack.Animation
-        local animationId = animation and animation.AnimationId
-        if animationId and not active[animationId] then
-            pcall(function() cloneTrack:Stop(0.12) end)
-        end
-    end
-end
-
-local function StartVisualCloneAnimationSync()
-    if VisualCloneAnimationLoop then
-        VisualCloneAnimationLoop:Disconnect()
-        VisualCloneAnimationLoop = nil
-    end
-    if not State.VisualCloneModel then return end
-
-    -- Jalankan sekali langsung agar clone tidak sempat berdiri T-pose/kaku.
-    SyncVisualCloneAnimations()
-    VisualCloneAnimationLoop = RunService.Heartbeat:Connect(function()
-        if not State.VisualCloneMode or not State.VisualCloneModel or not State.VisualCloneModel.Parent then
-            if VisualCloneAnimationLoop then
-                VisualCloneAnimationLoop:Disconnect()
-                VisualCloneAnimationLoop = nil
-            end
-            return
-        end
-        SyncVisualCloneAnimations()
-    end)
-end
-
-local function StopVisualCloneAnimationSync()
-    if VisualCloneAnimationLoop then
-        VisualCloneAnimationLoop:Disconnect()
-        VisualCloneAnimationLoop = nil
-    end
-end
-
-local function DestroyVisualClone()
-    State.VisualCloneMode = false
-    State.VisualCloneSpectator = false
-    State.VisualCloneFollowCamera = false
-    if VisualCloneControlLoop then VisualCloneControlLoop:Disconnect(); VisualCloneControlLoop=nil end
-    if VisualCloneCameraLoop then VisualCloneCameraLoop:Disconnect(); VisualCloneCameraLoop=nil end
-    StopVisualCloneAnimationSync()
-    local model = State.VisualCloneModel
-    if model and model.Parent then model:Destroy() end
-    State.VisualCloneModel = nil
-    if State.VisualCloneControlEnabled then
-        State.VisualCloneControlEnabled = false
-    end
-end
-
-local function RestorePlayerMovement()
-    local character = LocalPlayer.Character
-    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        if SavedPlayerWalkSpeed ~= nil then humanoid.WalkSpeed = SavedPlayerWalkSpeed end
-        if SavedPlayerJumpPower ~= nil then humanoid.JumpPower = SavedPlayerJumpPower end
-        if SavedPlayerJumpHeight ~= nil then humanoid.JumpHeight = SavedPlayerJumpHeight end
-        if SavedPlayerAutoRotate ~= nil then humanoid.AutoRotate = SavedPlayerAutoRotate end
-    end
-    SavedPlayerWalkSpeed=nil; SavedPlayerJumpPower=nil; SavedPlayerJumpHeight=nil; SavedPlayerAutoRotate=nil
-end
-
-local function EnterVisualControl()
-    local clone = State.VisualCloneModel
-    local character = LocalPlayer.Character
-    local playerHum = character and character:FindFirstChildOfClass("Humanoid")
-    local cloneHum = clone and clone:FindFirstChildOfClass("Humanoid")
-    if not clone or not cloneHum or not playerHum then return false, "Visual clone belum siap" end
-    if not State.VisualCloneControlEnabled then
-        SavedPlayerWalkSpeed = playerHum.WalkSpeed
-        SavedPlayerJumpPower = playerHum.JumpPower
-        SavedPlayerJumpHeight = playerHum.JumpHeight
-        SavedPlayerAutoRotate = playerHum.AutoRotate
-    end
-    State.VisualCloneControlEnabled = true
-    playerHum.WalkSpeed = 0
-    pcall(function() playerHum.JumpPower = 0 end)
-    pcall(function() playerHum.JumpHeight = 0 end)
-    playerHum.AutoRotate = true
-    cloneHum.WalkSpeed = 16
-    cloneHum.AutoRotate = true
-    if VisualCloneControlLoop then VisualCloneControlLoop:Disconnect() end
-    VisualCloneControlLoop = RunService.Heartbeat:Connect(function()
-        if not State.VisualCloneControlEnabled then return end
-        local c = State.VisualCloneModel
-        local ph = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        local vh = c and c:FindFirstChildOfClass("Humanoid")
-        if not ph or not vh or not c or not c.Parent then return end
-        local move = ph.MoveDirection
-        if move.Magnitude > 0.01 then
-            vh:Move(move, false)
-        else
-            vh:Move(Vector3.zero, false)
-        end
-        if ph.Jump then vh.Jump = true end
-    end)
-    return true
-end
-
-local function ExitVisualControl()
-    State.VisualCloneControlEnabled = false
-    if VisualCloneControlLoop then VisualCloneControlLoop:Disconnect(); VisualCloneControlLoop=nil end
-    RestorePlayerMovement()
-end
-
-local function SetVisualCloneCameraFollow(enabled)
-    local camera = Workspace.CurrentCamera
-    local clone = State.VisualCloneModel
-    local hum = clone and clone:FindFirstChildOfClass("Humanoid")
-    if not camera or not clone then return end
-    if enabled then
-        SavedCameraType = camera.CameraType
-        SavedCameraSubject = camera.CameraSubject
-        State.VisualCloneFollowCamera = true
-        camera.CameraType = Enum.CameraType.Custom
-        if hum then camera.CameraSubject = hum end
-    else
-        State.VisualCloneFollowCamera = false
-        if VisualCloneCameraLoop then VisualCloneCameraLoop:Disconnect(); VisualCloneCameraLoop=nil end
-        if SavedCameraType then camera.CameraType = SavedCameraType end
-        if SavedCameraSubject and SavedCameraSubject.Parent then camera.CameraSubject = SavedCameraSubject end
-        SavedCameraType=nil; SavedCameraSubject=nil
-    end
-end
-
-local function SpawnVisualCloneFromData(data)
-    if not data then return nil, "Snapshot avatar belum tersedia" end
-
-    local oldModel = State.VisualCloneModel
-    if oldModel and oldModel.Parent then
-        pcall(function() oldModel:Destroy() end)
-    end
-    State.VisualCloneModel = nil
-
-    local model = nil
-    local lastError = nil
-
-    -- Strategi utama: gunakan snapshot HumanoidDescription.
-    if data.description then
-        local desc = DeserializeHumanoidDescription(data.description)
-        if desc then
-            local ok, generated = pcall(function()
-                return Players:CreateHumanoidModelFromDescriptionAsync(
-                    desc,
-                    Enum.HumanoidRigType.R15,
-                    Enum.AssetTypeVerification.Default
-                )
-            end)
-            if ok and generated then
-                model = generated
-            else
-                lastError = "CreateHumanoidModelFromDescriptionAsync gagal"
-            end
-        else
-            lastError = "Snapshot HumanoidDescription tidak valid"
-        end
-    end
-
-    -- Fallback: buat langsung dari UserId sumber supaya CLONE NOW tetap
-    -- menghasilkan model saat snapshot description gagal.
-    if not model and tonumber(data.sourceUserId) then
-        local ok, generated = pcall(function()
-            return Players:CreateHumanoidModelFromUserIdAsync(tonumber(data.sourceUserId))
-        end)
-        if ok and generated then
-            model = generated
-        else
-            lastError = "CreateHumanoidModelFromUserIdAsync gagal"
-        end
-    end
-
-    if not model then
-        return nil, "Gagal membuat visual clone" .. (lastError and (": " .. lastError) or "")
-    end
-
-    PrepareCloneModel(model)
-    model.Name = "VisualClone"
-
-    local folder = Workspace:FindFirstChild(FOLDER_NAME)
-    if not folder then
-        folder = Instance.new("Folder")
-        folder.Name = FOLDER_NAME
-        folder.Parent = Workspace
-    end
-    model.Parent = folder
-
-    pcall(function() model:PivotTo(GetNextSpawnCFrame()) end)
-
-    local hum = model:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-        hum.BreakJointsOnDeath = false
-        pcall(function() hum.RequiresNeck = false end)
-    end
-
-    State.VisualCloneModel = model
-    State.VisualCloneMode = true
-    StartVisualCloneAnimationSync()
-    return model
-end
-
-local function CaptureSelfAsVisualClone(label)
-    local character = LocalPlayer.Character
-    local description = CaptureDescriptionFromCharacter(character)
-    if not description then return false, "Tidak bisa membaca avatar saat ini" end
-    State.VisualCloneData = {
-        version=1,
-        label=label or "My Visual Snapshot",
-        sourceType="self",
-        sourceUserId=LocalPlayer.UserId,
-        sourceName=LocalPlayer.Name,
-        savedAt=os.time(),
-        description=description,
-    }
-    SaveVisualCloneSnapshot()
-    return true, "Avatar saat ini disimpan sebagai visual clone"
-end
-
-local function CapturePlayerAsVisualClone(player)
-    local character = player and player.Character
-    local description = CaptureDescriptionFromCharacter(character)
-    if not description then
-        local ok, desc = pcall(function() return Players:GetHumanoidDescriptionFromUserIdAsync(player.UserId) end)
-        if ok and desc then description = SerializeHumanoidDescription(desc) end
-    end
-    if not description then return false, "Avatar player tidak tersedia" end
-    State.VisualCloneData = {
-        version=1,
-        label="Visual: " .. player.DisplayName,
-        sourceType="player",
-        sourceUserId=player.UserId,
-        sourceName=player.Name,
-        savedAt=os.time(),
-        description=description,
-    }
-    SaveVisualCloneSnapshot()
-    return true, "Avatar player disimpan"
-end
-
-local function StartVisualClone()
-    ExitVisualControl()
-
-    local existing = State.VisualCloneModel
-    if existing and existing.Parent then
-        pcall(function() existing:Destroy() end)
-        State.VisualCloneModel = nil
-    end
-
-    local model, err = SpawnVisualCloneFromData(State.VisualCloneData)
-    if not model then return false, err end
-
-    local ok = EnterVisualControl()
-    if not ok then
-        State.VisualCloneControlEnabled = false
-        return true, "Visual clone aktif (control analog tidak tersedia di client)"
-    end
-    return true, "Visual clone aktif"
-end
-
-local function RespawnSavedVisualClone()
-    if not State.VisualCloneData then LoadVisualCloneSnapshot() end
-    if not State.VisualCloneData then return false end
-    if State.VisualCloneModel and State.VisualCloneModel.Parent then return true end
-    local model = SpawnVisualCloneFromData(State.VisualCloneData)
-    return model ~= nil
-end
-
-local GetSpotCFrame
-
-local function GetRecordingSpotFolder()
-    local folder = Workspace:FindFirstChild(FOLDER_NAME)
-    if not folder then
-        folder = Instance.new('Folder')
-        folder.Name = FOLDER_NAME
-        folder.Parent = Workspace
-    end
-    local spotsFolder = folder:FindFirstChild('RecordingSpots')
-    if not spotsFolder then
-        spotsFolder = Instance.new('Folder')
-        spotsFolder.Name = 'RecordingSpots'
-        spotsFolder.Parent = folder
-    end
-    State.RecordingSpotFolder = spotsFolder
-    return spotsFolder
-end
-
-local function SetRecordingSpotPartVisual(spot, isActive)
-    if not spot then return end
-    local spotsFolder = GetRecordingSpotFolder()
-    local part
-    for _, child in ipairs(spotsFolder:GetChildren()) do
-        if child:IsA('BasePart') and child:GetAttribute('SpotName') == spot.name then
-            part = child
-            break
-        end
-    end
-    if not part then
-        local cf = GetSpotCFrame(spot)
-        if not cf then return end
-        part = Instance.new('Part')
-        part.Name = 'RecordingSpot_' .. tostring(#spotsFolder:GetChildren() + 1)
-        part.Size = Vector3.new(0.9, 0.9, 0.9)
-        part.Shape = Enum.PartType.Ball
-        part.Anchored = true
-        part.CanCollide = false
-        part.CanTouch = false
-        part.CanQuery = false
-        part.Material = Enum.Material.Neon
-        part:SetAttribute('SpotName', spot.name)
-        part.Parent = spotsFolder
-
-        local gui = Instance.new('BillboardGui')
-        gui.Name = 'SpotLabel'
-        gui.Size = UDim2.new(0, 150, 0, 30)
-        gui.StudsOffset = Vector3.new(0, 1.4, 0)
-        gui.AlwaysOnTop = true
-        gui.MaxDistance = 250
-        gui.Adornee = part
-        gui.Parent = part
-
-        local label = Instance.new('TextLabel')
-        label.Size = UDim2.new(1, 0, 1, 0)
-        label.BackgroundTransparency = 1
-        label.Text = '● ' .. tostring(spot.name)
-        label.Font = Enum.Font.GothamBold
-        label.TextSize = 11
-        label.TextStrokeTransparency = 0.45
-        label.TextColor3 = COLORS.Red
-        label.Parent = gui
-    end
-
-    local color = isActive and COLORS.Green or COLORS.Red
-    part.Color = color
-    local gui = part:FindFirstChild('SpotLabel')
-    local label = gui and gui:FindFirstChildOfClass('TextLabel')
-    if label then label.TextColor3 = color end
-end
-
-local function RefreshRecordingSpotParts()
-    local spotsFolder = GetRecordingSpotFolder()
-    local validNames = {}
-    for _, spot in ipairs(State.RecordingSpots or {}) do
-        validNames[spot.name] = true
-        SetRecordingSpotPartVisual(spot, State.RecordingActive and State.SelectedRecordingSpot == spot.name)
-    end
-    for _, child in ipairs(spotsFolder:GetChildren()) do
-        if child:IsA('BasePart') then
-            local spotName = child:GetAttribute('SpotName')
-            if spotName and not validNames[spotName] then child:Destroy() end
-        end
-    end
-end
-
-local function SaveRecordingSpots()
-    WriteJsonFile(RECORDING_SPOTS_FILE, State.RecordingSpots or {})
-end
-
-local function LoadRecordingSpots()
-    local data = ReadJsonFile(RECORDING_SPOTS_FILE)
-    if type(data) == 'table' then State.RecordingSpots = data end
-    RefreshRecordingSpotParts()
-end
-
-local function SaveRecordingSessions()
-    WriteJsonFile(RECORDING_SESSIONS_FILE, State.RecordingSession or {})
-end
-
-local function RecordSpot(name)
-    local camera = Workspace.CurrentCamera
-    if not camera then return false, "Camera tidak tersedia" end
-
-    local spotName = name
-    if type(spotName) ~= "string" or spotName:gsub("%s+", "") == "" then
-        spotName = "Spot " .. tostring(#State.RecordingSpots + 1)
-    end
-
-    local spot = {
-        name = spotName,
-        cframe = {camera.CFrame:GetComponents()},
-        savedAt = os.time(),
-    }
-
-    table.insert(State.RecordingSpots, spot)
-    State.SelectedRecordingSpot = spot.name
-    SaveRecordingSpots()
-    RefreshRecordingSpotParts()
-    return true, "Recording spot disimpan — part spot dibuat"
-end
-
-GetSpotCFrame = function(spot)
-    if not spot or type(spot.cframe) ~= "table" then return nil end
-    local cf = spot.cframe
-    if #cf < 12 then return nil end
-    local ok, result = pcall(function()
-        return CFrame.new(
-            cf[1],cf[2],cf[3],
-            cf[4],cf[5],cf[6],
-            cf[7],cf[8],cf[9],
-            cf[10],cf[11],cf[12]
-        )
-    end)
-    return ok and result or nil
-end
-
-local function DeleteRecordingSpot(name)
-    for i=#State.RecordingSpots,1,-1 do
-        if State.RecordingSpots[i].name == name then
-            table.remove(State.RecordingSpots,i)
-        end
-    end
-    if State.SelectedRecordingSpot == name then
-        State.SelectedRecordingSpot = nil
-    end
-    SaveRecordingSpots()
-    RefreshRecordingSpotParts()
-end
-
-local function RestoreRecordingCamera()
-    local camera = Workspace.CurrentCamera
-    if camera then
-        if State.RecordingRestoreCFrame then
-            pcall(function() camera.CFrame = State.RecordingRestoreCFrame end)
-        end
-        if State.RecordingRestoreCameraType then
-            pcall(function() camera.CameraType = State.RecordingRestoreCameraType end)
-        end
-        if State.RecordingRestoreCameraSubject and State.RecordingRestoreCameraSubject.Parent then
-            pcall(function() camera.CameraSubject = State.RecordingRestoreCameraSubject end)
-        end
-    end
-
-    State.RecordingLockedCFrame = nil
-    State.RecordingRestoreCFrame = nil
-    State.RecordingRestoreCameraType = nil
-    State.RecordingRestoreCameraSubject = nil
-end
-
-local function DisconnectRecordingCameraLoop()
-    if RecordingCameraLoop then
-        RecordingCameraLoop:Disconnect()
-        RecordingCameraLoop = nil
-    end
-end
-
-local function StartRecording()
-    if State.RecordingActive then return false, "Recording sudah aktif" end
-    if not CaptureService or not CaptureService.StartVideoCaptureAsync then
-        return false, "CaptureService video tidak tersedia di client ini"
-    end
-
-    local clone = State.VisualCloneModel
-    if not clone or not clone.Parent then
-        return false, "Aktifkan visual clone dulu"
-    end
-
-    local camera = Workspace.CurrentCamera
-    if not camera then return false, "Camera tidak tersedia" end
-
-    State.RecordingRestoreCFrame = camera.CFrame
-    State.RecordingRestoreCameraType = camera.CameraType
-    State.RecordingRestoreCameraSubject = camera.CameraSubject
-
-    local lockedSpot = nil
-    local lockedSpotName = State.SelectedRecordingSpot
-    if lockedSpotName then
-        for _, spot in ipairs(State.RecordingSpots) do
-            if spot.name == lockedSpotName then
-                lockedSpot = GetSpotCFrame(spot)
-                break
-            end
-        end
-    end
-
-    -- Kalau user belum menyimpan spot, buat spot otomatis dari posisi camera
-    -- sekarang sekaligus membuat Part merah yang bisa dilihat di map.
-    if not lockedSpot then
-        lockedSpot = camera.CFrame
-        lockedSpotName = 'Auto Spot ' .. tostring(os.time())
-        State.SelectedRecordingSpot = lockedSpotName
-        table.insert(State.RecordingSpots, {
-            name = lockedSpotName,
-            cframe = {lockedSpot:GetComponents()},
-            savedAt = os.time(),
-            auto = true,
-        })
-        SaveRecordingSpots()
-    end
-
-    State.RecordingLockedCFrame = lockedSpot
-    State.RecordingActive = true
-    State.RecordingCaptureStartedAt = os.time()
-    State.RecordingSession = {
-        startedAt = State.RecordingCaptureStartedAt,
-        spot = lockedSpotName,
-        trackClone = State.RecordingTrackClone,
-        cloneSource = State.VisualCloneData and State.VisualCloneData.label or 'Unknown',
-    }
-    SaveRecordingSessions()
-    RefreshRecordingSpotParts()
-
-    -- Kamera benar-benar fixed. Tidak mengikuti posisi clone dan tidak ikut
-    -- berubah saat user menggerakkan camera/character.
-    pcall(function()
-        camera.CameraType = Enum.CameraType.Scriptable
-        camera.CFrame = lockedSpot
-    end)
-
-    DisconnectRecordingCameraLoop()
-    RecordingCameraLoop = RunService.RenderStepped:Connect(function()
-        if not State.RecordingActive then return end
-        local cam = Workspace.CurrentCamera
-        local fixed = State.RecordingLockedCFrame
-        if cam and fixed then
-            pcall(function()
-                cam.CameraType = Enum.CameraType.Scriptable
-                cam.CFrame = fixed
-            end)
-        end
-    end)
-
-    local ok, result = pcall(function()
-        return CaptureService:StartVideoCaptureAsync(function(videoResult, videoCapture)
-            State.RecordingActive = false
-            DisconnectRecordingCameraLoop()
-            RefreshRecordingSpotParts()
-
-            if State.RecordingSession then
-                State.RecordingSession.endedAt = os.time()
-                State.RecordingSession.duration =
-                    State.RecordingSession.endedAt - State.RecordingSession.startedAt
-                State.RecordingSession.result = tostring(videoResult)
-                SaveRecordingSessions()
-            end
-
-            if videoCapture and (
-                videoResult == Enum.VideoCaptureResult.Success or
-                videoResult == Enum.VideoCaptureResult.TimeLimitReached
-            ) then
-                pcall(function()
-                    CaptureService:PromptSaveCapturesToGallery({videoCapture}, function() end)
-                end)
-            end
-
-            RestoreRecordingCamera()
-        end, {})
-    end)
-
-    if not ok or result ~= Enum.VideoCaptureStartedResult.Success then
-        State.RecordingActive = false
-        DisconnectRecordingCameraLoop()
-        RefreshRecordingSpotParts()
-        RestoreRecordingCamera()
-        return false, "Video capture gagal dimulai"
-    end
-
-    return true, "Recording dimulai"
-end
-
-local function StopRecording()
-    if not State.RecordingActive then return false, "Recording tidak aktif" end
-
-    pcall(function()
-        CaptureService:StopVideoCapture()
-    end)
-
-    State.RecordingActive = false
-    DisconnectRecordingCameraLoop()
-    RefreshRecordingSpotParts()
-
-    if State.RecordingSession then
-        State.RecordingSession.endedAt = os.time()
-        State.RecordingSession.duration =
-            State.RecordingSession.endedAt - State.RecordingSession.startedAt
-        State.RecordingSession.stoppedManually = true
-        SaveRecordingSessions()
-    end
-
-    RestoreRecordingCamera()
-    return true, "Recording dihentikan"
-end
-
-LoadVisualCloneSnapshot()
-LoadRecordingSpots()
-
 local function CreateNameTag(clone, nameText, hide)
     local oldTag = clone:FindFirstChild("NameTag")
     if oldTag then oldTag:Destroy() end
@@ -1247,6 +577,108 @@ local function CreateNameTag(clone, nameText, hide)
     label.Parent = billboard
 
     return billboard
+end
+
+-- ================================================
+-- CLONE VISUAL — Save/Load Slot & Spawn ke Map
+-- ================================================
+local function SaveVisualCloneSlots()
+    pcall(function()
+        if writefile then writefile(VISUAL_CLONE_FILE, HttpService:JSONEncode(State.VisualCloneSlots)) end
+    end)
+end
+
+local function LoadVisualCloneSlots()
+    pcall(function()
+        if isfile and readfile and isfile(VISUAL_CLONE_FILE) then
+            local data = HttpService:JSONDecode(readfile(VISUAL_CLONE_FILE))
+            if type(data) == "table" then State.VisualCloneSlots = data end
+        end
+    end)
+end
+
+-- Menyimpan snapshot tampilan avatar SEKARANG (dari diri sendiri atau
+-- player lain yang dipilih) ke sebuah slot bernama, supaya bisa dipanggil
+-- ulang kapan saja persis sama walau avatar aslinya sudah berubah.
+local function SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
+    if not slotName or slotName == "" then return false, "Nama slot kosong" end
+    local snapshot, err = CaptureCharacterAppearance(sourceCharacter)
+    if not snapshot then return false, err or "Gagal mengambil tampilan avatar" end
+
+    State.VisualCloneSlots[slotName] = {
+        savedAt = os.time(),
+        sourceLabel = sourceLabel or "Diri Sendiri",
+        appearance = snapshot,
+    }
+    SaveVisualCloneSlots()
+    return true, "Clone Visual '" .. slotName .. "' tersimpan (tampilan " .. (sourceLabel or "Diri Sendiri") .. ")."
+end
+
+local function DeleteVisualCloneSlot(slotName)
+    State.VisualCloneSlots[slotName] = nil
+    SaveVisualCloneSlots()
+end
+
+local function RenameVisualCloneSlot(oldName, newName)
+    if not State.VisualCloneSlots[oldName] then return false end
+    if State.VisualCloneSlots[newName] then return false, "Nama sudah dipakai slot lain" end
+    State.VisualCloneSlots[newName] = State.VisualCloneSlots[oldName]
+    State.VisualCloneSlots[oldName] = nil
+    SaveVisualCloneSlots()
+    return true
+end
+
+-- Spawn 1 clone visual ke map berdasarkan sebuah slot tersimpan. Ini TIDAK
+-- pernah membaca ulang avatar dari server — selalu pakai snapshot yang
+-- sudah dibekukan di slot tersebut, jadi tampilannya konsisten walau
+-- avatar asli si pemilik sekarang sudah beda (habis ganti map, dsb).
+local function SpawnVisualClone(slotName, callback)
+    local slot = State.VisualCloneSlots[slotName]
+    if not slot or not slot.appearance then
+        if callback then callback(false, "Slot Clone Visual tidak ditemukan") end
+        return
+    end
+
+    task.spawn(function()
+        local model, err = CreateAvatarFromSnapshot(slot.appearance)
+        if not model then
+            if callback then callback(false, err or "Gagal membuat Clone Visual") end
+            return
+        end
+
+        State.CloneCounter = State.CloneCounter + 1
+        local cloneName = "VisualClone_" .. tostring(State.CloneCounter)
+        model.Name = cloneName
+        PrepareCloneModel(model)
+
+        local cf = GetNextSpawnCFrame()
+        model:PivotTo(cf)
+        local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
+        if rootPart then
+            rootPart.Anchored = true
+            rootPart.CanCollide = false
+            rootPart.Transparency = 1
+        end
+
+        local cloneData = {
+            Index = State.CloneCounter,
+            UserId = nil, -- Clone Visual TIDAK terikat ke userId manapun —
+                           -- ini kuncinya, biar tidak pernah ikut berubah
+                           -- kalau avatar asli si pemilik berubah nanti.
+            Username = slot.sourceLabel or slotName,
+            DisplayName = slotName,
+            OriginalCFrame = cf,
+            OriginalRotation = cf - cf.Position,
+            HideName = false,
+            IsVisualClone = true,
+            VisualCloneSlot = slotName,
+        }
+        State.CloneData[model] = cloneData
+        model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
+        CreateNameTag(model, slotName, false)
+
+        if callback then callback(true, "Clone Visual '" .. slotName .. "' berhasil di-spawn.") end
+    end)
 end
 
 local function SetGizmoVisibility()
@@ -2321,14 +1753,16 @@ local function makeInput(placeholder, parent)
     tb.Size = UDim2.new(1, -16, 1, 0)
     tb.Position = UDim2.new(0, 8, 0, 0)
     tb.BackgroundTransparency = 1
+    tb.Text = "" -- WAJIB di-set eksplisit — TextBox baru dari Instance.new()
+                 -- defaultnya punya Text = "TextBox" (bukan string kosong),
+                 -- jadi tanpa baris ini placeholder ketutupan tulisan "TextBox".
     tb.PlaceholderText = placeholder or ""
     tb.PlaceholderColor3 = COLORS.Gray
     tb.TextColor3 = COLORS.White
     tb.Font = Enum.Font.Gotham
     tb.TextSize = 11
-    tb.ClearTextOnFocus = true
+    tb.ClearTextOnFocus = false
     tb.TextXAlignment = Enum.TextXAlignment.Left
-    tb.Text = ""
     tb.Parent = frame
     return tb, frame
 end
@@ -2436,12 +1870,13 @@ rebuildEditorTab = function()
     renameBox.Size = UDim2.new(1, -70, 0, 28)
     renameBox.Position = UDim2.new(0, 10, 0, 48)
     renameBox.BackgroundColor3 = COLORS.Panel2
+    renameBox.Text = ""
     renameBox.PlaceholderText = "Ubah nama clone..."
     renameBox.PlaceholderColor3 = COLORS.DarkGray
     renameBox.TextColor3 = COLORS.White
     renameBox.Font = Enum.Font.Gotham
     renameBox.TextSize = 10
-    renameBox.ClearTextOnFocus = true
+    renameBox.ClearTextOnFocus = false
     renameBox.Parent = selectedFrame
     corner(renameBox, 6)
 
@@ -3074,6 +2509,167 @@ local function rebuildConfigTab()
     end
 end
 
+rebuildVisualCloneTab = function()
+    clearTabContent()
+
+    makeSectionHeader("CLONE VISUAL — Bekukan Tampilan Avatar", tabContentFrame, 1, COLORS.Gold)
+
+    local infoCard = makePremiumCard(tabContentFrame, 2)
+    local infoPad = Instance.new("UIPadding", infoCard)
+    infoPad.PaddingTop = UDim.new(0, 10); infoPad.PaddingBottom = UDim.new(0, 10)
+    infoPad.PaddingLeft = UDim.new(0, 10); infoPad.PaddingRight = UDim.new(0, 10)
+    local infoLayout = Instance.new("UIListLayout", infoCard)
+    infoLayout.Padding = UDim.new(0, 4)
+
+    local infoLbl = makeLabel("Bukan menggandakan diri — ini membekukan TAMPILAN avatar kamu (atau player lain) di satu momen, biar clone-nya tetap pakai tampilan itu walau avatar aslinya nanti berubah (ganti outfit, pindah map, dll).", 9, COLORS.Gray, nil, infoCard)
+    infoLbl.LayoutOrder = 1
+    infoLbl.TextWrapped = true
+    infoLbl.Size = UDim2.new(1, 0, 0, 48)
+
+    -- ===== PILIH SUMBER TAMPILAN =====
+    makeSectionHeader("1. PILIH SUMBER TAMPILAN", tabContentFrame, 3, COLORS.Blue)
+
+    local sourceOptions = {"Diri Sendiri"}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then table.insert(sourceOptions, player.Name) end
+    end
+
+    local sourceScroll = Instance.new("ScrollingFrame")
+    sourceScroll.Size = UDim2.new(1, 0, 0, 44)
+    sourceScroll.BackgroundTransparency = 1
+    sourceScroll.ScrollBarThickness = 3
+    sourceScroll.ScrollingDirection = Enum.ScrollingDirection.X
+    sourceScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+    sourceScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
+    sourceScroll.LayoutOrder = 4
+    sourceScroll.Parent = tabContentFrame
+
+    local sourceLayout = Instance.new("UIListLayout", sourceScroll)
+    sourceLayout.FillDirection = Enum.FillDirection.Horizontal
+    sourceLayout.Padding = UDim.new(0, 6)
+
+    for _, sourceName in ipairs(sourceOptions) do
+        local isSelected = State.VisualCloneTarget == sourceName
+        local chip = makeButton(sourceName, isSelected and COLORS.PurpleDark or COLORS.Panel2, sourceScroll, UDim2.new(0, 130, 1, 0))
+        chip.MouseButton1Click:Connect(function()
+            State.VisualCloneTarget = sourceName
+            rebuildVisualCloneTab()
+        end)
+    end
+
+    -- ===== SIMPAN SNAPSHOT BARU =====
+    makeSectionHeader("2. SIMPAN SEBAGAI CLONE VISUAL", tabContentFrame, 5, COLORS.Green)
+
+    local saveCard = makePremiumCard(tabContentFrame, 6)
+    local savePad = Instance.new("UIPadding", saveCard)
+    savePad.PaddingTop = UDim.new(0, 10); savePad.PaddingBottom = UDim.new(0, 10)
+    savePad.PaddingLeft = UDim.new(0, 10); savePad.PaddingRight = UDim.new(0, 10)
+    local saveLayout = Instance.new("UIListLayout", saveCard)
+    saveLayout.Padding = UDim.new(0, 6)
+
+    local nameInput, nameFrame = makeInput("Nama Clone Visual (contoh: Outfit Event)", saveCard)
+    nameFrame.LayoutOrder = 1
+
+    local saveBtn = makeButton("📸 AMBIL SNAPSHOT & SIMPAN", COLORS.Green, saveCard)
+    saveBtn.LayoutOrder = 2
+    saveBtn.MouseButton1Click:Connect(function()
+        local slotName = nameInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
+        if slotName == "" then return end
+
+        local sourceCharacter, sourceLabel
+        if State.VisualCloneTarget == "Diri Sendiri" then
+            sourceCharacter = LocalPlayer.Character
+            sourceLabel = "Diri Sendiri"
+        else
+            local targetPlayer = Players:FindFirstChild(State.VisualCloneTarget)
+            if targetPlayer then
+                sourceCharacter = targetPlayer.Character
+                sourceLabel = targetPlayer.Name
+            end
+        end
+
+        if not sourceCharacter then
+            saveBtn.Text = "✗ Karakter sumber tidak ditemukan"
+            task.delay(2, function()
+                if saveBtn and saveBtn.Parent then saveBtn.Text = "📸 AMBIL SNAPSHOT & SIMPAN" end
+            end)
+            return
+        end
+
+        local ok, msg = SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
+        nameInput.Text = ""
+        saveBtn.Text = ok and "✓ Tersimpan!" or ("✗ " .. tostring(msg))
+        task.delay(2, function()
+            if saveBtn and saveBtn.Parent then saveBtn.Text = "📸 AMBIL SNAPSHOT & SIMPAN" end
+        end)
+        rebuildVisualCloneTab()
+    end)
+
+    -- ===== DAFTAR CLONE VISUAL TERSIMPAN =====
+    makeSectionHeader("3. CLONE VISUAL TERSIMPAN", tabContentFrame, 7, COLORS.Purple)
+
+    local slotNames = {}
+    for name in pairs(State.VisualCloneSlots) do table.insert(slotNames, name) end
+    table.sort(slotNames)
+
+    if #slotNames == 0 then
+        local emptyLbl = makeLabel("Belum ada Clone Visual tersimpan. Simpan snapshot pertama kamu di atas.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 8
+        emptyLbl.TextWrapped = true
+    else
+        for i, slotName in ipairs(slotNames) do
+            local slot = State.VisualCloneSlots[slotName]
+            local card = makePremiumCard(tabContentFrame, 7 + i, 56)
+
+            local nameLbl = makeLabel(slotName, 12, COLORS.White, Enum.Font.GothamBold, card)
+            nameLbl.Size = UDim2.new(1, -160, 0, 20)
+            nameLbl.Position = UDim2.new(0, 10, 0, 6)
+
+            local savedDate = slot.savedAt and os.date("%d/%m/%Y %H:%M", slot.savedAt) or "-"
+            local subLbl = makeLabel("Sumber: " .. (slot.sourceLabel or "?") .. " · " .. savedDate, 8, COLORS.Gray, nil, card)
+            subLbl.Size = UDim2.new(1, -160, 0, 14)
+            subLbl.Position = UDim2.new(0, 10, 0, 26)
+
+            local spawnBtn = makeButton("SPAWN", COLORS.Blue, card, UDim2.new(0, 60, 0, 40))
+            spawnBtn.Position = UDim2.new(1, -164, 0.5, -20)
+            spawnBtn.MouseButton1Click:Connect(function()
+                spawnBtn.Text = "..."
+                SpawnVisualClone(slotName, function(ok, msg)
+                    if spawnBtn and spawnBtn.Parent then spawnBtn.Text = "SPAWN" end
+                    rebuildVisualCloneTab()
+                end)
+            end)
+
+            local overwriteBtn = makeButton("↻", COLORS.Orange, card, UDim2.new(0, 40, 0, 40))
+            overwriteBtn.Position = UDim2.new(1, -100, 0.5, -20)
+            overwriteBtn.MouseButton1Click:Connect(function()
+                local sourceCharacter, sourceLabel
+                if State.VisualCloneTarget == "Diri Sendiri" then
+                    sourceCharacter = LocalPlayer.Character
+                    sourceLabel = "Diri Sendiri"
+                else
+                    local targetPlayer = Players:FindFirstChild(State.VisualCloneTarget)
+                    if targetPlayer then
+                        sourceCharacter = targetPlayer.Character
+                        sourceLabel = targetPlayer.Name
+                    end
+                end
+                if sourceCharacter then
+                    SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
+                    rebuildVisualCloneTab()
+                end
+            end)
+
+            local deleteBtn = makeButton("🗑", COLORS.Delete, card, UDim2.new(0, 40, 0, 40))
+            deleteBtn.Position = UDim2.new(1, -50, 0.5, -20)
+            deleteBtn.MouseButton1Click:Connect(function()
+                DeleteVisualCloneSlot(slotName)
+                rebuildVisualCloneTab()
+            end)
+        end
+    end
+end
+
 rebuildHistoryTab = function()
     clearTabContent()
 
@@ -3610,156 +3206,6 @@ rebuildPlayersTab = function()
     end
 end
 
-
--- ============================================================
--- VISUAL CLONE TAB
--- ============================================================
-rebuildVisualTab = function()
-    clearTabContent()
-    makeSectionHeader("VISUAL CLONE", tabContentFrame, 1, COLORS.White)
-
-    local info = makeLabel("Snapshot avatar dipisahkan dari karakter kamu. Visual clone bisa dikontrol melalui analog Roblox sementara karakter asli tetap diam.", 9, COLORS.Gray, nil, tabContentFrame)
-    info.LayoutOrder=2; info.TextWrapped=true
-
-    local captureBtn = makeButton("SIMPAN AVATAR AKU SEKARANG", COLORS.Panel, tabContentFrame)
-    captureBtn.LayoutOrder=3
-    captureBtn.MouseButton1Click:Connect(function()
-        local ok,msg=CaptureSelfAsVisualClone("My Catalog Snapshot")
-        captureBtn.Text=ok and "SNAPSHOT TERSIMPAN" or "GAGAL MENYIMPAN"
-        task.delay(1.8,function() if captureBtn.Parent then captureBtn.Text="SIMPAN AVATAR AKU SEKARANG" end end)
-    end)
-
-    local savedLabel = makeLabel(State.VisualCloneData and ("Snapshot: "..tostring(State.VisualCloneData.label)) or "Belum ada snapshot avatar.", 9, COLORS.SoftWhite, Enum.Font.GothamBold, tabContentFrame)
-    savedLabel.LayoutOrder=4; savedLabel.TextWrapped=true
-
-    local playerHeader = makeSectionHeader("CLONE VISUAL DARI PLAYER", tabContentFrame, 5, COLORS.White)
-    local order=6
-    for _,player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then
-            local card=makePremiumCard(tabContentFrame,order,46)
-            order+=1
-            local icon=Instance.new("ImageLabel")
-            icon.Size=UDim2.new(0,34,0,34); icon.Position=UDim2.new(0,6,0.5,-17); icon.BackgroundTransparency=1
-            icon.Image="rbxassetid://7072718362"; icon.ImageColor3=COLORS.SoftWhite; icon.Parent=card
-            local name=makeLabel(player.DisplayName,11,COLORS.White,Enum.Font.GothamBold,card)
-            name.Position=UDim2.new(0,48,0,4); name.Size=UDim2.new(1,-135,0,18)
-            local sub=makeLabel("@"..player.Name,8,COLORS.Gray,nil,card)
-            sub.Position=UDim2.new(0,48,0,23); sub.Size=UDim2.new(1,-135,0,14)
-            local btn=makeButton("CLONE NOW",COLORS.Panel2,card,UDim2.new(0,86,0,32))
-            btn.Position=UDim2.new(1,-79,0.5,-16)
-            btn.MouseButton1Click:Connect(function()
-                local ok,msg=CapturePlayerAsVisualClone(player)
-                if ok then
-                    StartVisualClone()
-                end
-                toast(ok and "Visual Clone" or "Error",msg,2500)
-                rebuildVisualTab()
-            end)
-        end
-    end
-
-    makeSectionHeader("CONTROL", tabContentFrame, order, COLORS.White); order+=1
-    local activeLabel=makeLabel(State.VisualCloneMode and "Visual clone aktif" or "Visual clone belum aktif",9,COLORS.Gray,nil,tabContentFrame); activeLabel.LayoutOrder=order; order+=1
-    local startBtn=makeButton(State.VisualCloneMode and "RELOAD VISUAL CLONE" or "AKTIFKAN VISUAL CLONE", COLORS.Panel, tabContentFrame)
-    startBtn.LayoutOrder=order; order+=1
-    startBtn.MouseButton1Click:Connect(function()
-        if not State.VisualCloneData then toast("Visual Clone","Simpan snapshot avatar terlebih dahulu",2500); return end
-        local ok,msg=StartVisualClone(); toast(ok and "Visual Clone" or "Error",msg,2500); rebuildVisualTab()
-    end)
-
-    local controlBtn=makeButton(State.VisualCloneControlEnabled and "ANALOG CLONE: ON" or "ANALOG CLONE: OFF", State.VisualCloneControlEnabled and COLORS.White or COLORS.Panel2, tabContentFrame)
-    controlBtn.TextColor3=State.VisualCloneControlEnabled and COLORS.Background or COLORS.White
-    controlBtn.LayoutOrder=order; order+=1
-    controlBtn.MouseButton1Click:Connect(function()
-        if State.VisualCloneControlEnabled then ExitVisualControl() else
-            local ok,msg=EnterVisualControl(); if not ok then toast("Control",msg,2500) end
-        end
-        rebuildVisualTab()
-    end)
-
-    local specBtn=makeButton(State.VisualCloneSpectator and "SPECTATOR CLONE: ON" or "SPECTATOR CLONE: OFF", State.VisualCloneSpectator and COLORS.White or COLORS.Panel2, tabContentFrame)
-    specBtn.TextColor3=State.VisualCloneSpectator and COLORS.Background or COLORS.White
-    specBtn.LayoutOrder=order; order+=1
-    specBtn.MouseButton1Click:Connect(function()
-        if not State.VisualCloneModel then toast("Spectator","Aktifkan clone dahulu",2500); return end
-        State.VisualCloneSpectator=not State.VisualCloneSpectator
-        SetVisualCloneCameraFollow(State.VisualCloneSpectator)
-        rebuildVisualTab()
-    end)
-
-    local saveBtn=makeButton("SIMPAN SNAPSHOT KE CONFIG",COLORS.Panel,tabContentFrame)
-    saveBtn.LayoutOrder=order; order+=1
-    saveBtn.MouseButton1Click:Connect(function()
-        local ok=SaveVisualCloneSnapshot(); toast(ok and "Config" or "Config","Snapshot visual disimpan ke file local",2500)
-    end)
-
-    local destroyBtn=makeButton("HAPUS VISUAL CLONE",COLORS.Delete,tabContentFrame)
-    destroyBtn.LayoutOrder=order
-    destroyBtn.MouseButton1Click:Connect(function()
-        ExitVisualControl(); SetVisualCloneCameraFollow(false); DestroyVisualClone(); rebuildVisualTab()
-    end)
-end
-
--- ============================================================
--- RECORDING TAB
--- ============================================================
-rebuildRecordingTab = function()
-    clearTabContent()
-    makeSectionHeader("RECORDING STUDIO", tabContentFrame, 1, COLORS.White)
-    local note=makeLabel("Roblox CaptureService menangkap video dan menyimpannya lewat gallery Roblox. Recording video memiliki batas 30 detik; spot dan metadata session dapat disimpan lokal jika executor menyediakan writefile.",9,COLORS.Gray,nil,tabContentFrame)
-    note.LayoutOrder=2; note.TextWrapped=true
-
-    local spotInput,spotFrame=makeInput("Nama recording spot...",tabContentFrame); spotFrame.LayoutOrder=3
-    local saveSpot=makeButton("SIMPAN SPOT CAMERA",COLORS.Panel,tabContentFrame); saveSpot.LayoutOrder=4
-    saveSpot.MouseButton1Click:Connect(function()
-        local ok,msg=RecordSpot(spotInput.Text~="" and spotInput.Text or nil); toast(ok and "Recording" or "Error",msg,2500); spotInput.Text=""; rebuildRecordingTab()
-    end)
-
-    makeSectionHeader("SAVED SPOTS",tabContentFrame,5,COLORS.White)
-    local order=6
-    if #State.RecordingSpots==0 then
-        local empty=makeLabel("Belum ada spot. Posisikan camera lalu tekan Simpan Spot.",9,COLORS.DarkGray,nil,tabContentFrame); empty.LayoutOrder=order; order+=1
-    else
-        for _,spot in ipairs(State.RecordingSpots) do
-            local row=makePremiumCard(tabContentFrame,order,44); order+=1
-            local selected=State.SelectedRecordingSpot==spot.name
-            local choose=makeButton(selected and "AKTIF" or "PILIH",selected and COLORS.White or COLORS.Panel2,row,UDim2.new(0,62,0,30)); choose.TextColor3=selected and COLORS.Background or COLORS.White; choose.Position=UDim2.new(1,-68,0.5,-15)
-            local label=makeLabel(spot.name,10,COLORS.White,Enum.Font.GothamBold,row); label.Position=UDim2.new(0,8,0,5); label.Size=UDim2.new(1,-150,0,16)
-            local date=makeLabel(os.date("%d %b %Y %H:%M",spot.savedAt or os.time()),7,COLORS.Gray,nil,row); date.Position=UDim2.new(0,8,0,23); date.Size=UDim2.new(1,-150,0,13)
-            choose.MouseButton1Click:Connect(function()
-                State.SelectedRecordingSpot=spot.name
-                local cf=GetSpotCFrame(spot); if cf and Workspace.CurrentCamera then Workspace.CurrentCamera.CFrame=cf end
-                rebuildRecordingTab()
-            end)
-            local del=makeButton("X",COLORS.Delete,row,UDim2.new(0,30,0,30)); del.Position=UDim2.new(1,-104,0.5,-15)
-            del.MouseButton1Click:Connect(function() DeleteRecordingSpot(spot.name); rebuildRecordingTab() end)
-        end
-    end
-
-    local track=makeButton(State.RecordingTrackClone and "TRACK CLONE ANIMASI: ON" or "TRACK CLONE ANIMASI: OFF", State.RecordingTrackClone and COLORS.White or COLORS.Panel2,tabContentFrame)
-    track.LayoutOrder=order; order+=1; track.TextColor3=State.RecordingTrackClone and COLORS.Background or COLORS.White
-    track.MouseButton1Click:Connect(function() State.RecordingTrackClone=not State.RecordingTrackClone; rebuildRecordingTab() end)
-
-    local statusText = State.RecordingActive and "● RECORDING ACTIVE" or "● RECORDING OFF"
-    local statusColor = State.RecordingActive and COLORS.Green or COLORS.Red
-    local status=makeLabel(statusText,9,statusColor,Enum.Font.GothamBold,tabContentFrame); status.LayoutOrder=order; order+=1
-
-    local recColor = State.RecordingActive and COLORS.Green or COLORS.Red
-    local recText = State.RecordingActive and "● RECORDING — STOP" or "● START RECORDING"
-    local recBtn=makeButton(recText, recColor, tabContentFrame)
-    recBtn.TextColor3=COLORS.White
-    recBtn.LayoutOrder=order
-    order+=1
-    recBtn.MouseButton1Click:Connect(function()
-        local ok,msg
-        if State.RecordingActive then ok,msg=StopRecording() else ok,msg=StartRecording() end
-        toast(ok and "Recording" or "Error",msg,3000); rebuildRecordingTab()
-    end)
-
-    local hint=makeLabel("Tip: tekan SIMPAN SPOT CAMERA untuk membuat Part merah di posisi camera. Saat START, Part berubah hijau dan camera terkunci 100% di spot itu. Setelah STOP, Part langsung kembali merah. Clone tetap bergerak/beranimasi tanpa memindahkan camera.",8,COLORS.DarkGray,nil,tabContentFrame)
-    hint.LayoutOrder=order; hint.TextWrapped=true
-end
-
 rebuildCurrentTab = function()
     if State.CurrentTab == "Clones" then
         rebuildClonesTab()
@@ -3777,10 +3223,8 @@ rebuildCurrentTab = function()
         rebuildPlayersTab()
     elseif State.CurrentTab == "Variasi" then
         rebuildVariasiTab()
-    elseif State.CurrentTab == "Visual" then
-        rebuildVisualTab()
-    elseif State.CurrentTab == "Record" then
-        rebuildRecordingTab()
+    elseif State.CurrentTab == "Clone Visual" then
+        rebuildVisualCloneTab()
     end
 end
 
@@ -3795,8 +3239,7 @@ function _G.openMyCloneApp()
     LoadFavorites()
     LoadFavPlayers()
     LoadConfigSlots()
-    LoadVisualCloneSnapshot()
-    LoadRecordingSpots()
+    LoadVisualCloneSlots()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
         local folder = Instance.new("Folder")
@@ -3829,7 +3272,7 @@ function _G.openMyCloneApp()
     tabLayout.Padding = UDim.new(0, 6)
     tabLayout.Parent = tabBarFrame
 
-    local tabs = {"Clones", "Visual", "Players", "Editor", "Sync", "Variasi", "Record", "AI Chat", "Config", "History"}
+    local tabs = {"Clones", "Players", "Editor", "Sync", "Variasi", "Clone Visual", "AI Chat", "Config", "History"}
     for i, tabName in ipairs(tabs) do
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(0, 75, 1, 0)
