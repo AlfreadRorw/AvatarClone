@@ -12,6 +12,7 @@ local Services = _G.Services or {
     RunService = game:GetService("RunService"),
     CoreGui = game:GetService("CoreGui"),
     TextChatService = game:GetService("TextChatService"),
+    Debris = game:GetService("Debris"),
 }
 
 local Players = Services.Players
@@ -22,6 +23,7 @@ local HttpService = Services.HttpService
 local RunService = Services.RunService
 local CoreGui = Services.CoreGui
 local TextChatService = Services.TextChatService
+local Debris = Services.Debris or game:GetService("Debris")
 
 local LocalPlayer = Players.LocalPlayer
 local T = _G.T or {}
@@ -159,9 +161,13 @@ _G.MyCloneState = _G.MyCloneState or {
     RandomSwapActive = false,
     MemeChatActive = false,
     MemeChatInterval = 8,
-    -- Clone Visual (snapshot avatar, bukan gandakan diri)
-    VisualCloneSlots = {},
-    VisualCloneTarget = "Diri Sendiri", -- "Diri Sendiri" atau nama player
+    -- Clone Visual (ubah TAMPILAN DIRI SENDIRI jadi meniru avatar orang lain)
+    VisualCloneSlots = {}, -- {[nama] = {userId=, username=, savedAt=}}
+    VisualCloneActive = false, -- sedang ber-transformasi jadi orang lain?
+    VisualCloneCurrentUserId = nil,
+    VisualCloneCurrentName = nil,
+    VisualCloneOriginalAppearanceId = nil, -- buat kembali ke wajah asli
+    VisualClonePersist = true, -- tetap pakai tampilan clone walau ganti map/respawn
 }
 
 local State = _G.MyCloneState
@@ -272,102 +278,126 @@ local function PrepareCloneModel(model)
 end
 
 -- ================================================
--- CLONE VISUAL (Snapshot Avatar — BUKAN menggandakan diri,
--- tapi "membekukan" tampilan avatar di satu momen tertentu supaya
--- clone-nya selalu pakai tampilan itu, walau avatar aslinya nanti
--- berubah — misal habis pakai kode Catalog terus pindah map).
+-- CLONE VISUAL — Ubah TAMPILAN DIRI SENDIRI jadi meniru avatar orang lain
+-- (BUKAN menggandakan diri jadi 2, dan BUKAN spawn NPC terpisah).
+-- Pakai LocalPlayer.CharacterAppearanceId, jadi begitu diterapkan, badanmu
+-- sendiri yang berubah wujud jadi avatar target — termasuk kalau kamu
+-- pindah map/server, avatarmu tetap ikut CharacterAppearanceId yang
+-- terakhir di-set (bukan balik ke avatar aslimu), sampai kamu Reset manual.
 -- ================================================
 
--- Daftar lengkap properti HumanoidDescription yang bisa disimpan & dimuat
--- ulang. Roblox TIDAK punya cara otomatis untuk serialize instance ini,
--- jadi setiap properti didaftarkan manual di sini.
-local HUMANOID_DESC_PROPERTIES = {
-    -- Aset pakaian & tubuh
-    "Shirt", "Pants", "GraphicTShirt", "Face",
-    "HatAccessory", "HairAccessory", "FaceAccessory", "NeckAccessory",
-    "ShouldersAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory",
-    "ClimbAnimation", "FallAnimation", "IdleAnimation", "JumpAnimation",
-    "RunAnimation", "SwimAnimation", "WalkAnimation", "MoodAnimation",
-    "Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg",
-    -- Warna body part
-    "HeadColor", "TorsoColor", "LeftArmColor", "RightArmColor",
-    "LeftLegColor", "RightLegColor",
-    -- Skala tubuh
-    "HeightScale", "WidthScale", "HeadScale", "BodyTypeScale",
-    "ProportionScale", "DepthScale",
-    -- Info dasar
-    "GraphicTShirt",
-}
-
--- Serialize sebuah HumanoidDescription instance menjadi tabel biasa
--- (bisa di-JSONEncode) supaya bisa disimpan ke file / Firebase.
-local function SerializeHumanoidDescription(description)
-    if not description then return nil end
-    local data = {}
-    for _, propName in ipairs(HUMANOID_DESC_PROPERTIES) do
-        local ok, value = pcall(function() return description[propName] end)
-        if ok then
-            if typeof(value) == "Color3" then
-                data[propName] = {value.R, value.G, value.B}
-            else
-                data[propName] = value
-            end
-        end
+-- Backup avatar asli sekali di awal (sebelum transformasi pertama kali),
+-- supaya ada cara balik ke wajah asli lewat tombol Reset.
+local function BackupOriginalAppearance()
+    if State.VisualCloneOriginalAppearanceId then return end
+    local ok, appearanceId = pcall(function() return LocalPlayer.CharacterAppearanceId end)
+    if ok then
+        State.VisualCloneOriginalAppearanceId = appearanceId
     end
-    -- Simpan juga jenis rig (R6/R15) supaya bentuk badan konsisten
-    local rigOk, rigValue = pcall(function() return description.RigType end)
-    if rigOk and rigValue then
-        data.RigType = rigValue.Name
-    end
-    return data
 end
 
--- Kebalikan dari SerializeHumanoidDescription: membangun ulang instance
--- HumanoidDescription dari tabel data yang tersimpan.
-local function DeserializeHumanoidDescription(data)
-    if not data then return nil end
-    local description = Instance.new("HumanoidDescription")
-    for _, propName in ipairs(HUMANOID_DESC_PROPERTIES) do
-        local value = data[propName]
-        if value ~= nil then
-            pcall(function()
-                if type(value) == "table" and #value == 3 then
-                    description[propName] = Color3.new(value[1], value[2], value[3])
-                else
-                    description[propName] = value
-                end
-            end)
-        end
-    end
-    return description, (data.RigType == "R6" and Enum.HumanoidRigType.R6 or Enum.HumanoidRigType.R15)
-end
+-- Efek transformasi (opsional, murni visual) — nyala sebentar di posisi
+-- karakter saat berubah wujud, biar transformasinya kerasa lebih niat.
+local function PlayCloneTransformEffect(position)
+    if not position then return end
+    local ok = pcall(function()
+        local effectPart = Instance.new("Part")
+        effectPart.Name = "CloneVisualEffect"
+        effectPart.Size = Vector3.new(1, 1, 1)
+        effectPart.Position = position
+        effectPart.Anchored = true
+        effectPart.CanCollide = false
+        effectPart.Transparency = 1
+        effectPart.Parent = Workspace
 
--- Mengambil snapshot tampilan avatar SEKARANG dari sebuah karakter
--- (diri sendiri atau player lain yang sedang berada di map). Ini membaca
--- tampilan yang BENAR-BENAR sedang dipakai saat ini (termasuk kode
--- Catalog/UGC yang lagi aktif dicoba), bukan data tersimpan di server.
-local function CaptureCharacterAppearance(character)
-    if not character then return nil, "Karakter tidak ditemukan" end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return nil, "Humanoid tidak ditemukan" end
-    local ok, description = pcall(function() return humanoid:GetAppliedDescription() end)
-    if not ok or not description then return nil, "Gagal mengambil tampilan avatar" end
-    return SerializeHumanoidDescription(description), nil
-end
+        local sparkle = Instance.new("Sparkles")
+        sparkle.SparkleColor = COLORS.Gold
+        sparkle.Parent = effectPart
 
--- Membuat sebuah Model baru dari data snapshot yang tersimpan (bukan dari
--- userId — ini kuncinya, supaya tampilannya TIDAK ikut berubah walau
--- avatar asli si pemilik sudah berganti outfit / pindah map).
-local function CreateAvatarFromSnapshot(snapshotData)
-    if not snapshotData then return nil, "Data snapshot kosong" end
-    local description, rigType = DeserializeHumanoidDescription(snapshotData)
-    if not description then return nil, "Gagal membangun ulang tampilan avatar" end
-    local ok, model = pcall(function()
-        return Players:CreateHumanoidModelFromDescriptionAsync(description, rigType or Enum.HumanoidRigType.R15, Enum.AssetTypeVerification.Default)
+        local light = Instance.new("PointLight")
+        light.Brightness = 4
+        light.Range = 14
+        light.Color = COLORS.Gold
+        light.Parent = effectPart
+
+        TweenService:Create(light, TweenInfo.new(1.2), {Brightness = 0}):Play()
+        Debris:AddItem(effectPart, 1.5)
     end)
-    if not ok or not model then return nil, "Gagal membuat model dari snapshot" end
-    return model, nil
 end
+
+-- Menerapkan tampilan avatar userId tertentu ke diri sendiri.
+-- persistLabel dipakai untuk disimpan sebagai "target aktif" supaya bisa
+-- di-reapply otomatis kalau character reset (lihat watchdog di bawah).
+local function ApplyCloneVisualToSelf(userId, displayLabel)
+    if not LocalPlayer.Character then return false, "Karaktermu belum siap" end
+    BackupOriginalAppearance()
+
+    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if rootPart then PlayCloneTransformEffect(rootPart.Position) end
+
+    local ok = pcall(function()
+        LocalPlayer.CharacterAppearanceId = userId
+    end)
+    if not ok then return false, "Gagal menerapkan avatar (userId mungkin tidak valid)" end
+
+    State.VisualCloneActive = true
+    State.VisualCloneCurrentUserId = userId
+    State.VisualCloneCurrentName = displayLabel or tostring(userId)
+
+    task.wait(0.3)
+    -- BreakJoints supaya Roblox segera reload tampilan berdasarkan
+    -- CharacterAppearanceId yang baru saja diubah (efeknya avatar
+    -- "meledak" sebentar lalu terbentuk ulang jadi wujud baru).
+    pcall(function()
+        if LocalPlayer.Character then LocalPlayer.Character:BreakJoints() end
+    end)
+
+    return true, "Berhasil clone tampilan jadi " .. (displayLabel or tostring(userId))
+end
+
+-- Mengembalikan avatar ke wujud asli sebelum transformasi pertama.
+local function ResetCloneVisual()
+    if not State.VisualCloneOriginalAppearanceId then
+        State.VisualCloneActive = false
+        State.VisualCloneCurrentUserId = nil
+        State.VisualCloneCurrentName = nil
+        return false, "Tidak ada avatar asli tersimpan untuk direset"
+    end
+
+    pcall(function()
+        LocalPlayer.CharacterAppearanceId = State.VisualCloneOriginalAppearanceId
+    end)
+    task.wait(0.3)
+    pcall(function()
+        if LocalPlayer.Character then LocalPlayer.Character:BreakJoints() end
+    end)
+
+    State.VisualCloneActive = false
+    State.VisualCloneCurrentUserId = nil
+    State.VisualCloneCurrentName = nil
+    return true, "Avatar dikembalikan ke wujud asli"
+end
+
+-- Watchdog: kalau VisualClonePersist aktif dan character kamu baru saja
+-- respawn/pindah map, otomatis terapkan ulang CharacterAppearanceId target
+-- supaya tampilanmu TETAP jadi clone tadi, bukan balik ke avatar aslimu.
+-- Ini yang menjawab requirement "pindah map jangan ikutin avatar sekarang
+-- tapi ikutin avatar yang di-clone".
+local function StartVisualCloneWatchdog()
+    LocalPlayer.CharacterAdded:Connect(function(newCharacter)
+        if not State.VisualCloneActive or not State.VisualClonePersist then return end
+        if not State.VisualCloneCurrentUserId then return end
+        task.wait(1) -- beri waktu character baru selesai loading dulu
+        pcall(function()
+            LocalPlayer.CharacterAppearanceId = State.VisualCloneCurrentUserId
+        end)
+        task.wait(0.3)
+        pcall(function()
+            if newCharacter then newCharacter:BreakJoints() end
+        end)
+    end)
+end
+StartVisualCloneWatchdog()
 
 local function GetNextSpawnCFrame()
     local character = LocalPlayer.Character
@@ -580,7 +610,7 @@ local function CreateNameTag(clone, nameText, hide)
 end
 
 -- ================================================
--- CLONE VISUAL — Save/Load Slot & Spawn ke Map
+-- CLONE VISUAL — Save/Load Slot (berisi userId target, bukan snapshot)
 -- ================================================
 local function SaveVisualCloneSlots()
     pcall(function()
@@ -597,21 +627,19 @@ local function LoadVisualCloneSlots()
     end)
 end
 
--- Menyimpan snapshot tampilan avatar SEKARANG (dari diri sendiri atau
--- player lain yang dipilih) ke sebuah slot bernama, supaya bisa dipanggil
--- ulang kapan saja persis sama walau avatar aslinya sudah berubah.
-local function SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
+-- Menyimpan sebuah target (userId + nama) sebagai slot bernama, supaya
+-- bisa dipanggil ulang kapan saja tanpa perlu ketik ulang username/userId.
+local function SaveVisualCloneSlot(slotName, userId, username)
     if not slotName or slotName == "" then return false, "Nama slot kosong" end
-    local snapshot, err = CaptureCharacterAppearance(sourceCharacter)
-    if not snapshot then return false, err or "Gagal mengambil tampilan avatar" end
+    if not userId then return false, "UserId tidak valid" end
 
     State.VisualCloneSlots[slotName] = {
         savedAt = os.time(),
-        sourceLabel = sourceLabel or "Diri Sendiri",
-        appearance = snapshot,
+        userId = userId,
+        username = username or tostring(userId),
     }
     SaveVisualCloneSlots()
-    return true, "Clone Visual '" .. slotName .. "' tersimpan (tampilan " .. (sourceLabel or "Diri Sendiri") .. ")."
+    return true, "Clone Visual '" .. slotName .. "' tersimpan (target: " .. (username or tostring(userId)) .. ")."
 end
 
 local function DeleteVisualCloneSlot(slotName)
@@ -628,57 +656,13 @@ local function RenameVisualCloneSlot(oldName, newName)
     return true
 end
 
--- Spawn 1 clone visual ke map berdasarkan sebuah slot tersimpan. Ini TIDAK
--- pernah membaca ulang avatar dari server — selalu pakai snapshot yang
--- sudah dibekukan di slot tersebut, jadi tampilannya konsisten walau
--- avatar asli si pemilik sekarang sudah beda (habis ganti map, dsb).
-local function SpawnVisualClone(slotName, callback)
+-- Menerapkan sebuah slot tersimpan langsung ke diri sendiri.
+local function LoadVisualCloneSlotToSelf(slotName)
     local slot = State.VisualCloneSlots[slotName]
-    if not slot or not slot.appearance then
-        if callback then callback(false, "Slot Clone Visual tidak ditemukan") end
-        return
+    if not slot or not slot.userId then
+        return false, "Slot Clone Visual tidak ditemukan"
     end
-
-    task.spawn(function()
-        local model, err = CreateAvatarFromSnapshot(slot.appearance)
-        if not model then
-            if callback then callback(false, err or "Gagal membuat Clone Visual") end
-            return
-        end
-
-        State.CloneCounter = State.CloneCounter + 1
-        local cloneName = "VisualClone_" .. tostring(State.CloneCounter)
-        model.Name = cloneName
-        PrepareCloneModel(model)
-
-        local cf = GetNextSpawnCFrame()
-        model:PivotTo(cf)
-        local rootPart = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-        if rootPart then
-            rootPart.Anchored = true
-            rootPart.CanCollide = false
-            rootPart.Transparency = 1
-        end
-
-        local cloneData = {
-            Index = State.CloneCounter,
-            UserId = nil, -- Clone Visual TIDAK terikat ke userId manapun —
-                           -- ini kuncinya, biar tidak pernah ikut berubah
-                           -- kalau avatar asli si pemilik berubah nanti.
-            Username = slot.sourceLabel or slotName,
-            DisplayName = slotName,
-            OriginalCFrame = cf,
-            OriginalRotation = cf - cf.Position,
-            HideName = false,
-            IsVisualClone = true,
-            VisualCloneSlot = slotName,
-        }
-        State.CloneData[model] = cloneData
-        model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
-        CreateNameTag(model, slotName, false)
-
-        if callback then callback(true, "Clone Visual '" .. slotName .. "' berhasil di-spawn.") end
-    end)
+    return ApplyCloneVisualToSelf(slot.userId, slot.username or slotName)
 end
 
 local function SetGizmoVisibility()
@@ -2512,7 +2496,7 @@ end
 rebuildVisualCloneTab = function()
     clearTabContent()
 
-    makeSectionHeader("CLONE VISUAL — Bekukan Tampilan Avatar", tabContentFrame, 1, COLORS.Gold)
+    makeSectionHeader("CLONE VISUAL — Ubah Wujudmu Jadi Orang Lain", tabContentFrame, 1, COLORS.Gold)
 
     local infoCard = makePremiumCard(tabContentFrame, 2)
     local infoPad = Instance.new("UIPadding", infoCard)
@@ -2521,143 +2505,186 @@ rebuildVisualCloneTab = function()
     local infoLayout = Instance.new("UIListLayout", infoCard)
     infoLayout.Padding = UDim.new(0, 4)
 
-    local infoLbl = makeLabel("Bukan menggandakan diri — ini membekukan TAMPILAN avatar kamu (atau player lain) di satu momen, biar clone-nya tetap pakai tampilan itu walau avatar aslinya nanti berubah (ganti outfit, pindah map, dll).", 9, COLORS.Gray, nil, infoCard)
+    local infoLbl = makeLabel("Bukan menggandakan diri jadi 2 — ini mengubah TUBUHMU SENDIRI supaya tampilannya sama persis kayak player yang kamu pilih. Kalau 'Tetap Pakai' diaktifkan, wujud ini akan otomatis dipertahankan walau kamu pindah map/respawn.", 9, COLORS.Gray, nil, infoCard)
     infoLbl.LayoutOrder = 1
     infoLbl.TextWrapped = true
     infoLbl.Size = UDim2.new(1, 0, 0, 48)
 
-    -- ===== PILIH SUMBER TAMPILAN =====
-    makeSectionHeader("1. PILIH SUMBER TAMPILAN", tabContentFrame, 3, COLORS.Blue)
-
-    local sourceOptions = {"Diri Sendiri"}
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player ~= LocalPlayer then table.insert(sourceOptions, player.Name) end
+    -- ===== STATUS CARD =====
+    local statusCard = makePremiumCard(tabContentFrame, 3)
+    local statusPad = Instance.new("UIPadding", statusCard)
+    statusPad.PaddingTop = UDim.new(0, 10); statusPad.PaddingBottom = UDim.new(0, 10)
+    statusPad.PaddingLeft = UDim.new(0, 10); statusPad.PaddingRight = UDim.new(0, 10)
+    local statusLayout = Instance.new("UIListLayout", statusCard)
+    statusLayout.Padding = UDim.new(0, 4)
+    if State.VisualCloneActive then
+        stroke(statusCard, COLORS.Gold, 1.5, 0.1)
     end
 
-    local sourceScroll = Instance.new("ScrollingFrame")
-    sourceScroll.Size = UDim2.new(1, 0, 0, 44)
-    sourceScroll.BackgroundTransparency = 1
-    sourceScroll.ScrollBarThickness = 3
-    sourceScroll.ScrollingDirection = Enum.ScrollingDirection.X
-    sourceScroll.CanvasSize = UDim2.new(0, 0, 0, 0)
-    sourceScroll.AutomaticCanvasSize = Enum.AutomaticSize.X
-    sourceScroll.LayoutOrder = 4
-    sourceScroll.Parent = tabContentFrame
+    local statusText = State.VisualCloneActive
+        and ("🟢 Sedang jadi: " .. tostring(State.VisualCloneCurrentName))
+        or "⚪ Wujud asli (belum clone siapa-siapa)"
+    local statusLbl = makeLabel(statusText, 11, State.VisualCloneActive and COLORS.Gold or COLORS.Gray, Enum.Font.GothamBold, statusCard)
+    statusLbl.LayoutOrder = 1
 
-    local sourceLayout = Instance.new("UIListLayout", sourceScroll)
-    sourceLayout.FillDirection = Enum.FillDirection.Horizontal
-    sourceLayout.Padding = UDim.new(0, 6)
+    local persistLbl = makeLabel("Tetap Pakai Wujud Ini (walau pindah map/respawn): " .. (State.VisualClonePersist and "ON" or "OFF"), 8, COLORS.DarkGray, nil, statusCard)
+    persistLbl.LayoutOrder = 2
 
-    for _, sourceName in ipairs(sourceOptions) do
-        local isSelected = State.VisualCloneTarget == sourceName
-        local chip = makeButton(sourceName, isSelected and COLORS.PurpleDark or COLORS.Panel2, sourceScroll, UDim2.new(0, 130, 1, 0))
-        chip.MouseButton1Click:Connect(function()
-            State.VisualCloneTarget = sourceName
-            rebuildVisualCloneTab()
+    local statusBtnRow = Instance.new("Frame", tabContentFrame)
+    statusBtnRow.Size = UDim2.new(1, 0, 0, 40)
+    statusBtnRow.BackgroundTransparency = 1
+    statusBtnRow.LayoutOrder = 4
+    local statusBtnLayout = Instance.new("UIListLayout", statusBtnRow)
+    statusBtnLayout.FillDirection = Enum.FillDirection.Horizontal
+    statusBtnLayout.Padding = UDim.new(0, 6)
+
+    local persistBtn = makeButton(State.VisualClonePersist and "🔒 TETAP PAKAI: ON" or "🔓 TETAP PAKAI: OFF", State.VisualClonePersist and COLORS.Emerald or COLORS.Panel2, statusBtnRow, UDim2.new(0.48, 0, 1, 0))
+    persistBtn.MouseButton1Click:Connect(function()
+        State.VisualClonePersist = not State.VisualClonePersist
+        rebuildVisualCloneTab()
+    end)
+
+    local resetBtn = makeButton("↩ RESET KE WAJAH ASLI", COLORS.Red, statusBtnRow, UDim2.new(0.48, 0, 1, 0))
+    resetBtn.MouseButton1Click:Connect(function()
+        local ok, msg = ResetCloneVisual()
+        resetBtn.Text = ok and "✓ Direset!" or ("✗ " .. tostring(msg))
+        task.delay(2, function()
+            if resetBtn and resetBtn.Parent then resetBtn.Text = "↩ RESET KE WAJAH ASLI" end
         end)
+        rebuildVisualCloneTab()
+    end)
+
+    -- ===== PILIH PLAYER UNTUK DI-CLONE =====
+    makeSectionHeader("PILIH PLAYERS — CLONE KE DIRI SENDIRI", tabContentFrame, 5, COLORS.Blue)
+
+    local otherPlayers = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then table.insert(otherPlayers, player) end
     end
 
-    -- ===== SIMPAN SNAPSHOT BARU =====
-    makeSectionHeader("2. SIMPAN SEBAGAI CLONE VISUAL", tabContentFrame, 5, COLORS.Green)
+    if #otherPlayers == 0 then
+        local emptyLbl = makeLabel("Tidak ada player lain di map ini saat ini.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = 6
+    else
+        for i, player in ipairs(otherPlayers) do
+            local isCurrentTarget = State.VisualCloneActive and State.VisualCloneCurrentUserId == player.UserId
+            local card = makePremiumCard(tabContentFrame, 5 + i, 56)
+            if isCurrentTarget then stroke(card, COLORS.Gold, 1.5, 0.1) end
 
-    local saveCard = makePremiumCard(tabContentFrame, 6)
+            local avatarHolder = Instance.new("Frame", card)
+            avatarHolder.Size = UDim2.new(0, 40, 0, 40)
+            avatarHolder.Position = UDim2.new(0, 8, 0.5, -20)
+            avatarHolder.BackgroundColor3 = COLORS.Panel2
+            corner(avatarHolder, 20)
+            stroke(avatarHolder, COLORS.Gold, 1, 0.4)
+
+            local avatarImg = Instance.new("ImageLabel", avatarHolder)
+            avatarImg.Size = UDim2.new(1, 0, 1, 0)
+            avatarImg.BackgroundTransparency = 1
+            corner(avatarImg, 20)
+            task.spawn(function()
+                local ok, content = pcall(function()
+                    return Players:GetUserThumbnailAsync(player.UserId, Enum.ThumbnailType.HeadShot, Enum.ThumbnailSize.Size100x100)
+                end)
+                if ok and content and avatarImg.Parent then avatarImg.Image = content end
+            end)
+
+            local nameLbl = makeLabel(player.DisplayName, 11, COLORS.White, Enum.Font.GothamBold, card)
+            nameLbl.Size = UDim2.new(1, -180, 0, 18)
+            nameLbl.Position = UDim2.new(0, 56, 0, 5)
+
+            local subLbl = makeLabel("@" .. player.Name, 8, COLORS.Gray, nil, card)
+            subLbl.Size = UDim2.new(1, -180, 0, 14)
+            subLbl.Position = UDim2.new(0, 56, 0, 24)
+
+            local cloneBtn = makeButton(isCurrentTarget and "AKTIF ✓" or "🔄 CLONE", isCurrentTarget and COLORS.GoldDark or COLORS.Blue, card, UDim2.new(0, 90, 0, 40))
+            cloneBtn.Position = UDim2.new(1, -98, 0.5, -20)
+            cloneBtn.MouseButton1Click:Connect(function()
+                cloneBtn.Text = "..."
+                task.spawn(function()
+                    local ok, msg = ApplyCloneVisualToSelf(player.UserId, player.DisplayName)
+                    if cloneBtn and cloneBtn.Parent then cloneBtn.Text = ok and "AKTIF ✓" or "✗ Gagal" end
+                    rebuildVisualCloneTab()
+                end)
+            end)
+        end
+    end
+
+    local nextOrder = 6 + #otherPlayers
+
+    -- ===== SIMPAN SEBAGAI SLOT =====
+    makeSectionHeader("SIMPAN TARGET DENGAN NAMA", tabContentFrame, nextOrder + 1, COLORS.Green)
+
+    local saveCard = makePremiumCard(tabContentFrame, nextOrder + 2)
     local savePad = Instance.new("UIPadding", saveCard)
     savePad.PaddingTop = UDim.new(0, 10); savePad.PaddingBottom = UDim.new(0, 10)
     savePad.PaddingLeft = UDim.new(0, 10); savePad.PaddingRight = UDim.new(0, 10)
     local saveLayout = Instance.new("UIListLayout", saveCard)
     saveLayout.Padding = UDim.new(0, 6)
 
-    local nameInput, nameFrame = makeInput("Nama Clone Visual (contoh: Outfit Event)", saveCard)
+    local nameInput, nameFrame = makeInput("Nama slot (contoh: Wujud Boss)", saveCard)
     nameFrame.LayoutOrder = 1
 
-    local saveBtn = makeButton("📸 AMBIL SNAPSHOT & SIMPAN", COLORS.Green, saveCard)
+    local saveBtn = makeButton("💾 SIMPAN WUJUD SEKARANG DENGAN NAMA INI", COLORS.Green, saveCard)
     saveBtn.LayoutOrder = 2
     saveBtn.MouseButton1Click:Connect(function()
         local slotName = nameInput.Text:gsub("^%s+", ""):gsub("%s+$", "")
         if slotName == "" then return end
-
-        local sourceCharacter, sourceLabel
-        if State.VisualCloneTarget == "Diri Sendiri" then
-            sourceCharacter = LocalPlayer.Character
-            sourceLabel = "Diri Sendiri"
-        else
-            local targetPlayer = Players:FindFirstChild(State.VisualCloneTarget)
-            if targetPlayer then
-                sourceCharacter = targetPlayer.Character
-                sourceLabel = targetPlayer.Name
-            end
-        end
-
-        if not sourceCharacter then
-            saveBtn.Text = "✗ Karakter sumber tidak ditemukan"
+        if not State.VisualCloneActive or not State.VisualCloneCurrentUserId then
+            saveBtn.Text = "✗ Belum clone siapa-siapa"
             task.delay(2, function()
-                if saveBtn and saveBtn.Parent then saveBtn.Text = "📸 AMBIL SNAPSHOT & SIMPAN" end
+                if saveBtn and saveBtn.Parent then saveBtn.Text = "💾 SIMPAN WUJUD SEKARANG DENGAN NAMA INI" end
             end)
             return
         end
-
-        local ok, msg = SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
+        local ok, msg = SaveVisualCloneSlot(slotName, State.VisualCloneCurrentUserId, State.VisualCloneCurrentName)
         nameInput.Text = ""
         saveBtn.Text = ok and "✓ Tersimpan!" or ("✗ " .. tostring(msg))
         task.delay(2, function()
-            if saveBtn and saveBtn.Parent then saveBtn.Text = "📸 AMBIL SNAPSHOT & SIMPAN" end
+            if saveBtn and saveBtn.Parent then saveBtn.Text = "💾 SIMPAN WUJUD SEKARANG DENGAN NAMA INI" end
         end)
         rebuildVisualCloneTab()
     end)
 
-    -- ===== DAFTAR CLONE VISUAL TERSIMPAN =====
-    makeSectionHeader("3. CLONE VISUAL TERSIMPAN", tabContentFrame, 7, COLORS.Purple)
+    local saveHint = makeLabel("Tips: pencet CLONE ke salah satu player di atas dulu, baru ketik nama dan simpan di sini.", 8, COLORS.DarkGray, nil, tabContentFrame)
+    saveHint.LayoutOrder = nextOrder + 3
+    saveHint.TextWrapped = true
+
+    -- ===== DAFTAR SLOT TERSIMPAN =====
+    makeSectionHeader("SLOT TERSIMPAN", tabContentFrame, nextOrder + 4, COLORS.Purple)
 
     local slotNames = {}
     for name in pairs(State.VisualCloneSlots) do table.insert(slotNames, name) end
     table.sort(slotNames)
 
     if #slotNames == 0 then
-        local emptyLbl = makeLabel("Belum ada Clone Visual tersimpan. Simpan snapshot pertama kamu di atas.", 9, COLORS.DarkGray, nil, tabContentFrame)
-        emptyLbl.LayoutOrder = 8
-        emptyLbl.TextWrapped = true
+        local emptyLbl = makeLabel("Belum ada slot tersimpan.", 9, COLORS.DarkGray, nil, tabContentFrame)
+        emptyLbl.LayoutOrder = nextOrder + 5
     else
         for i, slotName in ipairs(slotNames) do
             local slot = State.VisualCloneSlots[slotName]
-            local card = makePremiumCard(tabContentFrame, 7 + i, 56)
+            local isCurrentTarget = State.VisualCloneActive and State.VisualCloneCurrentUserId == slot.userId
+            local card = makePremiumCard(tabContentFrame, nextOrder + 5 + i, 56)
+            if isCurrentTarget then stroke(card, COLORS.Gold, 1.5, 0.1) end
 
             local nameLbl = makeLabel(slotName, 12, COLORS.White, Enum.Font.GothamBold, card)
             nameLbl.Size = UDim2.new(1, -160, 0, 20)
             nameLbl.Position = UDim2.new(0, 10, 0, 6)
 
             local savedDate = slot.savedAt and os.date("%d/%m/%Y %H:%M", slot.savedAt) or "-"
-            local subLbl = makeLabel("Sumber: " .. (slot.sourceLabel or "?") .. " · " .. savedDate, 8, COLORS.Gray, nil, card)
+            local subLbl = makeLabel("Target: " .. (slot.username or "?") .. " · " .. savedDate, 8, COLORS.Gray, nil, card)
             subLbl.Size = UDim2.new(1, -160, 0, 14)
             subLbl.Position = UDim2.new(0, 10, 0, 26)
 
-            local spawnBtn = makeButton("SPAWN", COLORS.Blue, card, UDim2.new(0, 60, 0, 40))
-            spawnBtn.Position = UDim2.new(1, -164, 0.5, -20)
-            spawnBtn.MouseButton1Click:Connect(function()
-                spawnBtn.Text = "..."
-                SpawnVisualClone(slotName, function(ok, msg)
-                    if spawnBtn and spawnBtn.Parent then spawnBtn.Text = "SPAWN" end
+            local loadBtn = makeButton(isCurrentTarget and "AKTIF ✓" or "JADI DIA", isCurrentTarget and COLORS.GoldDark or COLORS.Blue, card, UDim2.new(0, 74, 0, 40))
+            loadBtn.Position = UDim2.new(1, -122, 0.5, -20)
+            loadBtn.MouseButton1Click:Connect(function()
+                loadBtn.Text = "..."
+                task.spawn(function()
+                    local ok, msg = LoadVisualCloneSlotToSelf(slotName)
+                    if loadBtn and loadBtn.Parent then loadBtn.Text = ok and "AKTIF ✓" or "✗ Gagal" end
                     rebuildVisualCloneTab()
                 end)
-            end)
-
-            local overwriteBtn = makeButton("↻", COLORS.Orange, card, UDim2.new(0, 40, 0, 40))
-            overwriteBtn.Position = UDim2.new(1, -100, 0.5, -20)
-            overwriteBtn.MouseButton1Click:Connect(function()
-                local sourceCharacter, sourceLabel
-                if State.VisualCloneTarget == "Diri Sendiri" then
-                    sourceCharacter = LocalPlayer.Character
-                    sourceLabel = "Diri Sendiri"
-                else
-                    local targetPlayer = Players:FindFirstChild(State.VisualCloneTarget)
-                    if targetPlayer then
-                        sourceCharacter = targetPlayer.Character
-                        sourceLabel = targetPlayer.Name
-                    end
-                end
-                if sourceCharacter then
-                    SaveVisualCloneSnapshot(slotName, sourceCharacter, sourceLabel)
-                    rebuildVisualCloneTab()
-                end
             end)
 
             local deleteBtn = makeButton("🗑", COLORS.Delete, card, UDim2.new(0, 40, 0, 40))
