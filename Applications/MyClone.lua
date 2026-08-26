@@ -278,35 +278,52 @@ local function PrepareCloneModel(model)
 end
 
 -- ================================================
--- CLONE VISUAL — Ubah TAMPILAN DIRI SENDIRI jadi meniru avatar orang lain
--- (BUKAN menggandakan diri jadi 2, dan BUKAN spawn NPC terpisah).
--- Pakai LocalPlayer.CharacterAppearanceId, jadi begitu diterapkan, badanmu
--- sendiri yang berubah wujud jadi avatar target — termasuk kalau kamu
--- pindah map/server, avatarmu tetap ikut CharacterAppearanceId yang
--- terakhir di-set (bukan balik ke avatar aslimu), sampai kamu Reset manual.
+-- CLONE VISUAL — CORE DARI cek.lua (TRUE VISUAL AVATAR SWAP)
+-- Mengganti Character lokal dengan model avatar target yang dibuat
+-- dari HumanoidDescription. Bukan NPC terpisah.
 -- ================================================
 
--- Backup avatar asli sekali di awal (sebelum transformasi pertama kali),
--- supaya ada cara balik ke wajah asli lewat tombol Reset.
-local function BackupOriginalAppearance()
-    if State.VisualCloneOriginalAppearanceId then return end
-    local ok, appearanceId = pcall(function() return LocalPlayer.CharacterAppearanceId end)
-    if ok then
-        State.VisualCloneOriginalAppearanceId = appearanceId
+local OriginalDesc = nil
+local VisualCloneTransforming = false
+local VisualCloneWatchdogBusy = false
+
+local function CaptureOriginal()
+    if OriginalDesc then return true end
+    local ch = LocalPlayer.Character
+    if not ch then return false end
+
+    local h = ch:FindFirstChildOfClass("Humanoid")
+    if not h then return false end
+
+    local ok, desc = pcall(function()
+        return h:GetAppliedDescription()
+    end)
+    if ok and desc then
+        OriginalDesc = desc
+        return true
     end
+
+    local ok2, fallback = pcall(function()
+        return Players:GetHumanoidDescriptionFromUserIdAsync(LocalPlayer.UserId)
+    end)
+    if ok2 and fallback then
+        OriginalDesc = fallback
+        return true
+    end
+    return false
 end
 
--- Efek transformasi (opsional, murni visual) — nyala sebentar di posisi
--- karakter saat berubah wujud, biar transformasinya kerasa lebih niat.
 local function PlayCloneTransformEffect(position)
     if not position then return end
-    local ok = pcall(function()
+    pcall(function()
         local effectPart = Instance.new("Part")
-        effectPart.Name = "CloneVisualEffect"
+        effectPart.Name = "MyClone_VisualTransformEffect"
         effectPart.Size = Vector3.new(1, 1, 1)
         effectPart.Position = position
         effectPart.Anchored = true
         effectPart.CanCollide = false
+        effectPart.CanTouch = false
+        effectPart.CanQuery = false
         effectPart.Transparency = 1
         effectPart.Parent = Workspace
 
@@ -320,83 +337,384 @@ local function PlayCloneTransformEffect(position)
         light.Color = COLORS.Gold
         light.Parent = effectPart
 
-        TweenService:Create(light, TweenInfo.new(1.2), {Brightness = 0}):Play()
-        Debris:AddItem(effectPart, 1.5)
+        TweenService:Create(light, TweenInfo.new(0.7), {
+            Brightness = 0,
+            Range = 3,
+        }):Play()
+        Debris:AddItem(effectPart, 1.0)
     end)
 end
 
--- Menerapkan tampilan avatar userId tertentu ke diri sendiri.
--- persistLabel dipakai untuk disimpan sebagai "target aktif" supaya bisa
--- di-reapply otomatis kalau character reset (lihat watchdog di bawah).
-local function ApplyCloneVisualToSelf(userId, displayLabel)
-    if not LocalPlayer.Character then return false, "Karaktermu belum siap" end
-    BackupOriginalAppearance()
+-- Animate diambil dari karakter lama supaya idle/walk/run/jump tetap normal.
+local function SetupVisualCloneAnimations(newChar, oldChar)
+    local humanoid = newChar and newChar:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
 
-    local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if rootPart then PlayCloneTransformEffect(rootPart.Position) end
+    local animator = humanoid:FindFirstChildOfClass("Animator")
+    if not animator then
+        animator = Instance.new("Animator")
+        animator.Parent = humanoid
+    end
 
-    local ok = pcall(function()
-        LocalPlayer.CharacterAppearanceId = userId
+    local animSrc = nil
+    if oldChar then
+        animSrc = oldChar:FindFirstChild("Animate")
+    end
+
+    if not animSrc then
+        pcall(function()
+            animSrc = game:GetService("StarterPlayer").StarterCharacterScripts:FindFirstChild("Animate")
+        end)
+    end
+
+    if animSrc then
+        pcall(function()
+            local animateClone = animSrc:Clone()
+            animateClone.Disabled = false
+            animateClone.Parent = newChar
+        end)
+        return
+    end
+
+    -- Fallback kalau Animate tidak ditemukan.
+    task.spawn(function()
+        task.wait(0.25)
+        if not newChar.Parent or not humanoid.Parent then return end
+
+        local function playAnimation(id, looped)
+            local animation = Instance.new("Animation")
+            animation.AnimationId = "rbxassetid://" .. tostring(id)
+
+            local ok, track = pcall(function()
+                return animator:LoadAnimation(animation)
+            end)
+
+            if ok and track then
+                track.Looped = looped == true
+                track:Play(0.1)
+                return track
+            end
+        end
+
+        playAnimation(507766388, true)
+
+        humanoid.Running:Connect(function(speed)
+            if not newChar.Parent then return end
+            if speed > 0.5 then
+                playAnimation(507767714, true)
+            end
+        end)
     end)
-    if not ok then return false, "Gagal menerapkan avatar (userId mungkin tidak valid)" end
+end
+
+-- CORE DARI cek.lua:
+-- buat model baru dari HumanoidDescription lalu jadikan Character LocalPlayer.
+local function DoVisualCloneSwap(description, oldChar)
+    if not description then
+        return false, "HumanoidDescription tidak tersedia"
+    end
+
+    local spawnCF = CFrame.new(0, 5, 0)
+    pcall(function()
+        local root = oldChar and (
+            oldChar:FindFirstChild("HumanoidRootPart")
+            or oldChar.PrimaryPart
+        )
+        if root then
+            spawnCF = root.CFrame
+        end
+    end)
+
+    local rigType = Enum.HumanoidRigType.R15
+    pcall(function()
+        local oldHumanoid = oldChar and oldChar:FindFirstChildOfClass("Humanoid")
+        if oldHumanoid then
+            rigType = oldHumanoid.RigType
+        end
+    end)
+
+    local ok, newChar = pcall(function()
+        return Players:CreateHumanoidModelFromDescriptionAsync(description, rigType)
+    end)
+
+    if not ok or not newChar then
+        local fallbackOk, fallbackChar = pcall(function()
+            return Players:CreateHumanoidModelFromDescriptionAsync(
+                description,
+                Enum.HumanoidRigType.R15
+            )
+        end)
+        if fallbackOk and fallbackChar then
+            newChar = fallbackChar
+        else
+            return false, "Gagal membuat karakter dari HumanoidDescription"
+        end
+    end
+
+    -- Hapus script bawaan model; Animate dipasang sendiri.
+    for _, obj in ipairs(newChar:GetDescendants()) do
+        if obj:IsA("BaseScript") then
+            obj:Destroy()
+        end
+    end
+
+    local newHumanoid = newChar:FindFirstChildOfClass("Humanoid")
+    if not newHumanoid then
+        newChar:Destroy()
+        return false, "Model avatar tidak memiliki Humanoid"
+    end
+
+    local root = newChar:FindFirstChild("HumanoidRootPart")
+    if root then
+        newChar.PrimaryPart = root
+    else
+        local firstPart = newChar:FindFirstChildWhichIsA("BasePart", true)
+        if firstPart then
+            newChar.PrimaryPart = firstPart
+        end
+    end
+
+    -- Invisible dulu untuk mencegah flicker.
+    for _, obj in ipairs(newChar:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            obj.Transparency = 1
+        elseif obj:IsA("Decal") then
+            obj.Transparency = 1
+        end
+    end
+
+    newChar.Name = LocalPlayer.Name
+    pcall(function()
+        newChar:PivotTo(spawnCF)
+    end)
+    newChar.Parent = Workspace
+
+    -- Sembunyikan karakter lama sebelum replace.
+    if oldChar and oldChar.Parent then
+        for _, obj in ipairs(oldChar:GetDescendants()) do
+            if obj:IsA("BasePart") or obj:IsA("Decal") then
+                obj.Transparency = 1
+            end
+        end
+    end
+
+    -- Sama seperti cek.lua: karakter baru menjadi Character asli.
+    LocalPlayer.Character = newChar
+
+    -- Hapus karakter lama agar tidak dobel.
+    if oldChar and oldChar.Parent and oldChar ~= newChar then
+        task.delay(0.05, function()
+            pcall(function()
+                if oldChar and oldChar.Parent then
+                    oldChar:Destroy()
+                end
+            end)
+        end)
+    end
+
+    -- Kamera mengikuti Humanoid karakter baru.
+    pcall(function()
+        local camera = Workspace.CurrentCamera
+        if camera then
+            camera.CameraType = Enum.CameraType.Custom
+            camera.CameraSubject = newHumanoid
+        end
+    end)
+
+    SetupVisualCloneAnimations(newChar, oldChar)
+
+    -- HRP selalu invisible; body lain fade-in.
+    for _, obj in ipairs(newChar:GetDescendants()) do
+        if obj:IsA("BasePart") then
+            if obj.Name == "HumanoidRootPart" then
+                obj.Transparency = 1
+            else
+                pcall(function()
+                    TweenService:Create(
+                        obj,
+                        TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                        {Transparency = 0}
+                    ):Play()
+                end)
+            end
+        elseif obj:IsA("Decal") then
+            pcall(function()
+                TweenService:Create(
+                    obj,
+                    TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                    {Transparency = 0}
+                ):Play()
+            end)
+        end
+    end
+
+    return true, newChar
+end
+
+local function GetTargetDescription(userId)
+    -- Target online: AppliedDescription paling akurat.
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.UserId == userId then
+            local character = player.Character
+            if character then
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                if humanoid then
+                    local ok, description = pcall(function()
+                        return humanoid:GetAppliedDescription()
+                    end)
+                    if ok and description then
+                        return description
+                    end
+                end
+            end
+            break
+        end
+    end
+
+    -- Fallback target offline / karakter belum siap.
+    local ok, description = pcall(function()
+        return Players:GetHumanoidDescriptionFromUserIdAsync(userId)
+    end)
+    if ok and description then
+        return description
+    end
+
+    return nil
+end
+
+local function ApplyCloneVisualToSelf(userId, displayLabel)
+    if VisualCloneTransforming then
+        return false, "Sedang memproses clone visual"
+    end
+
+    userId = tonumber(userId)
+    if not userId then
+        return false, "UserId target tidak valid"
+    end
+
+    if not LocalPlayer.Character then
+        return false, "Karaktermu belum siap"
+    end
+
+    if not CaptureOriginal() then
+        return false, "Gagal menyimpan avatar asli"
+    end
+
+    VisualCloneTransforming = true
+
+    local oldChar = LocalPlayer.Character
+    local oldRoot = oldChar and (
+        oldChar:FindFirstChild("HumanoidRootPart")
+        or oldChar.PrimaryPart
+    )
+
+    if oldRoot then
+        PlayCloneTransformEffect(oldRoot.Position)
+    end
+
+    local description = GetTargetDescription(userId)
+    if not description then
+        VisualCloneTransforming = false
+        return false, "Gagal mengambil avatar target"
+    end
+
+    local ok, result = DoVisualCloneSwap(description, oldChar)
+    if not ok then
+        VisualCloneTransforming = false
+        return false, tostring(result)
+    end
 
     State.VisualCloneActive = true
     State.VisualCloneCurrentUserId = userId
     State.VisualCloneCurrentName = displayLabel or tostring(userId)
 
-    task.wait(0.3)
-    -- BreakJoints supaya Roblox segera reload tampilan berdasarkan
-    -- CharacterAppearanceId yang baru saja diubah (efeknya avatar
-    -- "meledak" sebentar lalu terbentuk ulang jadi wujud baru).
-    pcall(function()
-        if LocalPlayer.Character then LocalPlayer.Character:BreakJoints() end
-    end)
+    -- Compatibility field lama; bukan sumber transformasi.
+    State.VisualCloneOriginalAppearanceId = LocalPlayer.UserId
 
-    return true, "Berhasil clone tampilan jadi " .. (displayLabel or tostring(userId))
+    VisualCloneTransforming = false
+    return true, "Berhasil clone visual menjadi " .. (displayLabel or tostring(userId))
 end
 
--- Mengembalikan avatar ke wujud asli sebelum transformasi pertama.
 local function ResetCloneVisual()
-    if not State.VisualCloneOriginalAppearanceId then
-        State.VisualCloneActive = false
-        State.VisualCloneCurrentUserId = nil
-        State.VisualCloneCurrentName = nil
-        return false, "Tidak ada avatar asli tersimpan untuk direset"
+    if VisualCloneTransforming then
+        return false, "Sedang memproses transformasi"
     end
 
-    pcall(function()
-        LocalPlayer.CharacterAppearanceId = State.VisualCloneOriginalAppearanceId
-    end)
-    task.wait(0.3)
-    pcall(function()
-        if LocalPlayer.Character then LocalPlayer.Character:BreakJoints() end
-    end)
+    if not OriginalDesc then
+        CaptureOriginal()
+    end
+
+    if not OriginalDesc then
+        return false, "Avatar asli belum tersimpan"
+    end
+
+    if not LocalPlayer.Character then
+        return false, "Karaktermu belum siap"
+    end
+
+    VisualCloneTransforming = true
+
+    local oldChar = LocalPlayer.Character
+    local root = oldChar and (
+        oldChar:FindFirstChild("HumanoidRootPart")
+        or oldChar.PrimaryPart
+    )
+
+    if root then
+        PlayCloneTransformEffect(root.Position)
+    end
+
+    local ok, result = DoVisualCloneSwap(OriginalDesc, oldChar)
+    if not ok then
+        VisualCloneTransforming = false
+        return false, tostring(result)
+    end
 
     State.VisualCloneActive = false
     State.VisualCloneCurrentUserId = nil
     State.VisualCloneCurrentName = nil
+
+    VisualCloneTransforming = false
     return true, "Avatar dikembalikan ke wujud asli"
 end
 
--- Watchdog: kalau VisualClonePersist aktif dan character kamu baru saja
--- respawn/pindah map, otomatis terapkan ulang CharacterAppearanceId target
--- supaya tampilanmu TETAP jadi clone tadi, bukan balik ke avatar aslimu.
--- Ini yang menjawab requirement "pindah map jangan ikutin avatar sekarang
--- tapi ikutin avatar yang di-clone".
+-- Persist opsional setelah respawn.
 local function StartVisualCloneWatchdog()
     LocalPlayer.CharacterAdded:Connect(function(newCharacter)
-        if not State.VisualCloneActive or not State.VisualClonePersist then return end
+        if VisualCloneWatchdogBusy then return end
+        if not State.VisualCloneActive then return end
+        if not State.VisualClonePersist then return end
         if not State.VisualCloneCurrentUserId then return end
-        task.wait(1) -- beri waktu character baru selesai loading dulu
-        pcall(function()
-            LocalPlayer.CharacterAppearanceId = State.VisualCloneCurrentUserId
-        end)
-        task.wait(0.3)
-        pcall(function()
-            if newCharacter then newCharacter:BreakJoints() end
+
+        VisualCloneWatchdogBusy = true
+
+        task.spawn(function()
+            task.wait(0.8)
+
+            if not newCharacter or not newCharacter.Parent then
+                VisualCloneWatchdogBusy = false
+                return
+            end
+
+            if not State.VisualCloneActive or not State.VisualCloneCurrentUserId then
+                VisualCloneWatchdogBusy = false
+                return
+            end
+
+            local description = GetTargetDescription(State.VisualCloneCurrentUserId)
+
+            if description and newCharacter == LocalPlayer.Character then
+                local swapOK = DoVisualCloneSwap(description, newCharacter)
+                if swapOK then
+                    State.VisualCloneActive = true
+                end
+            end
+
+            VisualCloneWatchdogBusy = false
         end)
     end)
 end
+
 StartVisualCloneWatchdog()
 
 local function GetNextSpawnCFrame()
