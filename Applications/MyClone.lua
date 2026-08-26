@@ -60,6 +60,7 @@ local FOLDER_NAME = "MyCloneFolder_V15"
 local CONFIG_FILE = "MyClone_Config.json"
 local CONFIG_SLOTS_FILE = "MyClone_ConfigSlots.json"
 local VISUAL_CLONE_FILE = "MyClone_VisualClones.json"
+local VISUAL_CLONE_ACTIVE_FILE = "MyClone_VisualCloneActive.json"
 local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
@@ -168,6 +169,8 @@ _G.MyCloneState = _G.MyCloneState or {
     VisualCloneCurrentName = nil,
     VisualCloneOriginalAppearanceId = nil, -- buat kembali ke wajah asli
     VisualClonePersist = true, -- tetap pakai tampilan clone walau ganti map/respawn
+    VisualCloneAutoRestore = true, -- otomatis pakai profil terakhir saat script/app dibuka lagi
+    VisualClonePrankDuration = 12,
 }
 
 local State = _G.MyCloneState
@@ -188,11 +191,10 @@ local RandomSwapLoop = nil
 local MemeChatLoop = nil
 
 local GROQ_MODELS = {
-    "llama-3.3-70b-versatile",
     "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "llama3-70b-8192",
-    "llama3-8b-8192",
+    "llama-3.3-70b-versatile",
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 }
 
 local MEME_LINES = {
@@ -630,6 +632,7 @@ local function ApplyCloneVisualToSelf(userId, displayLabel)
 
     -- Compatibility field lama; bukan sumber transformasi.
     State.VisualCloneOriginalAppearanceId = LocalPlayer.UserId
+    SaveActiveVisualCloneProfile()
 
     VisualCloneTransforming = false
     return true, "Berhasil clone visual menjadi " .. (displayLabel or tostring(userId))
@@ -673,6 +676,7 @@ local function ResetCloneVisual()
     State.VisualCloneActive = false
     State.VisualCloneCurrentUserId = nil
     State.VisualCloneCurrentName = nil
+    ClearActiveVisualCloneProfile()
 
     VisualCloneTransforming = false
     return true, "Avatar dikembalikan ke wujud asli"
@@ -932,7 +936,71 @@ end
 -- ================================================
 local function SaveVisualCloneSlots()
     pcall(function()
-        if writefile then writefile(VISUAL_CLONE_FILE, HttpService:JSONEncode(State.VisualCloneSlots)) end
+        if writefile then
+            writefile(VISUAL_CLONE_FILE, HttpService:JSONEncode(State.VisualCloneSlots))
+        end
+    end)
+end
+
+local function SaveActiveVisualCloneProfile()
+    pcall(function()
+        if not writefile then return end
+        local payload = {
+            version = 2,
+            savedAt = os.time(),
+            active = State.VisualCloneActive == true,
+            userId = tonumber(State.VisualCloneCurrentUserId),
+            username = State.VisualCloneCurrentName,
+            persist = State.VisualClonePersist ~= false,
+            autoRestore = State.VisualCloneAutoRestore ~= false,
+        }
+        writefile(VISUAL_CLONE_ACTIVE_FILE, HttpService:JSONEncode(payload))
+    end)
+end
+
+local function ClearActiveVisualCloneProfile()
+    pcall(function()
+        if delfile and isfile and isfile(VISUAL_CLONE_ACTIVE_FILE) then
+            delfile(VISUAL_CLONE_ACTIVE_FILE)
+        elseif writefile then
+            writefile(VISUAL_CLONE_ACTIVE_FILE, HttpService:JSONEncode({version=2, active=false}))
+        end
+    end)
+end
+
+local function LoadActiveVisualCloneProfile()
+    pcall(function()
+        if not (isfile and readfile) or not isfile(VISUAL_CLONE_ACTIVE_FILE) then return end
+        local data = HttpService:JSONDecode(readfile(VISUAL_CLONE_ACTIVE_FILE))
+        if type(data) ~= "table" then return end
+        if data.persist ~= nil then State.VisualClonePersist = data.persist == true end
+        if data.autoRestore ~= nil then State.VisualCloneAutoRestore = data.autoRestore == true end
+        if data.active and tonumber(data.userId) then
+            State.VisualCloneActive = true
+            State.VisualCloneCurrentUserId = tonumber(data.userId)
+            State.VisualCloneCurrentName = data.username or tostring(data.userId)
+        end
+    end)
+end
+
+local function AutoRestoreSavedVisualClone()
+    if not State.VisualCloneAutoRestore then return end
+    if not State.VisualCloneActive or not State.VisualCloneCurrentUserId then return end
+    task.spawn(function()
+        for _=1,12 do
+            if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid") then break end
+            task.wait(0.5)
+        end
+        if State.VisualCloneActive and State.VisualCloneCurrentUserId and LocalPlayer.Character then
+            local ok, msg = ApplyCloneVisualToSelf(State.VisualCloneCurrentUserId, State.VisualCloneCurrentName)
+            if not ok then
+                State.VisualCloneActive = false
+                State.VisualCloneCurrentUserId = nil
+                State.VisualCloneCurrentName = nil
+                SaveActiveVisualCloneProfile()
+                State.AIChatLastError = tostring(msg)
+            end
+        end
     end)
 end
 
@@ -975,12 +1043,52 @@ local function RenameVisualCloneSlot(oldName, newName)
 end
 
 -- Menerapkan sebuah slot tersimpan langsung ke diri sendiri.
+local function SaveCurrentVisualCloneAsSlot(slotName)
+    slotName = tostring(slotName or ""):gsub("^%s+", ""):gsub("%s+$", "")
+    if slotName == "" then return false, "Nama slot kosong" end
+    if not State.VisualCloneActive or not State.VisualCloneCurrentUserId then
+        return false, "Aktifkan Clone Visual dulu"
+    end
+    return SaveVisualCloneSlot(slotName, State.VisualCloneCurrentUserId, State.VisualCloneCurrentName)
+end
+
 local function LoadVisualCloneSlotToSelf(slotName)
     local slot = State.VisualCloneSlots[slotName]
     if not slot or not slot.userId then
         return false, "Slot Clone Visual tidak ditemukan"
     end
     return ApplyCloneVisualToSelf(slot.userId, slot.username or slotName)
+end
+
+local function StartVisualClonePrank(duration)
+    duration = tonumber(duration) or State.VisualClonePrankDuration or 12
+    local targetUserId = State.VisualCloneCurrentUserId
+    local targetName = State.VisualCloneCurrentName
+    if not targetUserId then
+        return false, "Clone dulu seseorang"
+    end
+    State.VisualClonePrankToken = (State.VisualClonePrankToken or 0) + 1
+    local token = State.VisualClonePrankToken
+    task.spawn(function()
+        task.wait(duration)
+        if token ~= State.VisualClonePrankToken then return end
+        if State.VisualCloneActive and State.VisualCloneCurrentUserId == targetUserId then
+            ResetCloneVisual()
+        end
+    end)
+    return true, "Prank aktif " .. tostring(duration) .. " detik"
+end
+
+local function SurpriseRandomClonePrank(duration)
+    local candidates = {}
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then table.insert(candidates, player) end
+    end
+    if #candidates == 0 then return false, "Tidak ada player lain" end
+    local target = candidates[math.random(1, #candidates)]
+    local ok, msg = ApplyCloneVisualToSelf(target.UserId, target.DisplayName)
+    if not ok then return false, msg end
+    return StartVisualClonePrank(duration)
 end
 
 local function SetGizmoVisibility()
@@ -1339,51 +1447,53 @@ end
 local function performHttpPost(url, headers, body)
     local attempts = {}
     local opts = {Url = url, Method = "POST", Headers = headers, Body = body}
-
-    if syn and syn.request then
-        local success, response = pcall(function() return syn.request(opts) end)
-        if success and response and response.Body then
-            return response.Body, nil
-        end
-        table.insert(attempts, "syn.request: " .. tostring(success and (response and response.StatusCode) or response))
+    local function normalize(response)
+        if not response then return nil end
+        local bodyText = response.Body or response.body
+        local status = tonumber(response.StatusCode or response.status_code or response.Status)
+        local responseHeaders = response.Headers or response.headers or {}
+        return bodyText, status, responseHeaders
     end
 
-    if http_request then
-        local success, response = pcall(function() return http_request(opts) end)
-        if success and response and response.Body then
-            return response.Body, nil
+    local requesters = {}
+    if syn and syn.request then table.insert(requesters, {"syn.request", syn.request}) end
+    if http_request then table.insert(requesters, {"http_request", http_request}) end
+    if request then table.insert(requesters, {"request", request}) end
+
+    for _, pair in ipairs(requesters) do
+        local name, fn = pair[1], pair[2]
+        local ok, response = pcall(function() return fn(opts) end)
+        if ok and response then
+            local bodyText, status, responseHeaders = normalize(response)
+            if bodyText then
+                return bodyText, nil, status, responseHeaders
+            end
+            table.insert(attempts, name .. ": status=" .. tostring(status))
+        else
+            table.insert(attempts, name .. ": " .. tostring(response))
         end
-        table.insert(attempts, "http_request: " .. tostring(success and (response and response.StatusCode) or response))
     end
 
-    if request then
-        local success, response = pcall(function() return request(opts) end)
-        if success and response and response.Body then
-            return response.Body, nil
+    if HttpService and HttpService.RequestAsync then
+        local ok, response = pcall(function() return HttpService:RequestAsync(opts) end)
+        if ok and response then
+            local bodyText, status, responseHeaders = normalize(response)
+            if bodyText then return bodyText, nil, status, responseHeaders end
+            table.insert(attempts, "RequestAsync: status=" .. tostring(status))
+        else
+            table.insert(attempts, "RequestAsync: " .. tostring(response))
         end
-        table.insert(attempts, "request(): " .. tostring(success and (response and response.StatusCode) or response))
-    end
-
-    if HttpService then
-        local success, response = pcall(function() return HttpService:RequestAsync(opts) end)
-        if success and response and response.Body then
-            -- RequestAsync tetap punya Body walau StatusCode error (mis. 404) -
-            -- itu tetap dikembalikan supaya SendGroqMessage bisa baca pesan
-            -- error asli dari Groq dan lanjut ke model berikutnya kalau perlu.
-            return response.Body, nil
-        end
-        table.insert(attempts, "RequestAsync: " .. tostring(success and (response and response.StatusCode) or response))
     end
 
     if #attempts == 0 then
-        return nil, "Executor tidak mendukung HTTP request (syn.request/http_request/request/RequestAsync semua tidak tersedia)."
+        return nil, "Executor tidak mendukung HTTP request.", nil, nil
     end
-    return nil, table.concat(attempts, " | ")
+    return nil, table.concat(attempts, " | "), nil, nil
 end
 
 local function SendGroqMessage(prompt, systemPrompt, onProgress)
     if not State.GroqApiKey or State.GroqApiKey == "" then
-        return nil, "API key belum diisi. Buka tab Config, masukkan Groq API Key dulu."
+        return nil, "API key belum diisi. Buka tab AI Chat lalu simpan Groq API Key."
     end
     local url = "https://api.groq.com/openai/v1/chat/completions"
     local headers = {
@@ -1393,38 +1503,49 @@ local function SendGroqMessage(prompt, systemPrompt, onProgress)
     local errors = {}
 
     for i, model in ipairs(GROQ_MODELS) do
-        if onProgress then
-            pcall(onProgress, "Mencoba model " .. i .. "/" .. #GROQ_MODELS .. " (" .. model .. ")...")
-        end
+        if onProgress then pcall(onProgress, "AI " .. i .. "/" .. #GROQ_MODELS .. ": " .. model) end
         local body = HttpService:JSONEncode({
             model = model,
             messages = {
-                {role = "system", content = systemPrompt or "Kamu adalah asisten yang menjawab singkat dalam bahasa gaul Indonesia, maksimal 10 kata, santai dan natural."},
+                {role = "system", content = systemPrompt or "Kamu adalah asisten yang menjawab singkat dalam bahasa Indonesia."},
                 {role = "user", content = prompt},
             },
-            temperature = 0.9,
-            max_tokens = 100,
+            temperature = 0.85,
+            max_tokens = 120,
         })
 
-        local responseBody, httpErr = performHttpPost(url, headers, body)
+        local responseBody, httpErr, statusCode, responseHeaders = performHttpPost(url, headers, body)
         if responseBody then
             local success, decoded = pcall(function() return HttpService:JSONDecode(responseBody) end)
             if success and decoded then
                 if decoded.error then
-                    table.insert(errors, model .. ": " .. tostring(decoded.error.message or decoded.error))
-                elseif decoded.choices and decoded.choices[1] and decoded.choices[1].message and decoded.choices[1].message.content then
-                    return decoded.choices[1].message.content, nil
+                    local errMsg = tostring(decoded.error.message or decoded.error)
+                    table.insert(errors, model .. " [" .. tostring(statusCode or "?") .. "]: " .. errMsg)
+                    if tonumber(statusCode) == 429 then
+                        local retryAfter = 2
+                        if responseHeaders then
+                            retryAfter = tonumber(responseHeaders["retry-after"] or responseHeaders["Retry-After"]) or retryAfter
+                        end
+                        if onProgress then pcall(onProgress, "Rate limit, retry " .. tostring(retryAfter) .. " dtk") end
+                        task.wait(math.clamp(retryAfter, 1, 8))
+                    end
+                elseif decoded.choices and decoded.choices[1] and decoded.choices[1].message then
+                    local content = decoded.choices[1].message.content
+                    if type(content) == "string" and content ~= "" then
+                        return content, nil
+                    end
+                    table.insert(errors, model .. ": content kosong")
                 else
                     table.insert(errors, model .. ": response tidak berisi choices")
                 end
             else
-                table.insert(errors, model .. ": gagal decode JSON")
+                table.insert(errors, model .. ": JSON tidak valid")
             end
         else
             table.insert(errors, model .. ": " .. tostring(httpErr))
         end
     end
-    return nil, "Semua model gagal -> " .. table.concat(errors, " || ")
+    return nil, "Semua model gagal. " .. table.concat(errors, " || ")
 end
 
 local function DisplayCloneBubble(clone, message)
@@ -1432,17 +1553,46 @@ local function DisplayCloneBubble(clone, message)
     local head = clone:FindFirstChild("Head")
     if not head then return false end
 
-    -- Gunakan bubble chat BAWAAN Roblox (legacy Chat API - paling stabil untuk NPC/Model non-player)
-    local success = pcall(function()
+    local ok = pcall(function()
         game:GetService("Chat"):Chat(head, message, Enum.ChatColor.White)
     end)
-    if success then return true end
+    if ok then return true end
 
-    -- Fallback: coba lewat ChatService modul jika tersedia (server-side biasanya, tapi aman dicoba)
-    local success2 = pcall(function()
+    local ok2 = pcall(function()
         TextChatService:DisplayBubble(clone, message)
     end)
-    return success2
+    if ok2 then return true end
+
+    -- Fallback lokal: bubble tetap terlihat walau executor/game menolak API chat.
+    pcall(function()
+        local old = head:FindFirstChild("MyCloneAIBubble")
+        if old then old:Destroy() end
+        local bubble = Instance.new("BillboardGui")
+        bubble.Name = "MyCloneAIBubble"
+        bubble.Size = UDim2.new(0, 190, 0, 48)
+        bubble.StudsOffset = Vector3.new(0, 3.2, 0)
+        bubble.AlwaysOnTop = true
+        bubble.Adornee = head
+        bubble.Parent = head
+        local frame = Instance.new("Frame")
+        frame.Size = UDim2.new(1,0,1,0)
+        frame.BackgroundColor3 = Color3.fromRGB(255,255,255)
+        frame.BackgroundTransparency = 0.04
+        frame.Parent = bubble
+        corner(frame, 12)
+        local label = Instance.new("TextLabel")
+        label.Size = UDim2.new(1,-14,1,-10)
+        label.Position = UDim2.new(0,7,0,5)
+        label.BackgroundTransparency = 1
+        label.Text = tostring(message):sub(1, 120)
+        label.TextColor3 = Color3.fromRGB(20,20,25)
+        label.TextWrapped = true
+        label.TextScaled = true
+        label.Font = Enum.Font.GothamBold
+        label.Parent = frame
+        Debris:AddItem(bubble, 4)
+    end)
+    return true
 end
 
 local function DoAIChatOnce()
@@ -1460,6 +1610,7 @@ local function DoAIChatOnce()
         return false, "Butuh minimal 2 clone"
     end
 
+    table.sort(clones, function(a,b) return a.Name < b.Name end)
     local clone1 = clones[math.random(1, #clones)]
     local clone2
     repeat clone2 = clones[math.random(1, #clones)] until clone2 ~= clone1
@@ -2859,6 +3010,7 @@ rebuildVisualCloneTab = function()
     local persistBtn = makeButton(State.VisualClonePersist and "🔒 TETAP PAKAI: ON" or "🔓 TETAP PAKAI: OFF", State.VisualClonePersist and COLORS.Emerald or COLORS.Panel2, statusBtnRow, UDim2.new(0.48, 0, 1, 0))
     persistBtn.MouseButton1Click:Connect(function()
         State.VisualClonePersist = not State.VisualClonePersist
+        SaveActiveVisualCloneProfile()
         rebuildVisualCloneTab()
     end)
 
@@ -2872,8 +3024,51 @@ rebuildVisualCloneTab = function()
         rebuildVisualCloneTab()
     end)
 
+    local autoBtn = makeButton(State.VisualCloneAutoRestore and "🌐 AUTO LOAD ANTAR MAP: ON" or "🌐 AUTO LOAD ANTAR MAP: OFF", State.VisualCloneAutoRestore and COLORS.Blue or COLORS.Panel2, tabContentFrame)
+    autoBtn.LayoutOrder = 4
+    autoBtn.MouseButton1Click:Connect(function()
+        State.VisualCloneAutoRestore = not State.VisualCloneAutoRestore
+        SaveActiveVisualCloneProfile()
+        rebuildVisualCloneTab()
+    end)
+
+    -- ===== KONTEN / PRANK =====
+    makeSectionHeader("PRANK CLONE — CEPAT UNTUK KONTEN", tabContentFrame, 5, COLORS.Red)
+
+    local prankCard = makePremiumCard(tabContentFrame, 6)
+    local prankPad = Instance.new("UIPadding", prankCard)
+    prankPad.PaddingTop = UDim.new(0, 8); prankPad.PaddingBottom = UDim.new(0, 8)
+    prankPad.PaddingLeft = UDim.new(0, 8); prankPad.PaddingRight = UDim.new(0, 8)
+    local prankLayout = Instance.new("UIListLayout", prankCard)
+    prankLayout.Padding = UDim.new(0, 6)
+
+    local prank1 = makeButton("🎭 IMPOSTOR 12s — balik asli otomatis", COLORS.RedDark, prankCard)
+    prank1.LayoutOrder = 1
+    prank1.MouseButton1Click:Connect(function()
+        local ok, msg = StartVisualClonePrank(12)
+        prank1.Text = ok and "✓ PRANK AKTIF" or ("✗ " .. tostring(msg))
+        task.delay(2, function() if prank1 and prank1.Parent then prank1.Text = "🎭 IMPOSTOR 12s — balik asli otomatis" end end)
+    end)
+
+    local prank2 = makeButton("🎲 RANDOM IMPOSTOR — pilih player acak", COLORS.PurpleDark, prankCard)
+    prank2.LayoutOrder = 2
+    prank2.MouseButton1Click:Connect(function()
+        local ok, msg = SurpriseRandomClonePrank(12)
+        prank2.Text = ok and "✓ TARGET ACAK TERPILIH" or ("✗ " .. tostring(msg))
+        task.delay(2.5, function() if prank2 and prank2.Parent then prank2.Text = "🎲 RANDOM IMPOSTOR — pilih player acak" end end)
+    end)
+
+    local saveDefaultBtn = makeButton("⭐ SIMPAN CLONE INI SEBAGAI FAVORIT UTAMA", COLORS.GoldDark, prankCard)
+    saveDefaultBtn.LayoutOrder = 3
+    saveDefaultBtn.MouseButton1Click:Connect(function()
+        local ok, msg = SaveCurrentVisualCloneAsSlot("⭐ FAVORIT UTAMA")
+        saveDefaultBtn.Text = ok and "✓ FAVORIT TERSIMPAN" or ("✗ " .. tostring(msg))
+        task.delay(2, function() if saveDefaultBtn and saveDefaultBtn.Parent then saveDefaultBtn.Text = "⭐ SIMPAN CLONE INI SEBAGAI FAVORIT UTAMA" end end)
+        rebuildVisualCloneTab()
+    end)
+
     -- ===== PILIH PLAYER UNTUK DI-CLONE =====
-    makeSectionHeader("PILIH PLAYERS — CLONE KE DIRI SENDIRI", tabContentFrame, 5, COLORS.Blue)
+    makeSectionHeader("PILIH PLAYERS — CLONE KE DIRI SENDIRI", tabContentFrame, 9, COLORS.Blue)
 
     local otherPlayers = {}
     for _, player in ipairs(Players:GetPlayers()) do
@@ -2882,11 +3077,11 @@ rebuildVisualCloneTab = function()
 
     if #otherPlayers == 0 then
         local emptyLbl = makeLabel("Tidak ada player lain di map ini saat ini.", 9, COLORS.DarkGray, nil, tabContentFrame)
-        emptyLbl.LayoutOrder = 6
+        emptyLbl.LayoutOrder = 10
     else
         for i, player in ipairs(otherPlayers) do
             local isCurrentTarget = State.VisualCloneActive and State.VisualCloneCurrentUserId == player.UserId
-            local card = makePremiumCard(tabContentFrame, 5 + i, 56)
+            local card = makePremiumCard(tabContentFrame, 9 + i, 56)
             if isCurrentTarget then stroke(card, COLORS.Gold, 1.5, 0.1) end
 
             local avatarHolder = Instance.new("Frame", card)
@@ -2928,7 +3123,7 @@ rebuildVisualCloneTab = function()
         end
     end
 
-    local nextOrder = 6 + #otherPlayers
+    local nextOrder = 10 + #otherPlayers
 
     -- ===== SIMPAN SEBAGAI SLOT =====
     makeSectionHeader("SIMPAN TARGET DENGAN NAMA", tabContentFrame, nextOrder + 1, COLORS.Green)
@@ -3585,12 +3780,15 @@ function _G.openMyCloneApp()
     LoadFavPlayers()
     LoadConfigSlots()
     LoadVisualCloneSlots()
+    LoadActiveVisualCloneProfile()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
         local folder = Instance.new("Folder")
         folder.Name = FOLDER_NAME
         folder.Parent = Workspace
     end
+
+    AutoRestoreSavedVisualClone()
 
     local appContent = _G.appContent
     if not appContent then return end
