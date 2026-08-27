@@ -64,7 +64,6 @@ local HISTORY_FILE = "MyClone_History.json"
 local FAVORITES_FILE = "MyClone_Favorites.json"
 local API_KEY_FILE = "MyClone_ApiKey.txt"
 local FAV_PLAYERS_FILE = "MyClone_FavPlayers.json"
-local CLONE_AVATAR_SLOTS_FILE = "MyClone_CloneAvatarSlots.json"
 
 local COLORS = {
     Background = Color3.fromRGB(10, 11, 16),
@@ -169,13 +168,6 @@ _G.MyCloneState = _G.MyCloneState or {
     VisualCloneCurrentName = nil,
     VisualCloneOriginalAppearanceId = nil, -- buat kembali ke wajah asli
     VisualClonePersist = true, -- tetap pakai tampilan clone walau ganti map/respawn
-    CloneAvatarSlots = {},
-    LastCloneAvatarSlot = nil,
-    CloneControlEnabled = false,
-    CloneControlTarget = nil,
-    CloneControlJumpQueued = false,
-    CloneAnimationMirror = true,
-    CloneControlWalkSpeed = 16,
 }
 
 local State = _G.MyCloneState
@@ -194,14 +186,13 @@ local GhostModeLoop = nil
 local RagdollPrankLoop = nil
 local RandomSwapLoop = nil
 local MemeChatLoop = nil
-local CloneControlLoop = nil
-local CloneAnimationMirrorLoop = nil
-local CloneControlJumpConnection = nil
 
 local GROQ_MODELS = {
-    "openai/gpt-oss-20b",
-    "llama-3.1-8b-instant",
     "llama-3.3-70b-versatile",
+    "llama-3.1-8b-instant",
+    "gemma2-9b-it",
+    "llama3-70b-8192",
+    "llama3-8b-8192",
 }
 
 local MEME_LINES = {
@@ -1391,45 +1382,67 @@ local function performHttpPost(url, headers, body)
 end
 
 local function SendGroqMessage(prompt, systemPrompt, onProgress)
-    if not State.GroqApiKey or State.GroqApiKey == "" then return nil, "API key belum diisi." end
+    if not State.GroqApiKey or State.GroqApiKey == "" then
+        return nil, "API key belum diisi. Buka tab Config, masukkan Groq API Key dulu."
+    end
     local url = "https://api.groq.com/openai/v1/chat/completions"
-    local headers = {Authorization = "Bearer " .. tostring(State.GroqApiKey):gsub("%s+", ""), ["Content-Type"] = "application/json"}
+    local headers = {
+        ["Authorization"] = "Bearer " .. State.GroqApiKey,
+        ["Content-Type"] = "application/json",
+    }
     local errors = {}
+
     for i, model in ipairs(GROQ_MODELS) do
-        if onProgress then pcall(onProgress, ("AI %d/%d: %s"):format(i,#GROQ_MODELS,model)) end
-        local body = HttpService:JSONEncode({model=model,messages={{role="system",content=systemPrompt or "Jawab singkat bahasa Indonesia santai."},{role="user",content=prompt}},temperature=0.7,max_completion_tokens=80})
+        if onProgress then
+            pcall(onProgress, "Mencoba model " .. i .. "/" .. #GROQ_MODELS .. " (" .. model .. ")...")
+        end
+        local body = HttpService:JSONEncode({
+            model = model,
+            messages = {
+                {role = "system", content = systemPrompt or "Kamu adalah asisten yang menjawab singkat dalam bahasa gaul Indonesia, maksimal 10 kata, santai dan natural."},
+                {role = "user", content = prompt},
+            },
+            temperature = 0.9,
+            max_tokens = 100,
+        })
+
         local responseBody, httpErr = performHttpPost(url, headers, body)
         if responseBody then
-            local ok, data = pcall(function() return HttpService:JSONDecode(responseBody) end)
-            if ok and type(data)=="table" then
-                local choice = data.choices and data.choices[1]
-                local content = choice and choice.message and choice.message.content
-                if type(content)=="string" and content:gsub("%s+","")~="" then return content,nil end
-                if data.error then table.insert(errors, model..": "..tostring(data.error.message or data.error.code or data.error)) else table.insert(errors, model..": content kosong") end
+            local success, decoded = pcall(function() return HttpService:JSONDecode(responseBody) end)
+            if success and decoded then
+                if decoded.error then
+                    table.insert(errors, model .. ": " .. tostring(decoded.error.message or decoded.error))
+                elseif decoded.choices and decoded.choices[1] and decoded.choices[1].message and decoded.choices[1].message.content then
+                    return decoded.choices[1].message.content, nil
+                else
+                    table.insert(errors, model .. ": response tidak berisi choices")
+                end
             else
-                table.insert(errors, model..": JSON tidak valid")
+                table.insert(errors, model .. ": gagal decode JSON")
             end
         else
-            table.insert(errors, model..": "..tostring(httpErr or "HTTP gagal"))
+            table.insert(errors, model .. ": " .. tostring(httpErr))
         end
     end
-    return nil, "Semua model gagal: "..table.concat(errors," || ")
+    return nil, "Semua model gagal -> " .. table.concat(errors, " || ")
 end
 
 local function DisplayCloneBubble(clone, message)
     if not clone or not message or message == "" then return false end
-    local head = clone:FindFirstChild("Head") or clone.PrimaryPart
+    local head = clone:FindFirstChild("Head")
     if not head then return false end
-    local sent=false
-    pcall(function() if TextChatService and TextChatService.DisplayBubble then TextChatService:DisplayBubble(clone,message); sent=true end end)
-    if sent then return true end
-    pcall(function() game:GetService("Chat"):Chat(head,message,Enum.ChatColor.White); sent=true end)
-    if sent then return true end
-    local old=head:FindFirstChild("MyCloneBubble"); if old then old:Destroy() end
-    local bubble=Instance.new("BillboardGui"); bubble.Name="MyCloneBubble"; bubble.Size=UDim2.new(0,220,0,54); bubble.StudsOffset=Vector3.new(0,3.4,0); bubble.AlwaysOnTop=true; bubble.MaxDistance=80; bubble.Adornee=head; bubble.Parent=head
-    local frame=Instance.new("Frame"); frame.Size=UDim2.new(1,0,1,0); frame.BackgroundColor3=Color3.fromRGB(255,255,255); frame.BackgroundTransparency=0.08; frame.Parent=bubble; corner(frame,12)
-    local label=Instance.new("TextLabel"); label.Size=UDim2.new(1,-12,1,-8); label.Position=UDim2.new(0,6,0,4); label.BackgroundTransparency=1; label.Text=tostring(message):sub(1,120); label.TextColor3=Color3.fromRGB(25,25,30); label.Font=Enum.Font.GothamSemibold; label.TextSize=11; label.TextWrapped=true; label.Parent=frame
-    Debris:AddItem(bubble,3.5); return true
+
+    -- Gunakan bubble chat BAWAAN Roblox (legacy Chat API - paling stabil untuk NPC/Model non-player)
+    local success = pcall(function()
+        game:GetService("Chat"):Chat(head, message, Enum.ChatColor.White)
+    end)
+    if success then return true end
+
+    -- Fallback: coba lewat ChatService modul jika tersedia (server-side biasanya, tapi aman dicoba)
+    local success2 = pcall(function()
+        TextChatService:DisplayBubble(clone, message)
+    end)
+    return success2
 end
 
 local function DoAIChatOnce()
@@ -1452,7 +1465,7 @@ local function DoAIChatOnce()
     repeat clone2 = clones[math.random(1, #clones)] until clone2 ~= clone1
 
     State.AIChatStatus = "Meminta balasan AI..."
-    local prompt = "Buat percakapan dua orang Indonesia yang lucu untuk konten clone/prank. WAJIB hanya dua baris:\nA: pesan\nB: pesan\nMaksimal 7 kata per baris. Jangan markdown, jangan tambahan teks."
+    local prompt = "Buat percakapan singkat dua orang dalam bahasa gaul Indonesia. Format WAJIB persis:\nA: [pesan]\nB: [pesan]\nMaksimal 6 kata per pesan, santai, natural, jangan pakai tanda kutip."
     local response, err = SendGroqMessage(prompt, "Kamu adalah AI yang membuat percakapan gaul Indonesia singkat. Selalu balas dua baris, baris pertama diawali 'A:' dan baris kedua diawali 'B:'. Jangan tambahkan penjelasan lain.", function(progressText)
         State.AIChatStatus = progressText
         pcall(rebuildAIChatTab)
@@ -1549,243 +1562,6 @@ local function GetAllCloneModels()
     end
     return list
 end
-
--- SAVE CLONE AVATAR: simpan ID/avatar + posisi relatif terhadap pemain,
--- bukan koordinat map absolut. File lokal ini dapat dipakai kembali setelah pindah map.
-local function SaveCloneAvatarSlots()
-    pcall(function()
-        if writefile then writefile(CLONE_AVATAR_SLOTS_FILE, HttpService:JSONEncode(State.CloneAvatarSlots)) end
-    end)
-end
-
-local function LoadCloneAvatarSlots()
-    pcall(function()
-        if isfile and readfile and isfile(CLONE_AVATAR_SLOTS_FILE) then
-            local data = HttpService:JSONDecode(readfile(CLONE_AVATAR_SLOTS_FILE))
-            if type(data) == "table" then State.CloneAvatarSlots = data end
-        end
-    end)
-end
-
-local function SaveCloneAvatarSlot(slotName)
-    slotName = tostring(slotName or ""):gsub("^%s+", ""):gsub("%s+$", "")
-    if slotName == "" then return false, "Nama slot kosong" end
-    local clones = GetAllCloneModels()
-    if #clones == 0 then return false, "Belum ada clone avatar" end
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not myRoot then return false, "Karaktermu belum siap" end
-
-    local saved = {}
-    for _, clone in ipairs(clones) do
-        local info = State.CloneData[clone]
-        if info and info.UserId and clone.PrimaryPart then
-            local rel = myRoot.CFrame:ToObjectSpace(clone:GetPivot())
-            local _, yaw, _ = rel:ToOrientation()
-            table.insert(saved, {
-                userId = info.UserId, username = info.Username, displayName = info.DisplayName,
-                hideName = info.HideName or false, offset = {rel.X, rel.Y, rel.Z}, yaw = yaw,
-            })
-        end
-    end
-    if #saved == 0 then return false, "Data clone tidak valid" end
-    State.CloneAvatarSlots[slotName] = {savedAt = os.time(), clones = saved}
-    State.LastCloneAvatarSlot = slotName
-    SaveCloneAvatarSlots()
-    return true, ("Slot '%s' tersimpan (%d clone)"):format(slotName, #saved)
-end
-
-local function DeleteCloneAvatarSlot(slotName)
-    State.CloneAvatarSlots[slotName] = nil
-    if State.LastCloneAvatarSlot == slotName then State.LastCloneAvatarSlot = nil end
-    SaveCloneAvatarSlots()
-end
-
-local function ClearAllClonesLocal()
-    State.FollowMeMode = false; State.OrbitMode = false; State.MimicMode = false
-    if FollowMeLoop then FollowMeLoop:Disconnect(); FollowMeLoop = nil end
-    if CloneControlLoop then CloneControlLoop:Disconnect(); CloneControlLoop = nil end
-    if CloneControlJumpConnection then CloneControlJumpConnection:Disconnect(); CloneControlJumpConnection = nil end
-    State.CloneControlEnabled = false; State.CloneControlTarget = nil; State.CloneControlJumpQueued = false
-    pcall(function()
-        local camera = Workspace.CurrentCamera
-        local playerHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if camera and playerHumanoid then camera.CameraType = Enum.CameraType.Custom; camera.CameraSubject = playerHumanoid end
-    end)
-    for _, clone in ipairs(GetAllCloneModels()) do
-        State.CloneData[clone] = nil
-        pcall(function() clone:Destroy() end)
-    end
-    State.SelectedClone = nil
-end
-
-local function LoadCloneAvatarSlot(slotName, callback)
-    local slot = State.CloneAvatarSlots[slotName]
-    if not slot or type(slot.clones) ~= "table" then
-        if callback then callback(false, "Slot tidak ditemukan") end
-        return
-    end
-    ClearAllClonesLocal()
-    local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    local total, loaded = #slot.clones, 0
-    if total == 0 then if callback then callback(true, "Slot kosong") end return end
-
-    for _, info in ipairs(slot.clones) do
-        task.spawn(function()
-            local model = CreateAvatarFromUserId(info.userId)
-            if model then
-                State.CloneCounter = State.CloneCounter + 1
-                model.Name = "Clone_" .. tostring(State.CloneCounter)
-                PrepareCloneModel(model)
-                local cf = GetNextSpawnCFrame()
-                if myRoot and type(info.offset) == "table" then
-                    local off = Vector3.new(tonumber(info.offset[1]) or 0, tonumber(info.offset[2]) or 0, tonumber(info.offset[3]) or -5)
-                    cf = myRoot.CFrame * CFrame.new(off) * CFrame.Angles(0, tonumber(info.yaw) or 0, 0)
-                end
-                pcall(function() model:PivotTo(cf) end)
-                for _, part in ipairs(model:GetDescendants()) do
-                    if part:IsA("BasePart") then part.Anchored = false; part.CanCollide = false; part.Massless = true end
-                end
-                local root = model:FindFirstChild("HumanoidRootPart") or model.PrimaryPart
-                if root then root.Transparency = 1; root.CanCollide = false end
-                local data = {Index=State.CloneCounter, UserId=info.userId, Username=info.username, DisplayName=info.displayName, OriginalCFrame=cf, OriginalRotation=cf-cf.Position, HideName=info.hideName or false}
-                State.CloneData[model] = data
-                model.Parent = Workspace:FindFirstChild(FOLDER_NAME)
-                CreateNameTag(model, info.displayName or info.username or tostring(info.userId), data.HideName)
-            end
-            loaded = loaded + 1
-            if loaded >= total and callback then callback(true, ("Slot '%s' dimuat (%d clone)"):format(slotName, total)) end
-        end)
-    end
-end
-
--- Kontrol clone memakai input analog/keyboard bawaan Roblox via Humanoid.MoveDirection.
-local function SetCloneControlPhysics(clone, enabled)
-    if not clone then return end
-    for _, part in ipairs(clone:GetDescendants()) do
-        if part:IsA("BasePart") then part.Anchored = false; part.CanCollide = false; part.Massless = true end
-    end
-    local root = clone:FindFirstChild("HumanoidRootPart") or clone.PrimaryPart
-    if root then root.Anchored = false; root.CanCollide = false; root.Transparency = 1 end
-    local humanoid = clone:FindFirstChildOfClass("Humanoid")
-    if humanoid then
-        humanoid.PlatformStand = false; humanoid.AutoRotate = enabled
-        humanoid.WalkSpeed = State.CloneControlWalkSpeed or 16
-    end
-end
-
-local function StopCloneControl()
-    State.CloneControlEnabled = false; State.CloneControlTarget = nil; State.CloneControlJumpQueued = false
-    if CloneControlLoop then CloneControlLoop:Disconnect(); CloneControlLoop = nil end
-    if CloneControlJumpConnection then CloneControlJumpConnection:Disconnect(); CloneControlJumpConnection = nil end
-    local clone = State.SelectedClone
-    if clone and clone.Parent then
-        SetCloneControlPhysics(clone, false)
-        local root = clone:FindFirstChild("HumanoidRootPart") or clone.PrimaryPart
-        if root then root.Anchored = true end
-    end
-    pcall(function()
-        local camera = Workspace.CurrentCamera
-        local playerHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if camera and playerHumanoid then
-            camera.CameraType = Enum.CameraType.Custom
-            camera.CameraSubject = playerHumanoid
-        end
-    end)
-end
-
-local function StartCloneControl(clone)
-    if not clone or not clone.Parent then return false, "Pilih clone dulu" end
-    StopCloneControl()
-    local myChar = LocalPlayer.Character
-    local myHumanoid = myChar and myChar:FindFirstChildOfClass("Humanoid")
-    local cloneHumanoid = clone:FindFirstChildOfClass("Humanoid")
-    if not myHumanoid or not cloneHumanoid then return false, "Humanoid tidak ditemukan" end
-    State.SelectedClone = clone
-    State.CloneControlEnabled = true; State.CloneControlTarget = clone
-    SetCloneControlPhysics(clone, true)
-    CloneControlJumpConnection = myHumanoid.Jumping:Connect(function(active)
-        if active then State.CloneControlJumpQueued = true end
-    end)
-    pcall(function()
-        local camera = Workspace.CurrentCamera
-        if camera then
-            camera.CameraType = Enum.CameraType.Custom
-            camera.CameraSubject = cloneHumanoid
-        end
-    end)
-
-    CloneControlLoop = RunService.RenderStepped:Connect(function()
-        if not State.CloneControlEnabled or State.CloneControlTarget ~= clone or not clone.Parent then StopCloneControl(); return end
-        local currentHumanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if not currentHumanoid then return end
-        cloneHumanoid:Move(currentHumanoid.MoveDirection, true)
-        cloneHumanoid.WalkSpeed = currentHumanoid.WalkSpeed
-        if State.CloneControlJumpQueued then cloneHumanoid.Jump = true; State.CloneControlJumpQueued = false end
-        local dir = currentHumanoid.MoveDirection
-        if dir.Magnitude > 0.05 and clone.PrimaryPart then
-            local flat = Vector3.new(dir.X, 0, dir.Z)
-            if flat.Magnitude > 0.05 then clone:PivotTo(CFrame.lookAt(clone.PrimaryPart.Position, clone.PrimaryPart.Position + flat)) end
-        end
-    end)
-    return true, "Kontrol aktif — gunakan analog Roblox + tombol lompat"
-end
-
-local function ToggleCloneControl(clone)
-    if State.CloneControlEnabled and State.CloneControlTarget == clone then StopCloneControl(); return false, "Kontrol dimatikan" end
-    return StartCloneControl(clone)
-end
-
--- Mirror animasi locomotion aktif pemain, termasuk idle custom jika track tersebut sedang dimainkan.
-local function IsLocomotionTrack(track)
-    if not track or not track.Animation then return false end
-    local n = string.lower(track.Name or "")
-    return string.find(n,"idle") or string.find(n,"walk") or string.find(n,"run") or string.find(n,"jump") or string.find(n,"fall") or string.find(n,"climb") or string.find(n,"swim") or string.find(n,"sit")
-end
-
-local function SyncLocomotionToClone(clone, sourceHumanoid)
-    if not clone or not clone.Parent or not sourceHumanoid then return end
-    local sa = sourceHumanoid:FindFirstChildOfClass("Animator"); if not sa then return end
-    local th = clone:FindFirstChildOfClass("Humanoid"); if not th then return end
-    local ta = th:FindFirstChildOfClass("Animator") or Instance.new("Animator")
-    ta.Parent = th
-    local active = {}
-    for _, tr in ipairs(sa:GetPlayingAnimationTracks()) do
-        if tr.IsPlaying and IsLocomotionTrack(tr) and tr.Animation.AnimationId ~= "" then active[tr.Animation.AnimationId] = tr end
-    end
-    for _, tr in ipairs(ta:GetPlayingAnimationTracks()) do
-        if IsLocomotionTrack(tr) then
-            local id = tr.Animation and tr.Animation.AnimationId or ""
-            if not active[id] then tr:Stop(0.12) end
-        end
-    end
-    for id, src in pairs(active) do
-        local found = false
-        for _, tr in ipairs(ta:GetPlayingAnimationTracks()) do
-            if tr.Animation and tr.Animation.AnimationId == id then
-                found = true; tr.Looped = src.Looped; tr:AdjustSpeed(src.Speed); pcall(function() tr.TimePosition = src.TimePosition end); break
-            end
-        end
-        if not found then
-            local anim = Instance.new("Animation"); anim.AnimationId = id
-            local ok, tr = pcall(function() return ta:LoadAnimation(anim) end)
-            if ok and tr then tr.Priority=src.Priority; tr.Looped=src.Looped; tr:Play(0.12,1,math.max(math.abs(src.Speed),0.01)); pcall(function() tr.TimePosition=src.TimePosition end) end
-        end
-    end
-end
-
-local function StartCloneAnimationMirror()
-    if CloneAnimationMirrorLoop then return end
-    local accumulator = 0
-    CloneAnimationMirrorLoop = RunService.Heartbeat:Connect(function(dt)
-        if not State.CloneAnimationMirror then return end
-        accumulator = accumulator + dt
-        if accumulator < 0.08 then return end
-        accumulator = 0
-        local ch = LocalPlayer.Character; local h = ch and ch:FindFirstChildOfClass("Humanoid"); if not h then return end
-        for _, clone in ipairs(GetAllCloneModels()) do SyncLocomotionToClone(clone, h) end
-    end)
-end
-StartCloneAnimationMirror()
 
 local function ArrangeFormation(shape, radius)
     local clones = GetAllCloneModels()
@@ -2330,60 +2106,12 @@ rebuildClonesTab = function()
         end
     end)
 
-    makeSectionHeader("SAVE CLONE AVATAR — BISA DIPAKAI DI MAP LAIN", tabContentFrame, 5, COLORS.Green)
-    local slotInput, slotFrame = makeInput("Nama slot, contoh: Prank Squad", tabContentFrame)
-    slotFrame.LayoutOrder = 6
-    local saveSlotBtn = makeButton("💾 SIMPAN SEMUA CLONE", COLORS.Green, tabContentFrame)
-    saveSlotBtn.LayoutOrder = 7
-    saveSlotBtn.MouseButton1Click:Connect(function()
-        local ok, msg = SaveCloneAvatarSlot(slotInput.Text)
-        saveSlotBtn.Text = ok and "✓ Tersimpan" or ("✗ " .. tostring(msg))
-        slotInput.Text = ""
-        task.delay(1.8, function() if saveSlotBtn.Parent then saveSlotBtn.Text = "💾 SIMPAN SEMUA CLONE" end end)
-        rebuildClonesTab()
-    end)
-
-    local savedNames = {}
-    for name in pairs(State.CloneAvatarSlots) do table.insert(savedNames, name) end
-    table.sort(savedNames)
-    for i, slotName in ipairs(savedNames) do
-        local slot = State.CloneAvatarSlots[slotName]
-        local card = makePremiumCard(tabContentFrame, 7+i, 52)
-        local title = makeLabel((State.LastCloneAvatarSlot == slotName and "▶ " or "")..slotName, 11, COLORS.White, Enum.Font.GothamBold, card)
-        title.Size=UDim2.new(1,-150,0,18); title.Position=UDim2.new(0,8,0,6)
-        local sub=makeLabel((slot.clones and #slot.clones or 0).." clone · "..(slot.savedAt and os.date("%d/%m/%Y %H:%M",slot.savedAt) or "-"),8,COLORS.Gray,nil,card)
-        sub.Size=UDim2.new(1,-150,0,14); sub.Position=UDim2.new(0,8,0,26)
-        local load=makeButton("LOAD",COLORS.Blue,card,UDim2.new(0,58,0,34)); load.Position=UDim2.new(1,-120,0.5,-17)
-        load.MouseButton1Click:Connect(function() load.Text="..."; LoadCloneAvatarSlot(slotName,function(ok) load.Text=ok and "OK" or "ERR"; task.delay(1.2,function() if load.Parent then load.Text="LOAD" end end) end) end)
-        local del=makeButton("🗑",COLORS.Delete,card,UDim2.new(0,42,0,34)); del.Position=UDim2.new(1,-52,0.5,-17)
-        del.MouseButton1Click:Connect(function() DeleteCloneAvatarSlot(slotName); rebuildClonesTab() end)
-    end
-
-    local clearAll=makeButton("🧹 HAPUS SEMUA CLONE",COLORS.Delete,tabContentFrame)
-    clearAll.LayoutOrder=8+#savedNames
-    clearAll.MouseButton1Click:Connect(function() ClearAllClonesLocal(); rebuildClonesTab() end)
-
-    makeSectionHeader("PRANK PACK — BUAT KONTEN CLONE", tabContentFrame, 9 + #savedNames, COLORS.Gold)
-    local prankRow = Instance.new("Frame")
-    prankRow.Size = UDim2.new(1,0,0,76); prankRow.BackgroundTransparency=1; prankRow.LayoutOrder=10+#savedNames; prankRow.Parent=tabContentFrame
-    local ghost=makeButton(State.GhostModeActive and "👻 GHOST ON" or "👻 GHOST",State.GhostModeActive and COLORS.PurpleDark or COLORS.Panel,prankRow,UDim2.new(0.48,-3,0,34))
-    ghost.MouseButton1Click:Connect(function() if State.GhostModeActive then StopGhostMode() else StartGhostMode() end; rebuildClonesTab() end)
-    local rag=makeButton(State.RagdollPrankActive and "🤸 RAGDOLL ON" or "🤸 RAGDOLL",State.RagdollPrankActive and COLORS.PurpleDark or COLORS.Panel,prankRow,UDim2.new(0.48,-3,0,34))
-    rag.Position=UDim2.new(0.52,0,0,0)
-    rag.MouseButton1Click:Connect(function() if State.RagdollPrankActive then StopRagdollPrank() else StartRagdollPrank() end; rebuildClonesTab() end)
-    local swap=makeButton(State.RandomSwapActive and "🔀 SWAP ON" or "🔀 RANDOM SWAP",State.RandomSwapActive and COLORS.PurpleDark or COLORS.Panel,prankRow,UDim2.new(0.48,-3,0,34))
-    swap.Position=UDim2.new(0,0,0,40)
-    swap.MouseButton1Click:Connect(function() if State.RandomSwapActive then StopRandomSwap() else StartRandomSwap() end; rebuildClonesTab() end)
-    local meme=makeButton(State.MemeChatActive and "💬 MEME ON" or "💬 MEME CHAT",State.MemeChatActive and COLORS.PurpleDark or COLORS.Panel,prankRow,UDim2.new(0.48,-3,0,34))
-    meme.Position=UDim2.new(0.52,0,0,40)
-    meme.MouseButton1Click:Connect(function() if State.MemeChatActive then StopMemeChat() else StartMemeChat() end; rebuildClonesTab() end)
-
     local clonesLabel = makeLabel("DAFTAR CLONE AKTIF:", 10, COLORS.Gray, Enum.Font.GothamBold, tabContentFrame)
-    clonesLabel.LayoutOrder = 11 + #savedNames
+    clonesLabel.LayoutOrder = 5
 
     local folder = Workspace:FindFirstChild(FOLDER_NAME)
     if folder then
-        local index = 12 + #savedNames
+        local index = 6
         local cloneList = folder:GetChildren()
         if #cloneList == 0 then
             local emptyInfo = makeLabel("Belum ada clone yang dibuat.", 10, COLORS.DarkGray, nil, tabContentFrame)
@@ -2393,24 +2121,17 @@ rebuildClonesTab = function()
                 if clone:IsA("Model") then
                     local isSelected = (State.SelectedClone == clone)
                     local btnColor = isSelected and COLORS.PurpleDark or COLORS.Panel
-                    local row = Instance.new("Frame")
-                    row.Size = UDim2.new(1,0,0,38); row.BackgroundTransparency = 1; row.LayoutOrder=index; row.Parent=tabContentFrame
-                    local cloneButton = makeButton((isSelected and "▶ " or "")..clone.Name, btnColor, row, UDim2.new(1,-132,1,0))
-                    cloneButton.MouseButton1Click:Connect(function() SelectClone(clone); rebuildClonesTab() end)
-                    local controlButton=makeButton((State.CloneControlEnabled and State.CloneControlTarget==clone) and "🎮 ON" or "🎮",(State.CloneControlEnabled and State.CloneControlTarget==clone) and COLORS.Green or COLORS.Panel2,row,UDim2.new(0,58,1,0))
-                    controlButton.Position=UDim2.new(1,-126,0,0)
-                    controlButton.MouseButton1Click:Connect(function() ToggleCloneControl(clone); rebuildClonesTab() end)
-                    local delButton=makeButton("X",COLORS.Delete,row,UDim2.new(0,58,1,0)); delButton.Position=UDim2.new(1,-62,0,0)
-                    delButton.MouseButton1Click:Connect(function() if State.CloneControlTarget==clone then StopCloneControl() end; State.CloneData[clone]=nil; if State.SelectedClone==clone then State.SelectedClone=nil end; pcall(function() clone:Destroy() end); rebuildClonesTab() end)
-                    index=index+1
+                    local cloneButton = makeButton((isSelected and "▶ " or "") .. clone.Name, btnColor, tabContentFrame)
+                    cloneButton.LayoutOrder = index
+                    cloneButton.MouseButton1Click:Connect(function()
+                        SelectClone(clone)
+                        rebuildClonesTab()
+                    end)
+                    index = index + 1
                 end
             end
         end
     end
-
-    local controlHint = makeLabel("🎮 Pilih clone lalu tekan 🎮 untuk mengontrol dengan analog Roblox + tombol lompat. Animasi idle/walk/run/jump clone mengikuti karakter kamu.", 8, COLORS.DarkGray, nil, tabContentFrame)
-    controlHint.LayoutOrder = 10000
-    controlHint.TextWrapped = true
 end
 
 rebuildEditorTab = function()
@@ -3864,7 +3585,6 @@ function _G.openMyCloneApp()
     LoadFavPlayers()
     LoadConfigSlots()
     LoadVisualCloneSlots()
-    LoadCloneAvatarSlots()
 
     if not Workspace:FindFirstChild(FOLDER_NAME) then
         local folder = Instance.new("Folder")
