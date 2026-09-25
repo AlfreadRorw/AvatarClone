@@ -70,6 +70,9 @@ local defaults = {
     clockFormat = "24",
     passcode = "2006",
     phoneOpacity = 1,
+    compactMode = false,
+    haptics = true,
+    reducedMotion = false,
     savedKey = nil,
     lastChatTimestamp = 0,
 }

@@ -494,4 +494,7 @@ iconBuilders.Model3D = function(p, c)
     Helpers.corner(origin, 100)
 end
 
+iconBuilders.Dashboard = function(p,c) local tile=baseTile(p); glyphRect(tile,18,18,0,0,4); glyphRect(tile,5,5,-5,-5,2); glyphRect(tile,5,5,5,-5,2); glyphRect(tile,5,5,-5,5,2); glyphRect(tile,5,5,5,5,2) end
+iconBuilders.Appearance = function(p,c) local tile=baseTile(p); glyphCircleOutline(tile,19,0,0,2); glyphCircleOutline(tile,7,0,0,2) end
+
 return iconBuilders

@@ -8,6 +8,7 @@ return {
     DEVELOPER_USERNAME = "AlfreadR0rw",
     DEVELOPER_USER_ID = 10164114772,
     KEY_TIMER_INTERVAL = 1, -- detik
+    UI_VERSION = "3.0.0",
 
     BUY_KEY_URL = "https://t.me/eIIyxx?text=Bang%2C%20aku%20mau%20beli%20Script%20AvatarClone%20nya",
 

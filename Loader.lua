@@ -90,22 +90,20 @@ Load("Core/BuildIcons.lua")
 Load("Core/CommandListener.lua")
 -- ==================== LOAD APPLICATIONS ====================
 local AppList = {
+    {path = "Applications/Dashboard.lua", name = "Dashboard"},
     {path = "Applications/Players.lua", name = "Players"},
     {path = "Applications/Clone.lua", name = "Clone"},
     {path = "Applications/Preset.lua", name = "Preset"},
     {path = "Applications/Favorites.lua", name = "Favorites"},
     {path = "Applications/Items.lua", name = "Items"},
     {path = "Applications/Teleport.lua", name = "Teleport"},
-    {path = "Applications/Size.lua", name = "Size"},
     {path = "Applications/Volume.lua", name = "Volume"},
     {path = "Applications/Friends.lua", name = "Friends"},
     {path = "Applications/Server.lua", name = "Server"},
-    {path = "Applications/Bundle.lua", name = "Bundle"},
-    {path = "Applications/AvatarItems.lua", name = "AvatarItems"},
     {path = "Applications/WhoOnline.lua", name = "WhoOnline"},
     {path = "Applications/Messages.lua", name = "Messages"},
-    {path = "Applications/Command.lua", name = "Command"},
     {path = "Applications/Settings.lua", name = "Settings"},
+    {path = "Applications/Appearance.lua", name = "Appearance"},
     {path = "Applications/Premium.lua", name = "Premium"},
     {path = "Applications/AlfreadAI.lua", name = "AlfreadAI"},
     {path = "Applications/Shader.lua", name = "Shader"},
@@ -113,7 +111,6 @@ local AppList = {
     {path = "Applications/Emote.lua", name = "Emote"},
     {path = "Applications/MyClone.lua", name = "MyClone"},
     {path = "Applications/Model3D.lua", name = "Model3D"},
-    
 }
 
 for _, app in ipairs(AppList) do
