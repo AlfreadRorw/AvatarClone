@@ -65,12 +65,15 @@ local CloneLifecycle = {
     active = false,
     currentTab = "ALL",
     isCloning = false,
+    selectedItems = {},
+    selectAllVisible = true,
     loadToken = 0, -- dipakai buat batalkan render lama kalau app ditutup/dibuka ulang cepat
 }
 
 local function cleanupClone()
     CloneLifecycle.active = false
     CloneLifecycle.isCloning = false
+    CloneLifecycle.selectedItems = {}
     CloneLifecycle.loadToken = CloneLifecycle.loadToken + 1
 end
 
@@ -603,34 +606,118 @@ function _G.renderCloneUI(selectedPlayer, allItems, myToken)
         end)
     end
 
-    -- ==================== CLONE BUTTON ====================
-    local cloneBtn = Instance.new("TextButton", appContent)
-    cloneBtn.Size = UDim2.new(1, 0, 0, 40)
+    -- ==================== SELECTION + CLONE CONTROLS ====================
+    local selected = CloneLifecycle.selectedItems
+
+    local controls = Instance.new("Frame", appContent)
+    controls.Size = UDim2.new(1, 0, 0, 92)
+    controls.BackgroundColor3 = colors.card
+    controls.LayoutOrder = 3
+    corner(controls, 12)
+    stroke(controls, colors.border, 1, 0.25)
+
+    local status = Instance.new("TextLabel", controls)
+    status.Size = UDim2.new(1, -14, 0, 20)
+    status.Position = UDim2.new(0, 7, 0, 6)
+    status.BackgroundTransparency = 1
+    status.TextColor3 = colors.text
+    status.Font = Enum.Font.GothamBold
+    status.TextSize = 9
+    status.TextXAlignment = Enum.TextXAlignment.Left
+
+    local function selectedCount()
+        local n = 0
+        for _, v in pairs(selected) do if v then n += 1 end end
+        return n
+    end
+
+    local function updateStatus()
+        status.Text = string.format("%d / %d item dipilih", selectedCount(), #getFilteredItems(CloneLifecycle.currentTab))
+    end
+
+    local function makeControl(text, x, width)
+        local b = Instance.new("TextButton", controls)
+        b.Size = UDim2.new(0, width, 0, 28)
+        b.Position = UDim2.new(0, x, 0, 34)
+        b.BackgroundColor3 = colors.card2
+        b.Text = text
+        b.TextColor3 = colors.text
+        b.Font = Enum.Font.GothamBold
+        b.TextSize = 8
+        b.AutoButtonColor = false
+        corner(b, 8)
+        stroke(b, colors.border, 1, 0.25)
+        pressFX(b)
+        return b
+    end
+
+    local selectAllBtn = makeControl("✓ Pilih Semua", 7, 88)
+    local clearBtn = makeControl("× Bersihkan", 101, 82)
+    local cloneBtn = makeControl("⚡ Clone Terpilih", 189, 116)
     cloneBtn.BackgroundColor3 = colors.accent
-    cloneBtn.Text = "⚡ Clone Semua (" .. #getFilteredItems(CloneLifecycle.currentTab) .. ")"
     cloneBtn.TextColor3 = Color3.fromRGB(10, 10, 15)
-    cloneBtn.Font = Enum.Font.GothamBlack
-    cloneBtn.TextSize = 11
-    cloneBtn.AutoButtonColor = false
-    cloneBtn.LayoutOrder = 3
-    corner(cloneBtn, 11)
-    pressFX(cloneBtn)
 
-    local function tabDisplayName(filter)
-        for _, t in ipairs(tabs) do
-            if t.filter == filter then return t.name end
+    local function getFilteredItems(filterType)
+        if filterType == "ALL" then return allItems end
+        local filtered = {}
+        for _, item in ipairs(allItems) do
+            if item.Type == filterType then table.insert(filtered, item) end
         end
-        return filter
+        return filtered
     end
 
-    local function updateCloneBtnText()
-        local filtered = getFilteredItems(CloneLifecycle.currentTab)
-        local label = CloneLifecycle.currentTab == "ALL" and "Semua" or tabDisplayName(CloneLifecycle.currentTab)
-        cloneBtn.Text = "⚡ Clone " .. label .. " (" .. #filtered .. ")"
+    local function setSelected(item, value)
+        selected[item.Value] = value
+        updateStatus()
     end
+
+    selectAllBtn.MouseButton1Click:Connect(function()
+        for _, item in ipairs(getFilteredItems(CloneLifecycle.currentTab)) do
+            selected[item.Value] = true
+        end
+        updateStatus()
+        if _G.showDynamicNotification then _G.showDynamicNotification("Item dipilih", colors.accent) end
+        renderGrid(CloneLifecycle.currentTab)
+    end)
+
+    clearBtn.MouseButton1Click:Connect(function()
+        for _, item in ipairs(getFilteredItems(CloneLifecycle.currentTab)) do
+            selected[item.Value] = nil
+        end
+        updateStatus()
+        renderGrid(CloneLifecycle.currentTab)
+    end)
+
+    cloneBtn.MouseButton1Click:Connect(function()
+        if CloneLifecycle.isCloning then return end
+        local chosen = {}
+        for _, item in ipairs(getFilteredItems("ALL")) do
+            if selected[item.Value] then table.insert(chosen, item) end
+        end
+        if #chosen == 0 then
+            if _G.showDynamicNotification then _G.showDynamicNotification("Pilih minimal 1 item", colors.text3) end
+            return
+        end
+        CloneLifecycle.isCloning = true
+        cloneBtn.Text = "Cloning 0/" .. #chosen
+        cloneBtn.BackgroundColor3 = colors.card2
+        cloneItems(chosen, function(done, batchNum, totalBatches)
+            if done then
+                CloneLifecycle.isCloning = false
+                cloneBtn.Text = "✓ Selesai"
+                cloneBtn.BackgroundColor3 = colors.green
+                if _G.showDynamicNotification then _G.showDynamicNotification(#chosen .. " item berhasil diproses", colors.green) end
+                task.delay(1.5, function()
+                    if cloneBtn.Parent then cloneBtn.BackgroundColor3 = colors.accent; cloneBtn.Text = "⚡ Clone Terpilih" end
+                end)
+            else
+                cloneBtn.Text = string.format("Cloning %d/%d", batchNum, totalBatches)
+            end
+        end)
+    end)
 
     -- ==================== BUILD TABS ====================
-    for i, tab in ipairs(tabs) do
+    for _, tab in ipairs(tabs) do
         local tabBtn = Instance.new("TextButton", tabFrame)
         tabBtn.Size = UDim2.new(1, 0, 0, 28)
         tabBtn.BackgroundColor3 = tab.filter == "ALL" and colors.tabActive or colors.tabInactive
@@ -641,59 +728,56 @@ function _G.renderCloneUI(selectedPlayer, allItems, myToken)
         tabBtn.AutoButtonColor = false
         corner(tabBtn, 8)
         pressFX(tabBtn)
-
         tabBtn.MouseButton1Click:Connect(function()
             CloneLifecycle.currentTab = tab.filter
-
-            for _, btn in ipairs(tabButtons) do
-                tween(btn, {BackgroundColor3 = colors.tabInactive}, 0.15)
-                btn.TextColor3 = colors.text2
-            end
-
+            for _, btn in ipairs(tabButtons) do tween(btn, {BackgroundColor3 = colors.tabInactive}, 0.15); btn.TextColor3 = colors.text2 end
             tween(tabBtn, {BackgroundColor3 = colors.tabActive}, 0.15)
             tabBtn.TextColor3 = Color3.fromRGB(10, 10, 15)
-
             renderGrid(tab.filter)
-            updateCloneBtnText()
+            updateStatus()
         end)
-
         table.insert(tabButtons, tabBtn)
     end
 
-    cloneBtn.MouseButton1Click:Connect(function()
-        if CloneLifecycle.isCloning then return end
+    -- Initial selection state: KOSONG. User harus memilih item secara manual.
+    for _, item in ipairs(allItems) do selected[item.Value] = nil end
 
-        local filteredItems = getFilteredItems(CloneLifecycle.currentTab)
+    -- ==================== SELECTION CARD OVERLAY ====================
+    -- buildCard diubah agar klik card melakukan toggle pilihan.
+    -- Tombol Wear/Copy tetap tersedia.
+    local oldBuildCard = buildCard
+    buildCard = function(item, index)
+        local card = oldBuildCard(item, index)
+        local selectedMark = Instance.new("TextLabel", card)
+        selectedMark.Name = "SelectedMark"
+        selectedMark.Size = UDim2.new(0, 22, 0, 22)
+        selectedMark.Position = UDim2.new(0, 5, 0, 5)
+        selectedMark.BackgroundColor3 = colors.accent
+        selectedMark.Text = "✓"
+        selectedMark.TextColor3 = Color3.fromRGB(10, 10, 15)
+        selectedMark.Font = Enum.Font.GothamBlack
+        selectedMark.TextSize = 10
+        selectedMark.Visible = selected[item.Value] == true
+        corner(selectedMark, 7)
 
-        if #filteredItems == 0 then
-            if _G.showDynamicNotification then
-                _G.showDynamicNotification("Tidak ada item untuk di-clone", colors.text3)
-            end
-            return
-        end
-
-        CloneLifecycle.isCloning = true
-        cloneBtn.Text = "Cloning..."
-        cloneBtn.BackgroundColor3 = colors.card2
-
-        cloneItems(filteredItems, function(done, batchNum, totalBatches)
-            if done then
-                CloneLifecycle.isCloning = false
-                cloneBtn.Text = "✓ Selesai!"
-                cloneBtn.BackgroundColor3 = colors.green
-                if _G.showDynamicNotification then
-                    _G.showDynamicNotification("Clone selesai!", colors.green)
-                end
-                task.wait(1.5)
-                cloneBtn.BackgroundColor3 = colors.accent
-                updateCloneBtnText()
-            else
-                cloneBtn.Text = string.format("Cloning %d/%d...", batchNum, totalBatches)
-            end
+        local selectBtn = Instance.new("TextButton", card)
+        selectBtn.Name = "SelectOverlay"
+        selectBtn.Size = UDim2.new(1, 0, 0, 112)
+        selectBtn.Position = UDim2.new(0, 0, 0, 0)
+        selectBtn.BackgroundTransparency = 1
+        selectBtn.Text = ""
+        selectBtn.ZIndex = 5
+        selectBtn.AutoButtonColor = false
+        selectBtn.MouseButton1Click:Connect(function()
+            setSelected(item, not selected[item.Value])
+            selectedMark.Visible = selected[item.Value] == true
+            tween(card, {BackgroundColor3 = selected[item.Value] and colors.card2 or colors.card}, 0.12)
         end)
-    end)
+        return card
+    end
 
-    -- Initial render
+    updateStatus()
+    -- Initial render: tidak ada item yang otomatis dipilih.
     renderGrid("ALL")
 end
 
